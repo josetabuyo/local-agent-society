@@ -10,9 +10,12 @@ session/*.md
 session/*.log
 session/*.flag
 
-# Compiled widget binary
+# Compiled widget binaries and app bundles
 widget/widget
 widget/widget.py
+widget/tray
+widget/tray.app/
+widget/Local Agent Society.app/
 
 # Agent instance config
 .agent.json

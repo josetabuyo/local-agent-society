@@ -4,6 +4,16 @@ let args = CommandLine.arguments
 let family  = args.count > 1 ? args[1] : "Agent"
 let members = args.count > 2 ? args[2] : ""
 
+func fitFontSize(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFloat = 11) -> CGFloat {
+    var size = start
+    while size > min {
+        let w = (text as NSString).size(withAttributes: [.font: NSFont.boldSystemFont(ofSize: size)]).width
+        if w <= maxWidth { break }
+        size -= 1
+    }
+    return size
+}
+
 class Delegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
 
@@ -34,14 +44,15 @@ class Delegate: NSObject, NSApplicationDelegate {
 
         let content = window.contentView!
 
-        // Family name
+        // Family name — font auto-fits to widget width
+        let labelWidth = W - 28
         let nameLbl = NSTextField(wrappingLabelWithString: family)
-        nameLbl.frame = NSRect(x: 18, y: H * 0.28, width: W - 28, height: H * 0.60)
-        nameLbl.font = NSFont.boldSystemFont(ofSize: 62)
+        nameLbl.frame = NSRect(x: 18, y: H * 0.28, width: labelWidth, height: H * 0.60)
+        nameLbl.font = NSFont.boldSystemFont(ofSize: fitFontSize(text: family, maxWidth: labelWidth))
         nameLbl.textColor = NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1.0)
         nameLbl.backgroundColor = .clear
         nameLbl.drawsBackground = false
-        nameLbl.lineBreakMode = .byTruncatingTail
+        nameLbl.lineBreakMode = .byClipping
         content.addSubview(nameLbl)
 
         // Members row
@@ -57,6 +68,13 @@ class Delegate: NSObject, NSApplicationDelegate {
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.localagentsociety.focus.\(family)"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.window.orderFrontRegardless()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool {

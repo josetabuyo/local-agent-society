@@ -4,12 +4,12 @@ SYSTEM_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # ── backend ───────────────────────────────────────────────────────────────────
 bash "$SYSTEM_DIR/backend/start.sh"
 
-# ── widget ────────────────────────────────────────────────────────────────────
-if pgrep -f "widget System" > /dev/null 2>&1; then
-    echo "Widget     → ya corriendo"
+# ── Local Agent Society (manages all widget windows) ─────────────────────────
+if pgrep -x "tray" > /dev/null 2>&1; then
+    echo "Society    → ya corriendo"
 else
-    "$SYSTEM_DIR/widget/widget" System "HAIKU · SONNET · OPUS" &
-    echo "Widget     → lanzado"
+    open "$SYSTEM_DIR/widget/Local Agent Society.app"
+    echo "Society    → lanzado"
 fi
 
 # ── haiku watcher ─────────────────────────────────────────────────────────────
