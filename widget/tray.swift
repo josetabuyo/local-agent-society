@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 
+// MARK: - Font helper
+
 func fitFontSize(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFloat = 11) -> CGFloat {
     var size = start
     while size > min {
@@ -11,10 +13,114 @@ func fitFontSize(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFl
     return size
 }
 
+// MARK: - Persistent prefs per widget family
+
+enum Prefs {
+    static func color(for f: String) -> NSColor {
+        guard let d = UserDefaults.standard.data(forKey: "color.\(f)"),
+              let c = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: d)
+        else { return NSColor(calibratedRed: 0.565, green: 0.753, blue: 0.376, alpha: 1) }
+        return c
+    }
+    static func opacity(for f: String) -> Double {
+        let v = UserDefaults.standard.double(forKey: "opacity.\(f)")
+        return v == 0 ? 0.72 : v
+    }
+    static func ontop(for f: String) -> Bool {
+        guard UserDefaults.standard.object(forKey: "ontop.\(f)") != nil else { return true }
+        return UserDefaults.standard.bool(forKey: "ontop.\(f)")
+    }
+    static func save(color c: NSColor, for f: String) {
+        let d = try? NSKeyedArchiver.archivedData(withRootObject: c, requiringSecureCoding: true)
+        UserDefaults.standard.set(d, forKey: "color.\(f)")
+    }
+    static func save(opacity v: Double, for f: String) {
+        UserDefaults.standard.set(v, forKey: "opacity.\(f)")
+    }
+    static func save(ontop v: Bool, for f: String) {
+        UserDefaults.standard.set(v, forKey: "ontop.\(f)")
+    }
+}
+
+// MARK: - Config popover
+
+class ConfigVC: NSViewController {
+    let family: String
+    weak var widget: WidgetWindow?
+    var colorWell: NSColorWell!
+    var opacitySlider: NSSlider!
+    var ontopCheck: NSButton!
+
+    init(family: String, widget: WidgetWindow) {
+        self.family = family
+        self.widget = widget
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let W: CGFloat = 208, pad: CGFloat = 14
+
+        // Color row
+        let colorLbl = rowLabel("Color")
+        colorLbl.frame = NSRect(x: pad, y: 108, width: 60, height: 15)
+
+        colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 104, width: 36, height: 24))
+        colorWell.color = Prefs.color(for: family)
+        colorWell.target = self
+        colorWell.action = #selector(colorChanged(_:))
+
+        // Opacity row
+        let opacLbl = rowLabel("Opacity")
+        opacLbl.frame = NSRect(x: pad, y: 74, width: 60, height: 15)
+
+        opacitySlider = NSSlider(value: Prefs.opacity(for: family),
+                                  minValue: 0.1, maxValue: 1.0,
+                                  target: self, action: #selector(opacityChanged(_:)))
+        opacitySlider.frame = NSRect(x: pad, y: 52, width: W - pad * 2, height: 18)
+        opacitySlider.sliderType = .linear
+
+        // Always on top checkbox
+        ontopCheck = NSButton(checkboxWithTitle: "Always on top",
+                               target: self, action: #selector(ontopChanged(_:)))
+        ontopCheck.state = Prefs.ontop(for: family) ? .on : .off
+        ontopCheck.frame = NSRect(x: pad, y: 16, width: W - pad * 2, height: 20)
+        ontopCheck.font = NSFont.systemFont(ofSize: 11)
+
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: 144))
+        [colorLbl, colorWell, opacLbl, opacitySlider, ontopCheck].forEach { v.addSubview($0) }
+        self.view = v
+    }
+
+    private func rowLabel(_ s: String) -> NSTextField {
+        let f = NSTextField(labelWithString: s)
+        f.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        f.textColor = .secondaryLabelColor
+        return f
+    }
+
+    @objc func colorChanged(_ sender: NSColorWell) {
+        Prefs.save(color: sender.color, for: family)
+        widget?.applyPrefs()
+    }
+    @objc func opacityChanged(_ sender: NSSlider) {
+        Prefs.save(opacity: sender.doubleValue, for: family)
+        widget?.applyPrefs()
+    }
+    @objc func ontopChanged(_ sender: NSButton) {
+        Prefs.save(ontop: sender.state == .on, for: family)
+        widget?.applyPrefs()
+    }
+}
+
+// MARK: - Widget window
+
 class WidgetWindow: NSObject, NSWindowDelegate {
     let family: String
     let window: NSWindow
     var onClose: (() -> Void)?
+    var popover: NSPopover?
+    var dotsBtn: NSButton!
 
     init(family: String, members: [String], index: Int) {
         let W: CGFloat = 300, H: CGFloat = 160
@@ -32,12 +138,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         super.init()
 
         window.title = family
-        window.level = .floating
         window.collectionBehavior = [.managed, .participatesInCycle]
         window.isOpaque = false
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.backgroundColor = NSColor(calibratedRed: 0.565, green: 0.753, blue: 0.376, alpha: 0.72)
         window.isReleasedWhenClosed = false
         window.delegate = self
 
@@ -55,7 +159,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
         if !members.isEmpty {
             let sub = NSTextField(labelWithString: members.map { $0.uppercased() }.joined(separator: " · "))
-            sub.frame = NSRect(x: 20, y: 10, width: W - 28, height: 20)
+            sub.frame = NSRect(x: 20, y: 10, width: W - 56, height: 20)
             sub.font = NSFont.systemFont(ofSize: 10, weight: .medium)
             sub.textColor = NSColor(calibratedRed: 0.22, green: 0.40, blue: 0.08, alpha: 1.0)
             sub.backgroundColor = .clear
@@ -63,12 +167,52 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             content.addSubview(sub)
         }
 
+        // Dots button — opens config popover
+        dotsBtn = NSButton(frame: NSRect(x: W - 30, y: 8, width: 20, height: 20))
+        if let img = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Settings") {
+            dotsBtn.image = img
+            dotsBtn.imageScaling = .scaleProportionallyDown
+            dotsBtn.contentTintColor = NSColor(calibratedWhite: 0.15, alpha: 0.55)
+        } else {
+            dotsBtn.title = "•••"
+            dotsBtn.font = NSFont.systemFont(ofSize: 8)
+        }
+        dotsBtn.bezelStyle = .inline
+        dotsBtn.isBordered = false
+        dotsBtn.target = self
+        dotsBtn.action = #selector(showConfig(_:))
+        content.addSubview(dotsBtn)
+
+        applyPrefs()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.localagentsociety.focus.\(family)"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.window.orderFrontRegardless()
+        }
+    }
+
+    func applyPrefs() {
+        window.backgroundColor = Prefs.color(for: family).withAlphaComponent(Prefs.opacity(for: family))
+        window.level = Prefs.ontop(for: family) ? .floating : .normal
+    }
+
+    @objc func showConfig(_ sender: NSButton) {
+        if let p = popover, p.isShown { p.close(); return }
+        let p = NSPopover()
+        p.contentViewController = ConfigVC(family: family, widget: self)
+        p.behavior = .transient
+        p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        popover = p
     }
 
     func windowWillClose(_: Notification) { onClose?() }
 }
+
+// MARK: - App delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var widgets: [String: WidgetWindow] = [:]
@@ -79,7 +223,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
-    // Click on Dock icon when no windows are visible → reopen everything
     func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { refresh(showClosed: true) }
         return true
