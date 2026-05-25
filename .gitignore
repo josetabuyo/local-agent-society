@@ -1,0 +1,21 @@
+# Runtime data
+backend/data/
+backend/*.log
+backend/*.pid
+backend/launchd.log
+backend/__pycache__/
+
+# Session state (per-instance)
+session/*.md
+session/*.log
+session/*.flag
+
+# Compiled widget binary
+widget/widget
+widget/widget.py
+
+# Agent instance config
+.agent.json
+
+# macOS
+.DS_Store
