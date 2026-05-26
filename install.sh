@@ -105,6 +105,54 @@ PLIST
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
+# ── Haiku watcher ─────────────────────────────────────────────────────────────
+HAIKU_PLIST=~/Library/LaunchAgents/com.localagent.system.haiku.plist
+cat > "$HAIKU_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.localagent.system.haiku</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$INSTALL_DIR/session/haiku-watcher.sh</string>
+        <string>$INSTALL_DIR</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>$INSTALL_DIR/session/haiku-watcher.log</string>
+    <key>StandardErrorPath</key><string>$INSTALL_DIR/session/haiku-watcher.log</string>
+</dict>
+</plist>
+PLIST
+launchctl unload "$HAIKU_PLIST" 2>/dev/null || true
+launchctl load "$HAIKU_PLIST"
+
+# ── Opus watcher ──────────────────────────────────────────────────────────────
+OPUS_PLIST=~/Library/LaunchAgents/com.localagent.system.opus.plist
+cat > "$OPUS_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.localagent.system.opus</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>$INSTALL_DIR/session/opus-watcher.sh</string>
+        <string>$INSTALL_DIR</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>$INSTALL_DIR/session/opus-watcher.log</string>
+    <key>StandardErrorPath</key><string>$INSTALL_DIR/session/opus-watcher.log</string>
+</dict>
+</plist>
+PLIST
+launchctl unload "$OPUS_PLIST" 2>/dev/null || true
+launchctl load "$OPUS_PLIST"
+
 # ── Create .agent.json if not present ────────────────────────────────────────
 if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
     TODAY=$(date '+%Y-%m-%d')

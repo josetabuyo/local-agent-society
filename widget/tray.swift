@@ -206,6 +206,118 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     func windowWillClose(_: Notification) { onClose?() }
 }
 
+// MARK: - App icon
+
+func makeAppIcon() -> NSImage {
+    let size: CGFloat = 512
+    let img = NSImage(size: NSSize(width: size, height: size))
+    img.lockFocus()
+
+    let ctx = NSGraphicsContext.current!.cgContext
+
+    // Background: deep navy rounded square
+    let bg = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: size, height: size), xRadius: 110, yRadius: 110)
+    NSColor(calibratedRed: 0.07, green: 0.07, blue: 0.16, alpha: 1).setFill()
+    bg.fill()
+
+    // Subtle radial gradient overlay
+    let center = CGPoint(x: size / 2, y: size / 2)
+    let colors = [
+        CGColor(red: 0.18, green: 0.18, blue: 0.36, alpha: 0.8),
+        CGColor(red: 0.07, green: 0.07, blue: 0.16, alpha: 0)
+    ]
+    if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                              colors: colors as CFArray,
+                              locations: [0, 1]) {
+        ctx.drawRadialGradient(grad,
+                               startCenter: center, startRadius: 0,
+                               endCenter: center, endRadius: size * 0.62,
+                               options: [])
+    }
+
+    // Node positions: 1 center + 6 around a ring
+    let cx = size / 2, cy = size / 2
+    let ring: CGFloat = 148
+    var nodes: [CGPoint] = [CGPoint(x: cx, y: cy)]
+    for i in 0..<6 {
+        let angle = CGFloat(i) * .pi / 3 - .pi / 6
+        nodes.append(CGPoint(x: cx + ring * cos(angle), y: cy + ring * sin(angle)))
+    }
+
+    // Extra outer nodes (alternate ring positions)
+    let outerRing: CGFloat = 215
+    var outerNodes: [CGPoint] = []
+    for i in 0..<6 {
+        let angle = CGFloat(i) * .pi / 3
+        outerNodes.append(CGPoint(x: cx + outerRing * cos(angle), y: cy + outerRing * sin(angle)))
+    }
+
+    // Draw edges: center → inner ring
+    let edgeColor = NSColor(calibratedRed: 0.44, green: 0.82, blue: 0.72, alpha: 0.30)
+    edgeColor.setStroke()
+    for n in nodes.dropFirst() {
+        let path = NSBezierPath()
+        path.lineWidth = 1.8
+        path.move(to: nodes[0])
+        path.line(to: n)
+        path.stroke()
+    }
+
+    // Edges: inner ring neighbors
+    for i in 1...6 {
+        let next = i == 6 ? 1 : i + 1
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        edgeColor.setStroke()
+        path.move(to: nodes[i])
+        path.line(to: nodes[next])
+        path.stroke()
+    }
+
+    // Edges: inner ring → outer (alternating)
+    let outerEdgeColor = NSColor(calibratedRed: 0.44, green: 0.82, blue: 0.72, alpha: 0.15)
+    outerEdgeColor.setStroke()
+    for i in 0..<6 {
+        let path = NSBezierPath()
+        path.lineWidth = 1.2
+        path.move(to: nodes[i + 1])
+        path.line(to: outerNodes[i])
+        path.stroke()
+    }
+
+    // Draw outer nodes (small)
+    for pt in outerNodes {
+        let r: CGFloat = 6
+        let dot = NSBezierPath(ovalIn: NSRect(x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2))
+        NSColor(calibratedRed: 0.44, green: 0.82, blue: 0.72, alpha: 0.45).setFill()
+        dot.fill()
+    }
+
+    // Draw inner ring nodes (medium)
+    for pt in nodes.dropFirst() {
+        let r: CGFloat = 11
+        let dot = NSBezierPath(ovalIn: NSRect(x: pt.x - r, y: pt.y - r, width: r * 2, height: r * 2))
+        NSColor(calibratedRed: 0.44, green: 0.82, blue: 0.72, alpha: 0.85).setFill()
+        dot.fill()
+        // Glow ring
+        let glow = NSBezierPath(ovalIn: NSRect(x: pt.x - r - 3, y: pt.y - r - 3, width: (r + 3) * 2, height: (r + 3) * 2))
+        NSColor(calibratedRed: 0.44, green: 0.82, blue: 0.72, alpha: 0.12).setFill()
+        glow.fill()
+    }
+
+    // Center node (large, brighter)
+    let cr: CGFloat = 22
+    let glow2 = NSBezierPath(ovalIn: NSRect(x: cx - cr - 8, y: cy - cr - 8, width: (cr + 8) * 2, height: (cr + 8) * 2))
+    NSColor(calibratedRed: 0.44, green: 0.82, blue: 0.72, alpha: 0.15).setFill()
+    glow2.fill()
+    let centerDot = NSBezierPath(ovalIn: NSRect(x: cx - cr, y: cy - cr, width: cr * 2, height: cr * 2))
+    NSColor(calibratedRed: 0.56, green: 0.90, blue: 0.80, alpha: 1).setFill()
+    centerDot.fill()
+
+    img.unlockFocus()
+    return img
+}
+
 // MARK: - App delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -214,6 +326,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var closedByUser: Set<String> = []
 
     func applicationDidFinishLaunching(_: Notification) {
+        NSApp.applicationIconImage = makeAppIcon()
+
         // Open widgets for all registered agents on first launch
         guard let agents = fetchAgents() else { return }
         for (idx, family) in agents.keys.sorted().enumerated() {

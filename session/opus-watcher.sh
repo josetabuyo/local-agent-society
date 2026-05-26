@@ -1,6 +1,7 @@
 #!/bin/bash
 # Opus advisor — acepta un directorio de proyecto como $1
 # Uso: bash opus-watcher.sh /path/to/project
+export PATH="/Users/josetabuyo/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 PROJECT_DIR="${1:-$(dirname "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )")}"
 SESSION_DIR="$PROJECT_DIR/session"
 INBOX="$SESSION_DIR/opus-inbox.md"

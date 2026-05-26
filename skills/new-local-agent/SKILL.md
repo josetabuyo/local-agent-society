@@ -72,14 +72,50 @@ curl -s -X POST http://localhost:8700/agents \
 INSTALL_DIR/widget/widget FAMILY "MEMBERS_STR" &
 ```
 
-### 7. Launch Haiku/Opus watchers for this project
+### 7. Launch Haiku/Opus watchers as persistent launchd services
+
+Create session files and launchd plists so watchers survive reboots and session closes.
+SLUG = FAMILY lowercased.
+
 ```bash
 mkdir -p CWD/session
 touch CWD/session/haiku-inbox.md CWD/session/haiku-outbox.md
-touch CWD/session/opus-inbox.md CWD/session/opus-outbox.md
-nohup bash INSTALL_DIR/session/haiku-watcher.sh CWD >> CWD/session/haiku-watcher.log 2>&1 &
-nohup bash INSTALL_DIR/session/opus-watcher.sh CWD >> CWD/session/opus-watcher.log 2>&1 &
+touch CWD/session/opus-inbox.md  CWD/session/opus-outbox.md
 ```
+
+For each ROLE in [haiku, opus], write `~/Library/LaunchAgents/com.localagent.SLUG.ROLE.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.localagent.SLUG.ROLE</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>INSTALL_DIR/session/ROLE-watcher.sh</string>
+        <string>CWD</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>CWD/session/ROLE-watcher.log</string>
+    <key>StandardErrorPath</key><string>CWD/session/ROLE-watcher.log</string>
+</dict>
+</plist>
+```
+
+Then load each:
+```bash
+launchctl unload ~/Library/LaunchAgents/com.localagent.SLUG.ROLE.plist 2>/dev/null || true
+launchctl load   ~/Library/LaunchAgents/com.localagent.SLUG.ROLE.plist
+```
+
+### 7b. Verify consistency
+```bash
+python3 INSTALL_DIR/tests/test_agent_consistency.py
+```
+If this fails, report the errors to the user before continuing.
 
 ### 8. Announce
 ```bash
