@@ -68,9 +68,11 @@ curl -s -X POST http://localhost:8700/agents \
 ```
 
 ### 6. Launch widget
+Tell the running `Local Agent Society.app` to open a widget for this family via URL scheme:
 ```bash
-INSTALL_DIR/widget/widget FAMILY "MEMBERS_STR" &
+open "localagentsociety://FAMILY"
 ```
+If `start.sh` was called in step 2, the tray app is already running. The URL scheme triggers `openWidget(for:)` which spawns a full `WidgetWindow` with the ··· config button (color, opacity, always-on-top).
 
 ### 7. Create session channels
 SLUG = FAMILY lowercased.
