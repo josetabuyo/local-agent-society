@@ -61,7 +61,6 @@ class ConfigVC: NSViewController {
     override func loadView() {
         let W: CGFloat = 208, pad: CGFloat = 14
 
-        // Color row
         let colorLbl = rowLabel("Color")
         colorLbl.frame = NSRect(x: pad, y: 108, width: 60, height: 15)
 
@@ -70,7 +69,6 @@ class ConfigVC: NSViewController {
         colorWell.target = self
         colorWell.action = #selector(colorChanged(_:))
 
-        // Opacity row
         let opacLbl = rowLabel("Opacity")
         opacLbl.frame = NSRect(x: pad, y: 74, width: 60, height: 15)
 
@@ -78,9 +76,7 @@ class ConfigVC: NSViewController {
                                   minValue: 0.1, maxValue: 1.0,
                                   target: self, action: #selector(opacityChanged(_:)))
         opacitySlider.frame = NSRect(x: pad, y: 52, width: W - pad * 2, height: 18)
-        opacitySlider.sliderType = .linear
 
-        // Always on top checkbox
         ontopCheck = NSButton(checkboxWithTitle: "Always on top",
                                target: self, action: #selector(ontopChanged(_:)))
         ontopCheck.state = Prefs.ontop(for: family) ? .on : .off
@@ -120,7 +116,6 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     let window: NSWindow
     var onClose: (() -> Void)?
     var popover: NSPopover?
-    var dotsBtn: NSButton!
 
     init(family: String, members: [String], index: Int) {
         let W: CGFloat = 300, H: CGFloat = 160
@@ -167,8 +162,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             content.addSubview(sub)
         }
 
-        // Dots button — opens config popover
-        dotsBtn = NSButton(frame: NSRect(x: W - 30, y: 8, width: 20, height: 20))
+        let dotsBtn = NSButton(frame: NSRect(x: W - 30, y: 8, width: 20, height: 20))
         if let img = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Settings") {
             dotsBtn.image = img
             dotsBtn.imageScaling = .scaleProportionallyDown
@@ -216,15 +210,40 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var widgets: [String: WidgetWindow] = [:]
-    var timer: Timer?
+    // Families the user has manually closed this session — don't auto-reopen them
+    var closedByUser: Set<String> = []
 
     func applicationDidFinishLaunching(_: Notification) {
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.refresh() }
+        NSApp.setActivationPolicy(.accessory)
+        // Open widgets for all registered agents on first launch
+        guard let agents = fetchAgents() else { return }
+        for (idx, family) in agents.keys.sorted().enumerated() {
+            guard let info = agents[family] else { continue }
+            let members = info["members"] as? [String] ?? []
+            spawnWidget(family: family, members: members, index: idx)
+        }
     }
 
+    // URL scheme: localagentsociety://FamilyName  →  open or focus that widget
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard url.scheme == "localagentsociety",
+                  let family = url.host, !family.isEmpty else { continue }
+            openWidget(for: family)
+        }
+    }
+
+    // Dock icon click when all windows hidden → reopen everything
     func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { refresh(showClosed: true) }
+        if !hasVisibleWindows {
+            closedByUser.removeAll()
+            guard let agents = fetchAgents() else { return true }
+            for (idx, family) in agents.keys.sorted().enumerated() {
+                guard let info = agents[family] else { continue }
+                let members = info["members"] as? [String] ?? []
+                spawnWidget(family: family, members: members, index: idx)
+            }
+        }
         return true
     }
 
@@ -245,35 +264,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func focusAgent(_ sender: NSMenuItem) {
         guard let family = sender.representedObject as? String else { return }
-        if let widget = widgets[family] {
-            widget.window.makeKeyAndOrderFront(nil)
-        } else {
-            refresh(showClosed: false, only: family)
-        }
+        openWidget(for: family)
     }
 
-    func refresh(showClosed: Bool = false, only: String? = nil) {
-        guard let agents = fetchAgents() else { return }
-        let sorted = agents.keys.sorted()
-
-        for (idx, family) in sorted.enumerated() {
-            guard only == nil || only == family else { continue }
-            guard let info = agents[family] else { continue }
-
-            if let w = widgets[family] {
-                if showClosed { w.window.makeKeyAndOrderFront(nil) }
-            } else {
-                let members = info["members"] as? [String] ?? []
-                let widget = WidgetWindow(family: family, members: members, index: idx)
-                widget.onClose = { [weak self] in self?.widgets.removeValue(forKey: family) }
-                widgets[family] = widget
-            }
+    // Open or focus a widget. Removes family from closedByUser so it can be re-shown.
+    func openWidget(for family: String) {
+        closedByUser.remove(family)
+        if let w = widgets[family] {
+            w.window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
         }
+        guard let agents = fetchAgents(), let info = agents[family] else { return }
+        let idx = agents.keys.sorted().firstIndex(of: family) ?? 0
+        let members = info["members"] as? [String] ?? []
+        spawnWidget(family: family, members: members, index: idx)
+    }
 
-        for family in Set(widgets.keys).subtracting(agents.keys) {
-            widgets[family]?.window.close()
-            widgets.removeValue(forKey: family)
+    private func spawnWidget(family: String, members: [String], index: Int) {
+        guard widgets[family] == nil else { return }
+        let widget = WidgetWindow(family: family, members: members, index: index)
+        widget.onClose = { [weak self] in
+            self?.closedByUser.insert(family)
+            self?.widgets.removeValue(forKey: family)
         }
+        widgets[family] = widget
     }
 
     func fetchAgents() -> [String: [String: Any]]? {
