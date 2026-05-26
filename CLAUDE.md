@@ -35,7 +35,12 @@ echo "contexto + pregunta preparada" > session/opus-inbox.md
 
 ## Voces
 
-Hablame con `say -v Samantha` o via `POST http://localhost:8700/queue/speak`.
+Hablame via la cola del backend — nunca `say` directo (colisiona con otras voces):
+```bash
+curl -s -X POST http://localhost:8700/queue/speak \
+  -H "Content-Type: application/json" \
+  -d '{"text":"...","voice":"Samantha","family":"System"}'
+```
 Solo vos hablás — Haiku y Opus son silenciosos.
 
 ## Backend
