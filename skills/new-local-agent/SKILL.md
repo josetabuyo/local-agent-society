@@ -1,7 +1,7 @@
 ---
 name: new-local-agent
-description: Baptize a new agent family in the current directory. Creates .agent.json, registers with the backend, launches the sticky widget, assigns a voice, and starts Haiku/Opus watchers.
-allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*) Bash(nohup:*)
+description: Baptize a new agent family in the current directory. Creates .agent.json, registers with the backend, launches the sticky widget, and assigns a voice.
+allowed-tools: Bash(curl:*) Bash(python3:*)
 ---
 
 # /new-local-agent — Baptize a Local Agent Family
@@ -14,12 +14,12 @@ Creates a named agent family in the **current working directory**.
 
 ## Role assignment
 
-| Members           | Worker | User-facing | Advisor |
-|-------------------|--------|-------------|---------|
-| Haiku+Sonnet+Opus | Haiku  | Sonnet      | Opus    |
-| Haiku+Sonnet      | Haiku  | Sonnet      | Sonnet  |
-| Sonnet+Opus       | Sonnet | Sonnet      | Opus    |
-| Single model      | same   | same        | same    |
+| Members           | Worker (subagent) | User-facing | Advisor (subagent) |
+|-------------------|-------------------|-------------|---------------------|
+| Haiku+Sonnet+Opus | Haiku             | Sonnet      | Opus                |
+| Haiku+Sonnet      | Haiku             | Sonnet      | Sonnet              |
+| Sonnet+Opus       | Sonnet            | Sonnet      | Opus                |
+| Single model      | same              | same        | same                |
 
 ## Execution steps
 
@@ -72,57 +72,29 @@ curl -s -X POST http://localhost:8700/agents \
 INSTALL_DIR/widget/widget FAMILY "MEMBERS_STR" &
 ```
 
-### 7. Launch Haiku/Opus watchers as persistent launchd services
-
-Create session files and launchd plists so watchers survive reboots and session closes.
+### 7. Create session channels
 SLUG = FAMILY lowercased.
 
 ```bash
 mkdir -p CWD/session
-touch CWD/session/haiku-inbox.md CWD/session/haiku-outbox.md
-touch CWD/session/opus-inbox.md  CWD/session/opus-outbox.md
+touch CWD/session/SLUG-inbox.md    # inter-family messages
+touch CWD/session/extern-inbox.md  # external injection channel
+touch CWD/session/bitacora.md      # conversation log
 ```
 
-For each ROLE in [haiku, opus], write `~/Library/LaunchAgents/com.localagent.SLUG.ROLE.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.localagent.SLUG.ROLE</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>INSTALL_DIR/session/ROLE-watcher.sh</string>
-        <string>CWD</string>
-    </array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>CWD/session/ROLE-watcher.log</string>
-    <key>StandardErrorPath</key><string>CWD/session/ROLE-watcher.log</string>
-</dict>
-</plist>
-```
-
-Then load each:
-```bash
-launchctl unload ~/Library/LaunchAgents/com.localagent.SLUG.ROLE.plist 2>/dev/null || true
-launchctl load   ~/Library/LaunchAgents/com.localagent.SLUG.ROLE.plist
-```
-
-### 7b. Verify consistency
+### 9. Verify consistency
 ```bash
 python3 INSTALL_DIR/tests/test_agent_consistency.py
 ```
 If this fails, report the errors to the user before continuing.
 
-### 8. Announce
+### 10. Announce
 ```bash
 curl -s -X POST http://localhost:8700/queue/speak \
   -H "Content-Type: application/json" \
   -d '{"text":"Here! FAMILY","voice":"VOICE","family":"FAMILY"}'
 ```
 
-### 9. Report
-Confirm: family, voice, members, .agent.json created, widget launched, watchers running.
+### 11. Report
+Confirm: family, voice, members, .agent.json created, widget launched.
+Note: Haiku and Opus are spawned on demand via the Agent tool — no persistent processes needed.

@@ -1,7 +1,7 @@
 ---
 name: local-agent-society
-description: Multi-agent society for Claude Code. Each project folder gets a named family of agents (Haiku worker + Sonnet protagonist + Opus advisor) that communicate via session files, share a port registry, and announce via macOS TTS.
-version: 1.0.0
+description: Multi-agent society for Claude Code. Each project folder gets a named family of agents that communicate via Claude's native Agent tool, share a port registry, and announce via macOS TTS.
+version: 2.0.0
 author: josetabuyo
 requires: macOS, Swift 5.6+, Python 3.8+, Claude Code CLI
 ---
@@ -13,11 +13,19 @@ A system that turns Claude Code sessions into a coordinated society of agents.
 ## Concepts
 
 - **Family** — a named group of agents tied to a project directory (e.g. `System`, `Garantido`)
-- **Sonnet** — the protagonist. Talks to you, delegates to Haiku, consults Opus
-- **Haiku** — the worker. Handles heavy file ops, MCP calls, repetitive tasks. Silent.
-- **Opus** — the advisor. Consulted for important decisions. Silent.
-- **Voice** — each family has one unique TTS voice (Sonnet speaks, others don't)
+- **Sonnet** — the protagonist. Talks to you. Delegates via the Agent tool.
+- **Haiku** — spawned on demand for low-cost tasks: file searches, MCP calls, summaries, repetitive work
+- **Opus** — spawned on demand for high-complexity tasks: architecture, deep debugging, long reasoning
+- **Voice** — each family has one unique TTS voice (Sonnet speaks, subagents don't)
 - **Widget** — always-on-top green sticky showing the family name per desktop
+
+## Model selection
+
+| Difficulty | Model | Use cases |
+|-----------|-------|-----------|
+| Low | Haiku-4.5 | Formatting, renaming, lookups, MCP calls, rapid summaries |
+| Medium | Sonnet-4.6 | Most coding tasks, creative writing, deep analysis |
+| High | Opus-4.7 | Complex architecture, heavy debugging, long reasoning |
 
 ## Install
 

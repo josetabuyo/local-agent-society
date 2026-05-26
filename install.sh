@@ -13,16 +13,16 @@ echo "  Family    : $FAMILY"
 echo ""
 
 # ── 1. Compile widget ─────────────────────────────────────────────────────────
-echo "[ 1/7 ] Compiling widget..."
+echo "[ 1/5 ] Compiling widget..."
 swiftc "$INSTALL_DIR/widget/widget.swift" -o "$INSTALL_DIR/widget/widget"
 
 # ── 2. Python dependencies ────────────────────────────────────────────────────
-echo "[ 2/7 ] Installing Python dependencies..."
+echo "[ 2/5 ] Installing Python dependencies..."
 pip3 install -q fastapi "uvicorn[standard]" --break-system-packages 2>/dev/null || \
 pip3 install -q fastapi "uvicorn[standard]" 2>/dev/null
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
-echo "[ 3/7 ] Installing skills..."
+echo "[ 3/5 ] Installing skills..."
 for skill in new-local-agent local-agent-voice local-agent-pronunciation; do
     mkdir -p ~/.claude/skills/$skill
     sed "s|INSTALL_DIR|$INSTALL_DIR|g" \
@@ -32,14 +32,13 @@ for skill in new-local-agent local-agent-voice local-agent-pronunciation; do
 done
 
 # ── 4. Install hook ───────────────────────────────────────────────────────────
-echo "[ 4/7 ] Installing stop hook..."
+echo "[ 4/5 ] Installing stop hook..."
 mkdir -p ~/.claude/hooks
 cp "$INSTALL_DIR/hooks/announce-here.sh" ~/.claude/hooks/announce-here.sh
 chmod +x ~/.claude/hooks/announce-here.sh
 
 # ── 5. Update ~/.claude/settings.json ────────────────────────────────────────
-echo "[ 5/7 ] Updating Claude settings..."
-SETTINGS=~/.claude/settings.json
+echo "[ 5/5 ] Updating Claude settings..."
 python3 - <<PYEOF
 import json, os
 
@@ -70,19 +69,21 @@ with open(path, "w") as f:
 print("         settings.json updated")
 PYEOF
 
-# ── 6. Initialize runtime dirs and files ──────────────────────────────────────
-echo "[ 6/7 ] Initializing runtime directories..."
-mkdir -p "$INSTALL_DIR/backend/data" "$INSTALL_DIR/session"
+# ── Initialize session channels ───────────────────────────────────────────────
+SLUG=$(echo "$FAMILY" | tr '[:upper:]' '[:lower:]')
+touch "$INSTALL_DIR/session/${SLUG}-inbox.md"   # inter-family messages
+touch "$INSTALL_DIR/session/extern-inbox.md"    # external injection channel
+touch "$INSTALL_DIR/session/bitacora.md"        # conversation log
+
+# ── Initialize backend data ───────────────────────────────────────────────────
+mkdir -p "$INSTALL_DIR/backend/data"
 for f in registry.json ports.json; do
     [ ! -f "$INSTALL_DIR/backend/data/$f" ] && echo '{}' > "$INSTALL_DIR/backend/data/$f"
 done
 [ ! -f "$INSTALL_DIR/backend/data/queue.json" ] && echo '[]' > "$INSTALL_DIR/backend/data/queue.json"
 [ ! -f "$INSTALL_DIR/backend/data/attribution.json" ] && echo '[]' > "$INSTALL_DIR/backend/data/attribution.json"
-touch "$INSTALL_DIR/session/haiku-inbox.md" "$INSTALL_DIR/session/haiku-outbox.md"
-touch "$INSTALL_DIR/session/opus-inbox.md" "$INSTALL_DIR/session/opus-outbox.md"
 
-# ── 7. launchd ────────────────────────────────────────────────────────────────
-echo "[ 7/7 ] Registering launchd agent..."
+# ── Register launchd agent (backend) ─────────────────────────────────────────
 PLIST=~/Library/LaunchAgents/com.localagent.system.plist
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -105,54 +106,6 @@ PLIST
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
-# ── Haiku watcher ─────────────────────────────────────────────────────────────
-HAIKU_PLIST=~/Library/LaunchAgents/com.localagent.system.haiku.plist
-cat > "$HAIKU_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.localagent.system.haiku</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>$INSTALL_DIR/session/haiku-watcher.sh</string>
-        <string>$INSTALL_DIR</string>
-    </array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>$INSTALL_DIR/session/haiku-watcher.log</string>
-    <key>StandardErrorPath</key><string>$INSTALL_DIR/session/haiku-watcher.log</string>
-</dict>
-</plist>
-PLIST
-launchctl unload "$HAIKU_PLIST" 2>/dev/null || true
-launchctl load "$HAIKU_PLIST"
-
-# ── Opus watcher ──────────────────────────────────────────────────────────────
-OPUS_PLIST=~/Library/LaunchAgents/com.localagent.system.opus.plist
-cat > "$OPUS_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.localagent.system.opus</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>$INSTALL_DIR/session/opus-watcher.sh</string>
-        <string>$INSTALL_DIR</string>
-    </array>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>$INSTALL_DIR/session/opus-watcher.log</string>
-    <key>StandardErrorPath</key><string>$INSTALL_DIR/session/opus-watcher.log</string>
-</dict>
-</plist>
-PLIST
-launchctl unload "$OPUS_PLIST" 2>/dev/null || true
-launchctl load "$OPUS_PLIST"
-
 # ── Create .agent.json if not present ────────────────────────────────────────
 if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
     TODAY=$(date '+%Y-%m-%d')
@@ -168,7 +121,6 @@ if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
   "created": "$TODAY"
 }
 JSON
-    echo "         .agent.json created (voice will randomize on first start)"
 fi
 
 echo ""

@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """
-Verifica que cada agente registrado tiene toda su infraestructura activa.
-Falla si la UI declara algo que no está corriendo.
+Verifica que cada agente registrado tiene su infraestructura activa.
+Falla si la UI declara algo que no está corriendo o configurado mal.
 
 Uso: python3 tests/test_agent_consistency.py
 """
 import json
-import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 BACKEND = "http://localhost:8700"
-WATCHER_SCRIPT = Path(__file__).parent.parent / "session"
 
-def launchd_running() -> set[str]:
-    out = subprocess.run(["launchctl", "list"], capture_output=True, text=True).stdout
-    return {line.split()[-1] for line in out.splitlines() if "localagent" in line and line.split()[0] != "-"}
 
 def registered_agents() -> dict:
-    import urllib.request
     try:
         with urllib.request.urlopen(f"{BACKEND}/agents", timeout=3) as r:
             return json.loads(r.read())
@@ -26,52 +21,47 @@ def registered_agents() -> dict:
         print(f"FAIL  backend no responde ({e})")
         sys.exit(1)
 
-def check_agent(family: str, info: dict, running: set[str]) -> list[str]:
-    slug = family.lower()
-    members = info.get("members", [])
+
+def check_agent(family: str, info: dict) -> list[str]:
     path = Path(info.get("path", ""))
     errors = []
 
-    for member in members:
-        if member == "sonnet":
-            continue  # sonnet es la sesión interactiva, no necesita watcher
+    # .agent.json presente
+    if not (path / ".agent.json").exists():
+        errors.append(f"falta .agent.json en {path}")
 
-        svc = f"com.localagent.{slug}.{member}"
-        if svc not in running:
-            errors.append(f"launchd service '{svc}' no está corriendo (declara member '{member}')")
-
-        inbox = path / "session" / f"{member}-inbox.md"
-        if not inbox.exists():
-            errors.append(f"falta {inbox}")
-
-        outbox = path / "session" / f"{member}-outbox.md"
-        if not outbox.exists():
-            errors.append(f"falta {outbox}")
-
-    if not (path / "session").is_dir():
-        errors.append(f"falta directorio session/ en {path}")
-
+    # CLAUDE.md: no debe usar 'say -v' ni referencias al viejo sistema inbox/outbox
     claude_md = path / "CLAUDE.md"
     if claude_md.exists():
-        if "say -v" in claude_md.read_text():
-            errors.append(f"CLAUDE.md usa 'say -v' directo — debe usar POST /queue/speak")
+        text = claude_md.read_text()
+        if "say -v" in text:
+            errors.append("CLAUDE.md usa 'say -v' directo — debe usar POST /queue/speak")
+        if "haiku-inbox" in text or "opus-inbox" in text:
+            errors.append("CLAUDE.md referencia el sistema inbox/outbox obsoleto")
 
+    # Settings: no deben tener 'say -v'
     for settings_file in [path / ".claude" / "settings.json", path / ".claude" / "settings.local.json"]:
         if settings_file.exists():
             content = settings_file.read_text()
             if "say -v" in content:
-                errors.append(f"{settings_file.name} tiene hook con 'say -v' directo — eliminar o reemplazar con POST /queue/speak")
+                errors.append(f"{settings_file.name} tiene hook con 'say -v' directo")
+
+    # TTS: backend debe responder
+    try:
+        with urllib.request.urlopen(f"{BACKEND}/health", timeout=2) as r:
+            pass
+    except Exception:
+        errors.append("backend TTS no responde en http://localhost:8700")
 
     return errors
 
+
 def main():
     agents = registered_agents()
-    running = launchd_running()
-
     all_errors: dict[str, list[str]] = {}
 
     for family, info in agents.items():
-        errs = check_agent(family, info, running)
+        errs = check_agent(family, info)
         if errs:
             all_errors[family] = errs
 
@@ -82,12 +72,13 @@ def main():
             print(f"    {family}: {' · '.join(m.upper() for m in members)}")
         sys.exit(0)
     else:
-        print(f"FAIL  inconsistencias encontradas:\n")
+        print("FAIL  inconsistencias encontradas:\n")
         for family, errs in all_errors.items():
             print(f"  {family}:")
             for e in errs:
                 print(f"    - {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
