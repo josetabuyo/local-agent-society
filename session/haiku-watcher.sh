@@ -10,7 +10,7 @@ BACKEND="http://localhost:8700"
 FAMILY=$(python3 -c "import json; d=json.load(open('$PROJECT_DIR/.agent.json')); print(d.get('agent-family','Unknown'))" 2>/dev/null || echo "Unknown")
 
 mkdir -p "$SESSION_DIR"
-echo "" > "$INBOX"
+touch "$INBOX" "$OUTBOX"
 echo "[haiku-watcher] arrancando para $FAMILY en $PROJECT_DIR"
 
 while true; do
