@@ -53,9 +53,14 @@ def check_agent(family: str, info: dict, running: set[str]) -> list[str]:
 
     claude_md = path / "CLAUDE.md"
     if claude_md.exists():
-        content = claude_md.read_text()
-        if "say -v" in content:
-            errors.append(f"CLAUDE.md usa 'say -v' directo — debe usar POST /queue/speak para evitar colisión de voces")
+        if "say -v" in claude_md.read_text():
+            errors.append(f"CLAUDE.md usa 'say -v' directo — debe usar POST /queue/speak")
+
+    for settings_file in [path / ".claude" / "settings.json", path / ".claude" / "settings.local.json"]:
+        if settings_file.exists():
+            content = settings_file.read_text()
+            if "say -v" in content:
+                errors.append(f"{settings_file.name} tiene hook con 'say -v' directo — eliminar o reemplazar con POST /queue/speak")
 
     return errors
 
