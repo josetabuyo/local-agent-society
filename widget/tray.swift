@@ -214,7 +214,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var closedByUser: Set<String> = []
 
     func applicationDidFinishLaunching(_: Notification) {
-        NSApp.setActivationPolicy(.accessory)
         // Open widgets for all registered agents on first launch
         guard let agents = fetchAgents() else { return }
         for (idx, family) in agents.keys.sorted().enumerated() {
