@@ -51,6 +51,12 @@ def check_agent(family: str, info: dict, running: set[str]) -> list[str]:
     if not (path / "session").is_dir():
         errors.append(f"falta directorio session/ en {path}")
 
+    claude_md = path / "CLAUDE.md"
+    if claude_md.exists():
+        content = claude_md.read_text()
+        if "say -v" in content:
+            errors.append(f"CLAUDE.md usa 'say -v' directo — debe usar POST /queue/speak para evitar colisión de voces")
+
     return errors
 
 def main():
