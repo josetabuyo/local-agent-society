@@ -22,6 +22,19 @@ def registered_agents() -> dict:
         sys.exit(1)
 
 
+def check_skill_new_local_agent(install_dir: Path) -> list[str]:
+    skill = install_dir / "skills" / "new-local-agent" / "SKILL.md"
+    if not skill.exists():
+        return []
+    text = skill.read_text()
+    errors = []
+    if "widget/widget " in text and "localagentsociety://" not in text:
+        errors.append("new-local-agent skill lanza el binario widget simple en vez del URL scheme — los widgets no tendrán botón ···")
+    if "localagentsociety://" not in text:
+        errors.append("new-local-agent skill no usa open 'localagentsociety://FAMILY' para lanzar widgets")
+    return errors
+
+
 def check_agent(family: str, info: dict) -> list[str]:
     path = Path(info.get("path", ""))
     errors = []
@@ -59,6 +72,12 @@ def check_agent(family: str, info: dict) -> list[str]:
 def main():
     agents = registered_agents()
     all_errors: dict[str, list[str]] = {}
+
+    # Check skills (install-dir derived from this script's location)
+    install_dir = Path(__file__).parent.parent
+    skill_errors = check_skill_new_local_agent(install_dir)
+    if skill_errors:
+        all_errors["[skills]"] = skill_errors
 
     for family, info in agents.items():
         errs = check_agent(family, info)
