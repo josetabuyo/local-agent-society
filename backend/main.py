@@ -100,6 +100,10 @@ class AttributionEntry(BaseModel):
     project:   str
 
 
+class InjectRequest(BaseModel):
+    message: str
+
+
 # ── routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -210,6 +214,80 @@ def get_queue():
 def clear_queue():
     save_json(QUEUE_FILE, [])
     return {"ok": True}
+
+
+# ── agent inject ─────────────────────────────────────────────────────────────
+
+def _find_claude_tty(agent_path: str) -> str | None:
+    """Find the TTY of a claude process whose cwd is inside agent_path."""
+    try:
+        pids = subprocess.run(
+            ["pgrep", "-f", "claude"], capture_output=True, text=True
+        ).stdout.strip().split()
+        for pid in pids:
+            if not pid.isdigit():
+                continue
+            lsof_out = subprocess.run(
+                ["lsof", "-p", pid, "-a", "-d", "cwd"],
+                capture_output=True, text=True
+            ).stdout
+            if agent_path in lsof_out:
+                tty = subprocess.run(
+                    ["ps", "-p", pid, "-o", "tty="], capture_output=True, text=True
+                ).stdout.strip()
+                if tty and tty != "??":
+                    return tty
+    except Exception:
+        pass
+    return None
+
+
+def _inject_via_iterm(tty: str, message: str) -> bool:
+    """Write text + newline into the iTerm2 session that owns the given TTY."""
+    safe = message.replace("\\", "\\\\").replace('"', '\\"')
+    tty_dev = tty if tty.startswith("/") else f"/dev/{tty}"
+    script = f'''
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                try
+                    if (tty of s) is equal to "{tty_dev}" then
+                        tell s
+                            write text "{safe}"
+                        end tell
+                        return "ok"
+                    end if
+                end try
+            end repeat
+        end repeat
+    end repeat
+end tell
+return "not_found"
+'''
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    return result.returncode == 0 and "ok" in result.stdout
+
+
+@app.post("/agents/{family}/inject")
+def inject_message(family: str, body: InjectRequest):
+    registry = load_json(REGISTRY_FILE, {})
+    if family not in registry:
+        raise HTTPException(status_code=404, detail="Agent family not found")
+
+    path    = registry[family].get("path", "")
+    message = body.message
+
+    # Always write to extern-inbox so the agent sees it even if not at a prompt
+    inbox = Path(path) / "session" / "extern-inbox.md"
+    if inbox.parent.exists():
+        inbox.write_text((inbox.read_text() if inbox.exists() else "") + f"\n{message}\n")
+
+    # Find the live claude session and inject directly
+    tty      = _find_claude_tty(path)
+    injected = _inject_via_iterm(tty, message) if tty else False
+
+    return {"ok": True, "injected": injected, "tty": tty or "not found"}
 
 
 # ── attribution ───────────────────────────────────────────────────────────────
