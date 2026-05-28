@@ -219,24 +219,31 @@ def clear_queue():
 # ── agent inject ─────────────────────────────────────────────────────────────
 
 def _find_claude_tty(agent_path: str) -> str | None:
-    """Find the TTY of a claude process whose cwd is inside agent_path."""
+    """Find the TTY of a claude process whose cwd is exactly agent_path or a subdir."""
     try:
         pids = subprocess.run(
-            ["pgrep", "-f", "claude"], capture_output=True, text=True
+            ["pgrep", "-f", "claude"], capture_output=True, text=True, timeout=5
         ).stdout.strip().split()
         for pid in pids:
             if not pid.isdigit():
                 continue
             lsof_out = subprocess.run(
                 ["lsof", "-p", pid, "-a", "-d", "cwd"],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=5
             ).stdout
-            if agent_path in lsof_out:
-                tty = subprocess.run(
-                    ["ps", "-p", pid, "-o", "tty="], capture_output=True, text=True
-                ).stdout.strip()
-                if tty and tty != "??":
-                    return tty
+            # Parse cwd from lsof output — avoid substring false matches
+            for line in lsof_out.splitlines()[1:]:
+                parts = line.split()
+                if not parts:
+                    continue
+                cwd = parts[-1]
+                if cwd == agent_path or cwd.startswith(agent_path + "/"):
+                    tty = subprocess.run(
+                        ["ps", "-p", pid, "-o", "tty="],
+                        capture_output=True, text=True, timeout=5
+                    ).stdout.strip()
+                    if tty and tty != "??":
+                        return tty
     except Exception:
         pass
     return None
@@ -244,7 +251,12 @@ def _find_claude_tty(agent_path: str) -> str | None:
 
 def _inject_via_iterm(tty: str, message: str) -> bool:
     """Write text + newline into the iTerm2 session that owns the given TTY."""
-    safe = message.replace("\\", "\\\\").replace('"', '\\"')
+    # Escape backslashes, quotes, and newlines — all break AppleScript string literals
+    safe = (message
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\r", " ")
+            .replace("\n", " "))
     tty_dev = tty if tty.startswith("/") else f"/dev/{tty}"
     script = f'''
 tell application "iTerm2"
@@ -265,8 +277,13 @@ tell application "iTerm2"
 end tell
 return "not_found"
 '''
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    return result.returncode == 0 and "ok" in result.stdout
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True, timeout=10
+        )
+        return result.returncode == 0 and "ok" in result.stdout
+    except Exception:
+        return False
 
 
 @app.post("/agents/{family}/inject")
@@ -278,16 +295,19 @@ def inject_message(family: str, body: InjectRequest):
     path    = registry[family].get("path", "")
     message = body.message
 
-    # Always write to extern-inbox so the agent sees it even if not at a prompt
+    # Append to extern-inbox atomically (avoids read+write race)
     inbox = Path(path) / "session" / "extern-inbox.md"
+    inbox_written = False
     if inbox.parent.exists():
-        inbox.write_text((inbox.read_text() if inbox.exists() else "") + f"\n{message}\n")
+        with open(inbox, "a") as f:
+            f.write(f"\n{message}\n")
+        inbox_written = True
 
     # Find the live claude session and inject directly
     tty      = _find_claude_tty(path)
     injected = _inject_via_iterm(tty, message) if tty else False
 
-    return {"ok": True, "injected": injected, "tty": tty or "not found"}
+    return {"ok": True, "injected": injected, "inbox": inbox_written, "tty": tty or "not found"}
 
 
 # ── attribution ───────────────────────────────────────────────────────────────

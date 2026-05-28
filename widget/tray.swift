@@ -2,7 +2,6 @@ import AppKit
 import Foundation
 import Speech
 import AVFoundation
-import ApplicationServices
 
 // MARK: - Font helper
 
@@ -15,10 +14,6 @@ func fitFontSize(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFl
     }
     return size
 }
-
-// MARK: - Track last non-widget focused app (for injection target)
-
-var lastNonWidgetApp: NSRunningApplication?
 
 // MARK: - Persistent prefs per widget family
 
@@ -285,28 +280,6 @@ class VoiceInputManager {
     }
 }
 
-// MARK: - CGEvent injection
-
-func simulatePasteAndReturn() {
-    let src = CGEventSource(stateID: .combinedSessionState)
-
-    guard let vDown = CGEvent(keyboardEventSource: src, virtualKey: 9,  keyDown: true),
-          let vUp   = CGEvent(keyboardEventSource: src, virtualKey: 9,  keyDown: false) else { return }
-    vDown.flags = .maskCommand
-    vUp.flags   = .maskCommand
-    vDown.post(tap: .cgSessionEventTap)
-    vUp.post(tap: .cgSessionEventTap)
-
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-        guard let rDown = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: true),
-              let rUp   = CGEvent(keyboardEventSource: src, virtualKey: 36, keyDown: false) else { return }
-        rDown.flags = CGEventFlags(rawValue: 0)
-        rUp.flags   = CGEventFlags(rawValue: 0)
-        rDown.post(tap: .cgSessionEventTap)
-        rUp.post(tap: .cgSessionEventTap)
-    }
-}
-
 // MARK: - Widget window
 
 let micIdleColor   = NSColor(calibratedWhite: 0.08, alpha: 0.82)
@@ -455,29 +428,35 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     private func injectToSession(_ text: String) {
-        guard AXIsProcessTrusted() else {
-            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            AXIsProcessTrustedWithOptions(opts)
-            micBtn.contentTintColor = .systemOrange
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.micBtn.contentTintColor = micIdleColor
+        guard let url = URL(string: "http://localhost:8700/agents/\(family)/inject") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["message": text])
+        req.timeoutInterval = 5
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard status == 200, let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else {
+                    // HTTP error — backend down or agent not found
+                    self.micBtn.contentTintColor = .systemOrange
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                        self?.micBtn.contentTintColor = micIdleColor
+                    }
+                    return
+                }
+                let injected = json["injected"] as? Bool ?? false
+                // green = live injection into terminal; yellow = inbox only (agent not at prompt)
+                self.micBtn.contentTintColor = injected ? .systemGreen : .systemYellow
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    self?.micBtn.contentTintColor = micIdleColor
+                }
             }
-            return
-        }
-
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-
-        lastNonWidgetApp?.activate(options: .activateIgnoringOtherApps)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            simulatePasteAndReturn()
-        }
-
-        micBtn.contentTintColor = .systemGreen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            self?.micBtn.contentTintColor = micIdleColor
-        }
+        }.resume()
     }
 
     func windowWillClose(_: Notification) { onClose?() }
@@ -575,16 +554,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.applicationIconImage = makeAppIcon()
-
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil, queue: .main
-        ) { n in
-            let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            if app?.bundleIdentifier != Bundle.main.bundleIdentifier {
-                lastNonWidgetApp = app
-            }
-        }
 
         guard let agents = fetchAgents() else { return }
         for (idx, family) in agents.keys.sorted().enumerated() {
