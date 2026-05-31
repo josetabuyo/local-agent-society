@@ -63,16 +63,16 @@ def check_agent(family: str, info: dict) -> list[str]:
 
 
 def check_inject_applescript(install_dir: Path) -> list[str]:
-    """Verify the inject function sends Enter via explicit ASCII character 13."""
+    """Verify the inject function sends Enter by writing \\r directly to the TTY."""
     main_py = install_dir / "backend" / "main.py"
     if not main_py.exists():
         return []
     text = main_py.read_text()
     errors = []
-    if "ASCII character 13" not in text:
+    if 'b"\\r"' not in text and "b'\\r'" not in text:
         errors.append(
-            "backend/_inject_via_iterm does not use (ASCII character 13) — "
-            "voice injection will not press Enter automatically"
+            "backend/_inject_via_iterm does not write \\r to TTY device — "
+            "Enter will not be pressed automatically after voice injection"
         )
     return errors
 

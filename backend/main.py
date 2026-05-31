@@ -252,13 +252,15 @@ def _find_claude_tty(agent_path: str) -> str | None:
 
 
 def _inject_via_iterm(tty: str, message: str) -> bool:
-    """Write text + explicit Enter into the iTerm2 session that owns the given TTY."""
+    """Type text into the iTerm2 session, then send Return via direct TTY write."""
     safe = (message
             .replace("\\", "\\\\")
             .replace('"', '\\"')
             .replace("\r", " ")
             .replace("\n", " "))
     tty_dev = tty if tty.startswith("/") else f"/dev/{tty}"
+
+    # Step 1: type the text via AppleScript (reliable for finding the right session)
     script = f'''
 tell application "iTerm2"
     repeat with w in windows
@@ -267,7 +269,7 @@ tell application "iTerm2"
                 try
                     if (tty of s) is equal to "{tty_dev}" then
                         tell s
-                            write text "{safe}" & (ASCII character 13)
+                            write text "{safe}"
                         end tell
                         return "ok"
                     end if
@@ -282,7 +284,18 @@ return "not_found"
         result = subprocess.run(
             ["osascript", "-e", script], capture_output=True, text=True, timeout=10
         )
-        return result.returncode == 0 and "ok" in result.stdout
+        if result.returncode != 0 or "ok" not in result.stdout:
+            return False
+    except Exception:
+        return False
+
+    # Step 2: send Return by writing \r directly to the TTY device.
+    # write text in modern iTerm2 does not append a newline, so we push \r
+    # straight into the terminal's input buffer — equivalent to pressing Enter.
+    try:
+        with open(tty_dev, "wb", buffering=0) as f:
+            f.write(b"\r")
+        return True
     except Exception:
         return False
 
