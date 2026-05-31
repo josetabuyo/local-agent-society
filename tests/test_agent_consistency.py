@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Verifica que cada agente registrado tiene su infraestructura activa.
-Falla si la UI declara algo que no está corriendo o configurado mal.
+Verifies that each registered agent has its infrastructure active.
+Fails if something is declared but not running or misconfigured.
 
-Uso: python3 tests/test_agent_consistency.py
+Usage: python3 tests/test_agent_consistency.py
 """
 import json
 import sys
@@ -18,7 +18,7 @@ def registered_agents() -> dict:
         with urllib.request.urlopen(f"{BACKEND}/agents", timeout=3) as r:
             return json.loads(r.read())
     except Exception as e:
-        print(f"FAIL  backend no responde ({e})")
+        print(f"FAIL  backend unreachable ({e})")
         sys.exit(1)
 
 
@@ -28,10 +28,8 @@ def check_skill_new_local_agent(install_dir: Path) -> list[str]:
         return []
     text = skill.read_text()
     errors = []
-    if "widget/widget " in text and "localagentsociety://" not in text:
-        errors.append("new-local-agent skill lanza el binario widget simple en vez del URL scheme — los widgets no tendrán botón ···")
     if "localagentsociety://" not in text:
-        errors.append("new-local-agent skill no usa open 'localagentsociety://FAMILY' para lanzar widgets")
+        errors.append("new-local-agent skill does not use open 'localagentsociety://FAMILY' to launch widgets")
     return errors
 
 
@@ -39,33 +37,43 @@ def check_agent(family: str, info: dict) -> list[str]:
     path = Path(info.get("path", ""))
     errors = []
 
-    # .agent.json presente
     if not (path / ".agent.json").exists():
-        errors.append(f"falta .agent.json en {path}")
+        errors.append(f"missing .agent.json in {path}")
 
-    # CLAUDE.md: no debe usar 'say -v' ni referencias al viejo sistema inbox/outbox
     claude_md = path / "CLAUDE.md"
     if claude_md.exists():
         text = claude_md.read_text()
         if "say -v" in text:
-            errors.append("CLAUDE.md usa 'say -v' directo — debe usar POST /queue/speak")
+            errors.append("CLAUDE.md uses 'say -v' directly — must use POST /queue/speak")
         if "haiku-inbox" in text or "opus-inbox" in text:
-            errors.append("CLAUDE.md referencia el sistema inbox/outbox obsoleto")
+            errors.append("CLAUDE.md references the obsolete inbox/outbox system")
 
-    # Settings: no deben tener 'say -v'
     for settings_file in [path / ".claude" / "settings.json", path / ".claude" / "settings.local.json"]:
         if settings_file.exists():
-            content = settings_file.read_text()
-            if "say -v" in content:
-                errors.append(f"{settings_file.name} tiene hook con 'say -v' directo")
+            if "say -v" in settings_file.read_text():
+                errors.append(f"{settings_file.name} has a hook using 'say -v' directly")
 
-    # TTS: backend debe responder
     try:
         with urllib.request.urlopen(f"{BACKEND}/health", timeout=2) as r:
             pass
     except Exception:
-        errors.append("backend TTS no responde en http://localhost:8700")
+        errors.append("backend not responding at http://localhost:8700")
 
+    return errors
+
+
+def check_inject_applescript(install_dir: Path) -> list[str]:
+    """Verify the inject function sends Enter via explicit ASCII character 13."""
+    main_py = install_dir / "backend" / "main.py"
+    if not main_py.exists():
+        return []
+    text = main_py.read_text()
+    errors = []
+    if "ASCII character 13" not in text:
+        errors.append(
+            "backend/_inject_via_iterm does not use (ASCII character 13) — "
+            "voice injection will not press Enter automatically"
+        )
     return errors
 
 
@@ -73,11 +81,15 @@ def main():
     agents = registered_agents()
     all_errors: dict[str, list[str]] = {}
 
-    # Check skills (install-dir derived from this script's location)
     install_dir = Path(__file__).parent.parent
+
     skill_errors = check_skill_new_local_agent(install_dir)
     if skill_errors:
         all_errors["[skills]"] = skill_errors
+
+    inject_errors = check_inject_applescript(install_dir)
+    if inject_errors:
+        all_errors["[backend]"] = inject_errors
 
     for family, info in agents.items():
         errs = check_agent(family, info)
@@ -85,13 +97,13 @@ def main():
             all_errors[family] = errs
 
     if not all_errors:
-        print(f"OK  {len(agents)} agentes verificados, todo consistente")
+        print(f"OK  {len(agents)} agents verified, all consistent")
         for family in sorted(agents):
             members = agents[family].get("members", [])
             print(f"    {family}: {' · '.join(m.upper() for m in members)}")
         sys.exit(0)
     else:
-        print("FAIL  inconsistencias encontradas:\n")
+        print("FAIL  inconsistencies found:\n")
         for family, errs in all_errors.items():
             print(f"  {family}:")
             for e in errs:

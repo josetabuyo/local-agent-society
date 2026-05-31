@@ -242,8 +242,7 @@ class VoiceInputManager {
         req.shouldReportPartialResults = true
 
         let inputNode = engine.inputNode
-        let format    = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             self?.request?.append(buffer)
         }
 
@@ -432,7 +431,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["message": text])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "message": text,
+            "source":  "voice",
+        ])
         req.timeoutInterval = 5
 
         URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in

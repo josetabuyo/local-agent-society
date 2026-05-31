@@ -101,7 +101,9 @@ class AttributionEntry(BaseModel):
 
 
 class InjectRequest(BaseModel):
-    message: str
+    message:     str
+    source:      str           = "voice"   # "voice" | "agent" | "external"
+    from_family: Optional[str] = None
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -250,8 +252,7 @@ def _find_claude_tty(agent_path: str) -> str | None:
 
 
 def _inject_via_iterm(tty: str, message: str) -> bool:
-    """Write text + newline into the iTerm2 session that owns the given TTY."""
-    # Escape backslashes, quotes, and newlines — all break AppleScript string literals
+    """Write text + explicit Enter into the iTerm2 session that owns the given TTY."""
     safe = (message
             .replace("\\", "\\\\")
             .replace('"', '\\"')
@@ -266,7 +267,7 @@ tell application "iTerm2"
                 try
                     if (tty of s) is equal to "{tty_dev}" then
                         tell s
-                            write text "{safe}"
+                            write text "{safe}" & (ASCII character 13)
                         end tell
                         return "ok"
                     end if
@@ -295,17 +296,29 @@ def inject_message(family: str, body: InjectRequest):
     path    = registry[family].get("path", "")
     message = body.message
 
-    # Append to extern-inbox atomically (avoids read+write race)
+    # Build context prefix so the agent always knows who's talking
+    if body.source == "agent" and body.from_family:
+        prefix = f"[Mensaje de {body.from_family}]"
+    elif body.source == "voice":
+        prefix = "[Voz]"
+    else:
+        prefix = "[Externo]"
+
+    timestamp       = datetime.now().strftime("%H:%M")
+    inbox_line      = f"\n[{timestamp} | {prefix}]: {message}\n"
+    terminal_text   = f"{prefix}: {message}"
+
+    # Append to extern-inbox (agent reads this at next conversation start)
     inbox = Path(path) / "session" / "extern-inbox.md"
     inbox_written = False
     if inbox.parent.exists():
         with open(inbox, "a") as f:
-            f.write(f"\n{message}\n")
+            f.write(inbox_line)
         inbox_written = True
 
-    # Find the live claude session and inject directly
+    # Find the live claude session and inject directly into the terminal
     tty      = _find_claude_tty(path)
-    injected = _inject_via_iterm(tty, message) if tty else False
+    injected = _inject_via_iterm(tty, terminal_text) if tty else False
 
     return {"ok": True, "injected": injected, "inbox": inbox_written, "tty": tty or "not found"}
 
