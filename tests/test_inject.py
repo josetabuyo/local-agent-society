@@ -199,19 +199,19 @@ def test_empty_message_accepted():
         fail("empty message accepted without error", f"HTTP {status}")
 
 
-def test_inject_sends_return_via_tty_write():
-    """Verify _inject_via_iterm sends Enter by writing \\r directly to the TTY device."""
+def test_inject_sends_return_via_key_code():
+    """Verify _inject_via_iterm sends Enter via System Events key code 36."""
     import importlib.util, inspect
     main_py = Path(__file__).parent.parent / "backend" / "main.py"
     spec = importlib.util.spec_from_file_location("main", main_py)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     src = inspect.getsource(mod._inject_via_iterm)
-    if 'b"\\r"' in src or "b'\\r'" in src:
-        ok("_inject_via_iterm writes \\r directly to TTY device for Enter")
+    if "key code 36" in src and "System Events" in src:
+        ok("_inject_via_iterm sends Enter via System Events key code 36")
     else:
-        fail("_inject_via_iterm writes \\r directly to TTY device for Enter",
-             "Return is not sent via direct TTY write — Enter won't be pressed automatically")
+        fail("_inject_via_iterm sends Enter via System Events key code 36",
+             "Enter not sent via key code — will not press Enter automatically")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ def main():
     test_inbox_entry_has_timestamp()
     test_newlines_in_message_dont_crash()
     test_empty_message_accepted()
-    test_inject_sends_return_via_tty_write()
+    test_inject_sends_return_via_key_code()
 
     print(f"\n══════════════════════════════════")
     print(f"Results: {PASS} passed, {FAIL} failed")
