@@ -427,6 +427,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     private func injectToSession(_ text: String) {
+        NSLog("[inject] → family=%@ len=%d text=%@", family, text.count, text)
         guard let url = URL(string: "http://localhost:8700/agents/\(family)/inject") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -437,14 +438,14 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         ])
         req.timeoutInterval = 5
 
-        URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
+        URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard status == 200, let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 else {
-                    // HTTP error — backend down or agent not found
+                    NSLog("[inject] ✗ family=%@ HTTP status=%d error=%@", self.family, status, error?.localizedDescription ?? "nil")
                     self.micBtn.contentTintColor = .systemOrange
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                         self?.micBtn.contentTintColor = micIdleColor
@@ -452,6 +453,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                     return
                 }
                 let injected = json["injected"] as? Bool ?? false
+                let tty = json["tty"] as? String ?? "?"
+                NSLog("[inject] ✓ family=%@ injected=%@ tty=%@", self.family, injected ? "true" : "false", tty)
                 // green = live injection into terminal; yellow = inbox only (agent not at prompt)
                 self.micBtn.contentTintColor = injected ? .systemGreen : .systemYellow
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in

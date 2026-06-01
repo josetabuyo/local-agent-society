@@ -63,16 +63,21 @@ def check_agent(family: str, info: dict) -> list[str]:
 
 
 def check_inject_applescript(install_dir: Path) -> list[str]:
-    """Verify the inject function sends Enter via System Events key code 36."""
+    """Verify the inject function sends Enter within the iTerm2 tell block (not via System Events)."""
     main_py = install_dir / "backend" / "main.py"
     if not main_py.exists():
         return []
     text = main_py.read_text()
     errors = []
-    if "key code 36" not in text or "System Events" not in text:
+    if "ASCII character 13" not in text:
         errors.append(
-            "backend/_inject_via_iterm does not use System Events key code 36 — "
+            "backend/_inject_via_iterm does not use ASCII character 13 for Enter — "
             "Enter will not be pressed automatically after voice injection"
+        )
+    if "System Events" in text and "key code 36" in text:
+        errors.append(
+            "backend/_inject_via_iterm still uses System Events key code 36 — "
+            "this causes intermittent failures when iTerm2 frontmost session differs from target"
         )
     return errors
 

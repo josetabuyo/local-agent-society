@@ -251,24 +251,34 @@ def _find_claude_tty(agent_path: str) -> str | None:
     return None
 
 
-def _inject_via_iterm(tty: str, message: str) -> bool:
-    """Type text into the iTerm2 session and press Enter via System Events key code 36."""
+def _inject_via_iterm(tty: str, message: str) -> dict:
+    """Type text into the iTerm2 session and send Enter within the same tell block.
+
+    Enter is sent via write text (ASCII character 13) inside the tell s block so it
+    targets the specific TTY session rather than whatever iTerm2 window is frontmost.
+    This eliminates the race condition with System Events key code 36.
+    """
     safe = (message
             .replace("\\", "\\\\")
             .replace('"', '\\"')
             .replace("\r", " ")
             .replace("\n", " "))
     tty_dev = tty if tty.startswith("/") else f"/dev/{tty}"
+    delay_s = round(min(0.05 + len(safe) * 0.002, 1.0), 3)
     script = f'''
 set foundIt to false
+set sessionCount to 0
 tell application "iTerm2"
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in sessions of t
+                set sessionCount to sessionCount + 1
                 try
                     if (tty of s) is equal to "{tty_dev}" then
                         tell s
-                            write text "{safe}"
+                            write text "{safe}" newline NO
+                            delay {delay_s}
+                            write text (ASCII character 13) newline NO
                         end tell
                         set foundIt to true
                     end if
@@ -278,22 +288,37 @@ tell application "iTerm2"
     end repeat
 end tell
 if foundIt then
-    tell application "System Events"
-        tell process "iTerm2"
-            key code 36
-        end tell
-    end tell
-    return "ok"
+    return "ok|sessions=" & sessionCount
 end if
-return "not_found"
+return "not_found|sessions=" & sessionCount
 '''
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     try:
         result = subprocess.run(
             ["osascript", "-e", script], capture_output=True, text=True, timeout=10
         )
-        return result.returncode == 0 and "ok" in result.stdout
-    except Exception:
-        return False
+        success = result.returncode == 0 and "ok" in result.stdout
+        return {
+            "success": success,
+            "returncode": result.returncode,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "ts": ts,
+            "delay_s": delay_s,
+            "text_len": len(safe),
+            "tty": tty_dev,
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": str(exc),
+            "ts": ts,
+            "delay_s": delay_s,
+            "text_len": len(safe),
+            "tty": tty_dev,
+        }
 
 
 @app.post("/agents/{family}/inject")
@@ -326,8 +351,31 @@ def inject_message(family: str, body: InjectRequest):
         inbox_written = True
 
     # Find the live claude session and inject directly into the terminal
-    tty      = _find_claude_tty(path)
-    injected = _inject_via_iterm(tty, terminal_text) if tty else False
+    tty    = _find_claude_tty(path)
+    result = _inject_via_iterm(tty, terminal_text) if tty else None
+    injected = result["success"] if result else False
+
+    # ── structured inject log ──────────────────────────────────────────────────
+    log_path = Path(path) / "session" / "inject.log"
+    if log_path.parent.exists():
+        ts_full = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        preview = terminal_text[:60].replace("\n", " ") + ("…" if len(terminal_text) > 60 else "")
+        if result:
+            status = "OK" if result["success"] else f"FAIL(rc={result['returncode']})"
+            log_line = (
+                f"[{ts_full}] family={family} source={body.source} "
+                f"tty={result['tty']} len={result['text_len']} "
+                f"delay={result['delay_s']}s status={status} "
+                f"stdout={result['stdout']!r} stderr={result['stderr']!r} "
+                f"msg={preview!r}\n"
+            )
+        else:
+            log_line = (
+                f"[{ts_full}] family={family} source={body.source} "
+                f"tty=not_found — no live session msg={preview!r}\n"
+            )
+        with open(log_path, "a") as f:
+            f.write(log_line)
 
     return {"ok": True, "injected": injected, "inbox": inbox_written, "tty": tty or "not found"}
 
