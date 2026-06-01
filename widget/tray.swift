@@ -416,7 +416,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     private func injectToSession(_ text: String) {
-        NSLog("[inject] → family=%@ len=%d text=%@", family, text.count, text)
+        NSLog("[inject] → name=%@ len=%d text=%@", family, text.count, text)
         guard let url = URL(string: "http://localhost:8700/agents/\(family)/inject") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -434,7 +434,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 guard status == 200, let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 else {
-                    NSLog("[inject] ✗ family=%@ HTTP status=%d error=%@", self.family, status, error?.localizedDescription ?? "nil")
+                    NSLog("[inject] ✗ name=%@ HTTP status=%d error=%@", self.family, status, error?.localizedDescription ?? "nil")
                     self.micBtn.contentTintColor = .systemOrange
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                         self?.micBtn.contentTintColor = micIdleColor
@@ -443,7 +443,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 }
                 let injected = json["injected"] as? Bool ?? false
                 let tty = json["tty"] as? String ?? "?"
-                NSLog("[inject] ✓ family=%@ injected=%@ tty=%@", self.family, injected ? "true" : "false", tty)
+                NSLog("[inject] ✓ name=%@ injected=%@ tty=%@", self.family, injected ? "true" : "false", tty)
                 // green = live injection into terminal; yellow = inbox only (agent not at prompt)
                 self.micBtn.contentTintColor = injected ? .systemGreen : .systemYellow
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
