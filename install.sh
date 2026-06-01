@@ -18,8 +18,9 @@ swiftc "$INSTALL_DIR/widget/widget.swift" -o "$INSTALL_DIR/widget/widget"
 
 # ── 2. Python dependencies ────────────────────────────────────────────────────
 echo "[ 2/5 ] Installing Python dependencies..."
-pip3 install -q fastapi "uvicorn[standard]" --break-system-packages 2>/dev/null || \
-pip3 install -q fastapi "uvicorn[standard]" 2>/dev/null
+VENV="$INSTALL_DIR/backend/.venv"
+python3 -m venv "$VENV"
+"$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
 echo "[ 3/5 ] Installing skills..."
@@ -94,10 +95,15 @@ cat > "$PLIST" <<PLIST
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>$INSTALL_DIR/start.sh</string>
+        <string>$INSTALL_DIR/backend/serve.sh</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
     <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><false/>
+    <key>KeepAlive</key><true/>
     <key>StandardOutPath</key><string>$INSTALL_DIR/backend/launchd.log</string>
     <key>StandardErrorPath</key><string>$INSTALL_DIR/backend/launchd.log</string>
 </dict>
@@ -111,13 +117,11 @@ if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
     TODAY=$(date '+%Y-%m-%d')
     cat > "$INSTALL_DIR/.agent.json" <<JSON
 {
-  "agent-family": "$FAMILY",
-  "role": "sonnet",
+  "name": "$FAMILY",
   "voice": "Samantha",
   "pronunciation": "$FAMILY",
   "backend_url": "http://localhost:8700",
   "frontend_url": "http://localhost:8700/widget/$FAMILY",
-  "members": ["haiku", "sonnet", "opus"],
   "created": "$TODAY"
 }
 JSON

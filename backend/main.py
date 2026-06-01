@@ -70,40 +70,38 @@ threading.Thread(target=tts_drainer, daemon=True).start()
 # ── models ────────────────────────────────────────────────────────────────────
 
 class AgentRegistration(BaseModel):
-    family:       str
-    role:         str
+    name:         str
     voice:        str
     path:         str
     backend_url:  str
     frontend_url: str
-    members:      list[str]
 
 
 class PortRegistration(BaseModel):
     port:         int
     app:          str
-    agent_family: str
+    local_agent:  str
     path:         str
 
 
 class SpeakRequest(BaseModel):
     text:   str
     voice:  str
-    family: str
+    name:   str
 
 
 class AttributionEntry(BaseModel):
     file:      str
     agent:     str
-    family:    str
+    name:      str
     timestamp: str
     project:   str
 
 
 class InjectRequest(BaseModel):
-    message:     str
-    source:      str           = "voice"   # "voice" | "agent" | "external"
-    from_family: Optional[str] = None
+    message:    str
+    source:     str           = "voice"   # "voice" | "agent" | "external"
+    from_agent: Optional[str] = None
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -138,20 +136,20 @@ def list_agents():
 @app.post("/agents")
 def register_agent(agent: AgentRegistration):
     registry = load_json(REGISTRY_FILE, {})
-    registry[agent.family] = {
+    registry[agent.name] = {
         **agent.model_dump(),
         "registered_at": datetime.now().isoformat(),
     }
     save_json(REGISTRY_FILE, registry)
-    return {"ok": True, "family": agent.family}
+    return {"ok": True, "name": agent.name}
 
 
-@app.delete("/agents/{family}")
-def unregister_agent(family: str):
+@app.delete("/agents/{name}")
+def unregister_agent(name: str):
     registry = load_json(REGISTRY_FILE, {})
-    if family not in registry:
-        raise HTTPException(status_code=404, detail="Agent family not found")
-    del registry[family]
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    del registry[name]
     save_json(REGISTRY_FILE, registry)
     return {"ok": True}
 
@@ -202,7 +200,7 @@ def get_free_port(start: int = 9000, end: int = 9999):
 @app.post("/queue/speak")
 def enqueue_speak(req: SpeakRequest):
     queue = load_json(QUEUE_FILE, [])
-    queue.append({"text": req.text, "voice": req.voice, "family": req.family})
+    queue.append({"text": req.text, "voice": req.voice, "name": req.name})
     save_json(QUEUE_FILE, queue)
     return {"ok": True, "queue_length": len(queue)}
 
@@ -321,18 +319,18 @@ return "not_found|sessions=" & sessionCount
         }
 
 
-@app.post("/agents/{family}/inject")
-def inject_message(family: str, body: InjectRequest):
+@app.post("/agents/{name}/inject")
+def inject_message(name: str, body: InjectRequest):
     registry = load_json(REGISTRY_FILE, {})
-    if family not in registry:
-        raise HTTPException(status_code=404, detail="Agent family not found")
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    path    = registry[family].get("path", "")
+    path    = registry[name].get("path", "")
     message = body.message
 
     # Build context prefix so the agent always knows who's talking
-    if body.source == "agent" and body.from_family:
-        prefix = f"[Mensaje de {body.from_family}]"
+    if body.source == "agent" and body.from_agent:
+        prefix = f"[Mensaje de {body.from_agent}]"
     elif body.source == "voice":
         prefix = "[Voz]"
     else:
@@ -363,7 +361,7 @@ def inject_message(family: str, body: InjectRequest):
         if result:
             status = "OK" if result["success"] else f"FAIL(rc={result['returncode']})"
             log_line = (
-                f"[{ts_full}] family={family} source={body.source} "
+                f"[{ts_full}] name={name} source={body.source} "
                 f"tty={result['tty']} len={result['text_len']} "
                 f"delay={result['delay_s']}s status={status} "
                 f"stdout={result['stdout']!r} stderr={result['stderr']!r} "
@@ -371,7 +369,7 @@ def inject_message(family: str, body: InjectRequest):
             )
         else:
             log_line = (
-                f"[{ts_full}] family={family} source={body.source} "
+                f"[{ts_full}] name={name} source={body.source} "
                 f"tty=not_found — no live session msg={preview!r}\n"
             )
         with open(log_path, "a") as f:
@@ -391,28 +389,24 @@ def record_attribution(entry: AttributionEntry):
 
 
 @app.get("/attribution")
-def get_attribution(file: str = None, family: str = None):
+def get_attribution(file: str = None, name: str = None):
     log = load_json(ATTRIBUTION_FILE, [])
     if file:
         log = [e for e in log if e["file"] == file]
-    if family:
-        log = [e for e in log if e["family"] == family]
+    if name:
+        log = [e for e in log if e["name"] == name]
     return log
 
 
 # ── widget HTML ───────────────────────────────────────────────────────────────
 
-@app.get("/widget/{family}", response_class=HTMLResponse)
-def widget(family: str):
-    registry = load_json(REGISTRY_FILE, {})
-    agent = registry.get(family, {})
-    members = agent.get("members", ["sonnet"])
-    members_label = " · ".join(m.upper() for m in members)
+@app.get("/widget/{name}", response_class=HTMLResponse)
+def widget(name: str):
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<title>{family}</title>
+<title>{name}</title>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
@@ -431,15 +425,9 @@ def widget(family: str):
     color: #1a1a1a; line-height: 1;
     letter-spacing: -2px;
   }}
-  .members {{
-    font-size: 11px; font-weight: 500;
-    color: rgba(0,0,0,0.42);
-    margin-top: 8px; letter-spacing: 1px;
-  }}
 </style>
 </head>
 <body>
-  <div class="name">{family}</div>
-  <div class="members">{members_label}</div>
+  <div class="name">{name}</div>
 </body>
 </html>"""

@@ -45,8 +45,6 @@ def check_agent(family: str, info: dict) -> list[str]:
         text = claude_md.read_text()
         if "say -v" in text:
             errors.append("CLAUDE.md uses 'say -v' directly — must use POST /queue/speak")
-        if "haiku-inbox" in text or "opus-inbox" in text:
-            errors.append("CLAUDE.md references the obsolete inbox/outbox system")
 
     for settings_file in [path / ".claude" / "settings.json", path / ".claude" / "settings.local.json"]:
         if settings_file.exists():

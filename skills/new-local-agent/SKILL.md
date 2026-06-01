@@ -10,23 +10,11 @@ Creates a named agent family in the **current working directory**.
 
 ## Parameters
 - `$1` — Family name (required). e.g. `System`, `Garantido`, `Vacaciones`
-- `$2` — Members (optional). Format: `Model1-Model2`. Default: `Haiku-Sonnet-Opus`
-
-## Role assignment
-
-| Members           | Worker (subagent) | User-facing | Advisor (subagent) |
-|-------------------|-------------------|-------------|---------------------|
-| Haiku+Sonnet+Opus | Haiku             | Sonnet      | Opus                |
-| Haiku+Sonnet      | Haiku             | Sonnet      | Sonnet              |
-| Sonnet+Opus       | Sonnet            | Sonnet      | Opus                |
-| Single model      | same              | same        | same                |
 
 ## Execution steps
 
 ### 1. Parse inputs
 - FAMILY = first argument (required)
-- Members from second arg, lowercase, split by `-`. Default: `["haiku","sonnet","opus"]`
-- MEMBERS_STR = joined with ` · ` uppercase for display
 
 ### 2. Ensure system is running
 ```bash
@@ -47,13 +35,11 @@ curl -s http://localhost:8700/voices/random
 python3 -c "
 import json, datetime
 data = {
-  'agent-family': 'FAMILY',
-  'role': 'sonnet',
+  'name': 'FAMILY',
   'voice': 'VOICE',
   'pronunciation': 'FAMILY',
   'backend_url': 'http://localhost:8700',
   'frontend_url': 'http://localhost:8700/widget/FAMILY',
-  'members': MEMBERS_LIST,
   'created': str(datetime.date.today())
 }
 open('.agent.json','w').write(json.dumps(data,indent=2,ensure_ascii=False))
@@ -64,7 +50,7 @@ open('.agent.json','w').write(json.dumps(data,indent=2,ensure_ascii=False))
 ```bash
 curl -s -X POST http://localhost:8700/agents \
   -H "Content-Type: application/json" \
-  -d '{"family":"FAMILY","role":"sonnet","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/FAMILY","members":MEMBERS_LIST}'
+  -d '{"name":"FAMILY","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/FAMILY"}'
 ```
 
 ### 6. Launch widget
@@ -98,5 +84,4 @@ curl -s -X POST http://localhost:8700/queue/speak \
 ```
 
 ### 11. Report
-Confirm: family, voice, members, .agent.json created, widget launched.
-Note: Haiku and Opus are spawned on demand via the Agent tool — no persistent processes needed.
+Confirm: family, voice, .agent.json created, widget launched.

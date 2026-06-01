@@ -14,10 +14,14 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-pip3 install -q fastapi "uvicorn[standard]" 2>/dev/null
+VENV="$SCRIPT_DIR/.venv"
+if [ ! -f "$VENV/bin/pip" ]; then
+    python3 -m venv "$VENV"
+fi
+"$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
 
 cd "$SCRIPT_DIR"
-nohup python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
+nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 sleep 1
 

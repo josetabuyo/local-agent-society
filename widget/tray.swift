@@ -293,7 +293,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var micBtn: MicButton!
     var voice: VoiceInputManager!
 
-    init(family: String, members: [String], index: Int, path: String) {
+    init(family: String, index: Int, path: String) {
         let W: CGFloat = 300, H: CGFloat = 160
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let x = screen.minX + 60 + CGFloat(index) * 30
@@ -329,17 +329,6 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         nameLbl.drawsBackground = false
         nameLbl.lineBreakMode = .byClipping
         content.addSubview(nameLbl)
-
-        // Members row
-        if !members.isEmpty {
-            let sub = NSTextField(labelWithString: members.map { $0.uppercased() }.joined(separator: " · "))
-            sub.frame           = NSRect(x: 20, y: 10, width: W - 80, height: 20)
-            sub.font            = NSFont.systemFont(ofSize: 10, weight: .medium)
-            sub.textColor       = NSColor(calibratedRed: 0.22, green: 0.40, blue: 0.08, alpha: 1.0)
-            sub.backgroundColor = .clear
-            sub.drawsBackground = false
-            content.addSubview(sub)
-        }
 
         // Settings button (bottom-right, small)
         let dotsBtn = NSButton(frame: NSRect(x: W - 28, y: 10, width: 18, height: 18))
@@ -583,9 +572,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let agents = fetchAgents() else { return true }
             for (idx, family) in agents.keys.sorted().enumerated() {
                 guard let info = agents[family] else { continue }
-                let members = info["members"] as? [String] ?? []
-                let path    = info["path"]    as? String  ?? ""
-                spawnWidget(family: family, members: members, index: idx, path: path)
+                let path = info["path"] as? String ?? ""
+                spawnWidget(family: family, index: idx, path: path)
             }
         }
         return true
@@ -617,15 +605,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard let agents = fetchAgents(), let info = agents[family] else { return }
-        let idx     = agents.keys.sorted().firstIndex(of: family) ?? 0
-        let members = info["members"] as? [String] ?? []
-        let path    = info["path"]    as? String  ?? ""
-        spawnWidget(family: family, members: members, index: idx, path: path)
+        let idx  = agents.keys.sorted().firstIndex(of: family) ?? 0
+        let path = info["path"] as? String ?? ""
+        spawnWidget(family: family, index: idx, path: path)
     }
 
-    private func spawnWidget(family: String, members: [String], index: Int, path: String) {
+    private func spawnWidget(family: String, index: Int, path: String) {
         guard widgets[family] == nil else { return }
-        let widget = WidgetWindow(family: family, members: members, index: index, path: path)
+        let widget = WidgetWindow(family: family, index: index, path: path)
         widget.onClose = { [weak self] in
             self?.closedByUser.insert(family)
             self?.widgets.removeValue(forKey: family)

@@ -4,6 +4,7 @@ backend/*.log
 backend/*.pid
 backend/launchd.log
 backend/__pycache__/
+backend/.venv/
 
 # Session — inter-agent message files (runtime state, not tracked)
 session/*.md

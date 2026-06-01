@@ -13,19 +13,8 @@ A system that turns Claude Code sessions into a coordinated society of agents.
 ## Concepts
 
 - **Family** — a named group of agents tied to a project directory (e.g. `System`, `Garantido`)
-- **Sonnet** — the protagonist. Talks to you. Delegates via the Agent tool.
-- **Haiku** — spawned on demand for low-cost tasks: file searches, MCP calls, summaries, repetitive work
-- **Opus** — spawned on demand for high-complexity tasks: architecture, deep debugging, long reasoning
-- **Voice** — each family has one unique TTS voice (Sonnet speaks, subagents don't)
+- **Voice** — each family has one unique TTS voice
 - **Widget** — always-on-top green sticky showing the family name per desktop
-
-## Model selection
-
-| Difficulty | Model | Use cases |
-|-----------|-------|-----------|
-| Low | Haiku-4.5 | Formatting, renaming, lookups, MCP calls, rapid summaries |
-| Medium | Sonnet-4.6 | Most coding tasks, creative writing, deep analysis |
-| High | Opus-4.7 | Complex architecture, heavy debugging, long reasoning |
 
 ## Install
 
@@ -48,7 +37,7 @@ That's it. The system handles the rest.
 
 | Skill | Description |
 |-------|-------------|
-| `/new-local-agent <Name> [Members]` | Baptize a new agent family |
+| `/new-local-agent <Name>` | Baptize a new agent family |
 | `/local-agent-voice [VoiceName]` | Change the family's TTS voice |
 | `/local-agent-pronunciation <text>` | Set phonetic hint for TTS |
 
