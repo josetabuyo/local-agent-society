@@ -552,9 +552,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let agents = fetchAgents() else { return }
         for (idx, family) in agents.keys.sorted().enumerated() {
             guard let info = agents[family] else { continue }
-            let members = info["members"] as? [String] ?? []
-            let path    = info["path"]    as? String  ?? ""
-            spawnWidget(family: family, members: members, index: idx, path: path)
+            let path = info["path"] as? String ?? ""
+            spawnWidget(family: family, index: idx, path: path)
         }
     }
 

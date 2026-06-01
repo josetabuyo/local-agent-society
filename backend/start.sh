@@ -23,14 +23,15 @@ fi
 cd "$SCRIPT_DIR"
 nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
-sleep 1
+sleep 2
 
 if kill -0 $(cat "$PID_FILE") 2>/dev/null; then
     echo "Backend started → http://localhost:$PORT  (PID $(cat $PID_FILE))"
     echo "Docs          → http://localhost:$PORT/docs"
     echo "Log           → $LOG_FILE"
 else
-    echo "ERROR: backend failed to start — check $LOG_FILE"
+    echo "ERROR: backend failed to start. Last log lines:"
+    tail -5 "$LOG_FILE" 2>/dev/null || echo "  (no log file)"
     rm "$PID_FILE"
     exit 1
 fi

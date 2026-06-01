@@ -12,9 +12,38 @@ echo "  Directory : $INSTALL_DIR"
 echo "  Family    : $FAMILY"
 echo ""
 
-# ── 1. Compile widget ─────────────────────────────────────────────────────────
-echo "[ 1/5 ] Compiling widget..."
-swiftc "$INSTALL_DIR/widget/widget.swift" -o "$INSTALL_DIR/widget/widget"
+# ── 1. Compile tray app bundle ────────────────────────────────────────────────
+echo "[ 1/5 ] Compiling tray app..."
+APP="$INSTALL_DIR/widget/Local Agent Society.app"
+mkdir -p "$APP/Contents/MacOS"
+swiftc "$INSTALL_DIR/widget/tray.swift" \
+    -framework AppKit -framework Foundation -framework Speech -framework AVFoundation \
+    -o "$APP/Contents/MacOS/tray"
+cat > "$APP/Contents/Info.plist" <<INFOPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.localagentsociety.tray</string>
+    <key>CFBundleName</key><string>Local Agent Society</string>
+    <key>CFBundleDisplayName</key><string>Local Agent Society</string>
+    <key>CFBundleExecutable</key><string>tray</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>1.1</string>
+    <key>CFBundleShortVersionString</key><string>1.1</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSMicrophoneUsageDescription</key><string>Voice input for local agent session injection</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Transcribe voice notes to inject into the local agent session</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key><array><string>localagentsociety</string></array>
+            <key>CFBundleURLName</key><string>com.localagentsociety.open</string>
+        </dict>
+    </array>
+</dict>
+</plist>
+INFOPLIST
 
 # ── 2. Python dependencies ────────────────────────────────────────────────────
 echo "[ 2/5 ] Installing Python dependencies..."
