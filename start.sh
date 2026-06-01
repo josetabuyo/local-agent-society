@@ -6,11 +6,11 @@ bash "$SYSTEM_DIR/backend/start.sh"
 
 # ── Local Agent Society widget ────────────────────────────────────────────────
 if pgrep -x "tray" > /dev/null 2>&1; then
-    echo "Society    → ya corriendo"
+    echo "Society    → already running"
 else
     open "$SYSTEM_DIR/widget/Local Agent Society.app"
-    echo "Society    → lanzado"
+    echo "Society    → launched"
 fi
 
 echo ""
-echo "Sistema listo. Abrí Claude Code en cualquier directorio con .agent.json."
+echo "Ready. Open Claude Code in any directory with .agent.json."
