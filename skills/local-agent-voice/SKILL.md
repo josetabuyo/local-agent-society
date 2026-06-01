@@ -13,7 +13,7 @@ allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
 
 ### 1. Read current .agent.json
 ```bash
-python3 -c "import json; d=json.load(open('.agent.json')); print(d['agent-family'], d.get('voice','Samantha'))"
+python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name') or d.get('agent-family'), d.get('voice','Samantha'))"
 ```
 If file does not exist, tell the user this directory has no agent (run `/new-local-agent` first).
 

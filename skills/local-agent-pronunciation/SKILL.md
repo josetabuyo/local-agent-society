@@ -16,7 +16,7 @@ Example: family `Garantido` → pronunciation `Ga-ran-ti-do` (slowed spelling he
 
 ### 1. Read .agent.json
 ```bash
-python3 -c "import json; d=json.load(open('.agent.json')); print(d['agent-family'], d.get('voice','Samantha'), d.get('pronunciation',''))"
+python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name') or d.get('agent-family'), d.get('voice','Samantha'), d.get('pronunciation',''))"
 ```
 If file does not exist: tell user no agent is baptized here.
 

@@ -12,7 +12,7 @@ Reads `.agent.json` in the current directory and sends `open localagentsociety:/
 
 ### 1. Read agent name from .agent.json
 ```bash
-python3 -c "import json; print(json.load(open('.agent.json'))['name'])"
+python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name') or d.get('agent-family'))"
 ```
 
 ### 2. Open/focus the widget
