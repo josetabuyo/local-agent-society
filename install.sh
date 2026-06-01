@@ -24,7 +24,7 @@ python3 -m venv "$VENV"
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
 echo "[ 3/5 ] Installing skills..."
-for skill in new-local-agent local-agent-voice local-agent-pronunciation; do
+for skill in new-local-agent local-agent-voice local-agent-pronunciation local-agent-widget; do
     mkdir -p ~/.claude/skills/$skill
     sed "s|INSTALL_DIR|$INSTALL_DIR|g" \
         "$INSTALL_DIR/skills/$skill/SKILL.md" \

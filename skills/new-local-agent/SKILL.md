@@ -80,8 +80,8 @@ If this fails, report the errors to the user before continuing.
 ```bash
 curl -s -X POST http://localhost:8700/queue/speak \
   -H "Content-Type: application/json" \
-  -d '{"text":"Here! FAMILY","voice":"VOICE","family":"FAMILY"}'
+  -d '{"text":"Here! FAMILY","voice":"VOICE","name":"FAMILY"}'
 ```
 
 ### 11. Report
-Confirm: family, voice, .agent.json created, widget launched.
+Confirm: name, voice, .agent.json created, widget launched.
