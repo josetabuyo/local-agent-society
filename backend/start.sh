@@ -4,14 +4,13 @@ PID_FILE="$SCRIPT_DIR/backend.pid"
 LOG_FILE="$SCRIPT_DIR/backend.log"
 PORT=8700
 
+if lsof -ti tcp:$PORT > /dev/null 2>&1; then
+    echo "Backend already running on http://localhost:$PORT"
+    exit 0
+fi
+
 if [ -f "$PID_FILE" ]; then
-    PID=$(cat "$PID_FILE")
-    if kill -0 "$PID" 2>/dev/null; then
-        echo "Backend already running on http://localhost:$PORT (PID $PID)"
-        exit 0
-    else
-        rm "$PID_FILE"
-    fi
+    rm "$PID_FILE"
 fi
 
 VENV="$SCRIPT_DIR/.venv"

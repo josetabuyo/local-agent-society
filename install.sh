@@ -19,6 +19,7 @@ mkdir -p "$APP/Contents/MacOS"
 swiftc "$INSTALL_DIR/widget/tray.swift" \
     -framework AppKit -framework Foundation -framework Speech -framework AVFoundation \
     -o "$APP/Contents/MacOS/tray"
+codesign --force --deep --sign - "$APP"
 cat > "$APP/Contents/Info.plist" <<INFOPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
