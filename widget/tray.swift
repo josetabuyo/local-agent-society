@@ -3,16 +3,79 @@ import Foundation
 import Speech
 import AVFoundation
 
+
 // MARK: - Font helper
 
-func fitFontSize(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFloat = 11) -> CGFloat {
+func smartSplit(_ text: String) -> String {
+    let chars = Array(text)
+    let mid = chars.count / 2
+
+    // Priority 1: split at space or hyphen closest to middle
+    var bestSpaceIdx: Int? = nil
+    var bestSpaceDist = Int.max
+    for i in 0..<chars.count {
+        if chars[i] == " " || chars[i] == "-" {
+            let dist = abs(i - mid)
+            if dist < bestSpaceDist { bestSpaceDist = dist; bestSpaceIdx = i }
+        }
+    }
+    if let idx = bestSpaceIdx {
+        let before = String(chars[0..<idx]).trimmingCharacters(in: .whitespaces)
+        let after  = String(chars[min(idx + 1, chars.count)...]).trimmingCharacters(in: .whitespaces)
+        if !before.isEmpty && !after.isEmpty { return before + "\n" + after }
+    }
+
+    // Priority 2: CamelCase boundary closest to middle
+    var bestCamelIdx: Int? = nil
+    var bestCamelDist = Int.max
+    for i in 1..<chars.count {
+        if chars[i].isUppercase && chars[i-1].isLowercase {
+            let dist = abs(i - mid)
+            if dist < bestCamelDist { bestCamelDist = dist; bestCamelIdx = i }
+        }
+    }
+    if let idx = bestCamelIdx {
+        return String(chars[0..<idx]) + "\n" + String(chars[idx...])
+    }
+
+    return text
+}
+
+func measuredWidth(_ text: String, size: CGFloat) -> CGFloat {
+    (text as NSString).size(withAttributes: [
+        .font: NSFont.systemFont(ofSize: size, weight: .heavy),
+        .kern: CGFloat(1.5),
+    ]).width
+}
+
+func fitFontSizeAndSplit(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFloat = 14) -> (CGFloat, String) {
+    // Try single-line
     var size = start
-    while size > min {
-        let w = (text as NSString).size(withAttributes: [.font: NSFont.boldSystemFont(ofSize: size)]).width
-        if w <= maxWidth { break }
+    while size > 30 {
+        if measuredWidth(text, size: size) <= maxWidth { return (size, text) }
         size -= 1
     }
-    return size
+
+    // Try split version
+    let splitText = smartSplit(text)
+    if splitText != text {
+        let lines = splitText.components(separatedBy: "\n")
+        let labelH: CGFloat = 96
+        var splitSize = Swift.min(start, floor(labelH / 2.6))  // ~36pt max for two lines
+        while splitSize > min {
+            let maxW = lines.map { measuredWidth($0, size: splitSize) }.max() ?? 0
+            if maxW <= maxWidth { return (splitSize, splitText) }
+            splitSize -= 1
+        }
+        return (min, splitText)
+    }
+
+    // No split possible, keep shrinking
+    while size > min {
+        if measuredWidth(text, size: size) <= maxWidth { return (size, text) }
+        size -= 1
+    }
+    return (min, text)
 }
 
 // MARK: - Persistent prefs per widget family
@@ -279,9 +342,89 @@ class VoiceInputManager {
     }
 }
 
+// MARK: - Outlined label
+
+class OutlinedLabel: NSView {
+    var text: String = "" { didSet { needsDisplay = true } }
+    var textFont: NSFont = NSFont.systemFont(ofSize: 48, weight: .heavy)
+    var fillColor: NSColor = .black  { didSet { needsDisplay = true } }
+    var strokeOpacity: CGFloat = 0.72
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        let base: [NSAttributedString.Key: Any] = [
+            .font: textFont,
+            .kern: CGFloat(1.5),
+            .paragraphStyle: paragraphStyle,
+        ]
+        let shadow = NSShadow()
+        shadow.shadowColor      = NSColor.white.withAlphaComponent(strokeOpacity * 0.90)
+        shadow.shadowBlurRadius = 2.0
+        shadow.shadowOffset     = .zero
+
+        var fillAttrs = base
+        fillAttrs[.foregroundColor] = fillColor
+        fillAttrs[.shadow]          = shadow
+        NSAttributedString(string: text, attributes: fillAttrs).draw(in: bounds)
+    }
+}
+
+func drawMicImage(fill: NSColor, stroke: NSColor) -> NSImage {
+    NSImage(size: NSSize(width: 40, height: 40), flipped: true) { bounds in
+        let cx = bounds.midX
+
+        // Capsule body
+        let bodyW: CGFloat = 14, bodyH: CGFloat = 20
+        let body = NSBezierPath(roundedRect: NSRect(x: cx - bodyW/2, y: 3,
+                                                    width: bodyW, height: bodyH),
+                                xRadius: bodyW/2, yRadius: bodyW/2)
+        fill.setFill();   body.fill()
+        stroke.setStroke(); body.lineWidth = 1.3; body.stroke()
+
+        // Arc stand (∪ below body)
+        let arc = NSBezierPath()
+        arc.move(to: NSPoint(x: cx - 13, y: 16))
+        arc.curve(to: NSPoint(x: cx + 13, y: 16),
+                  controlPoint1: NSPoint(x: cx - 13, y: 32),
+                  controlPoint2: NSPoint(x: cx + 13, y: 32))
+        arc.lineWidth = 1.3; arc.stroke()
+
+        // Vertical stem
+        let stem = NSBezierPath()
+        stem.move(to: NSPoint(x: cx, y: 32))
+        stem.line(to: NSPoint(x: cx, y: 37))
+        stem.lineWidth = 1.3; stem.stroke()
+
+        // Base
+        let base = NSBezierPath()
+        base.move(to: NSPoint(x: cx - 8, y: 37))
+        base.line(to: NSPoint(x: cx + 8, y: 37))
+        base.lineWidth = 1.8; base.stroke()
+
+        return true
+    }
+}
+
+func drawDotsImage(fill: NSColor, stroke: NSColor) -> NSImage {
+    NSImage(size: NSSize(width: 28, height: 28), flipped: true) { bounds in
+        let r: CGFloat = 3.5
+        let cy = bounds.midY
+        fill.setFill(); stroke.setStroke()
+        for cx in [CGFloat(4.0), CGFloat(14), CGFloat(24.0)] {
+            let dot = NSBezierPath(ovalIn: NSRect(x: cx - r, y: cy - r, width: r*2, height: r*2))
+            dot.fill()
+            dot.lineWidth = 1.0; dot.stroke()
+        }
+        return true
+    }
+}
+
 // MARK: - Widget window
 
-let micIdleColor   = NSColor(calibratedWhite: 0.08, alpha: 0.82)
+
 
 class WidgetWindow: NSObject, NSWindowDelegate {
     let family: String
@@ -290,8 +433,11 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var onClose: (() -> Void)?
     var configPopover: NSPopover?
     var langPopover:   NSPopover?
+    var nameLbl: OutlinedLabel!
+    var dotsBtn: NSButton!
     var micBtn: MicButton!
     var voice: VoiceInputManager!
+    var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
 
     init(family: String, index: Int, path: String) {
         let W: CGFloat = 300, H: CGFloat = 160
@@ -321,25 +467,20 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
         // Family name label
         let labelWidth = W - 28
-        let nameLbl = NSTextField(wrappingLabelWithString: family)
-        nameLbl.frame         = NSRect(x: 18, y: H * 0.28, width: labelWidth, height: H * 0.60)
-        nameLbl.font          = NSFont.boldSystemFont(ofSize: fitFontSize(text: family, maxWidth: labelWidth))
-        nameLbl.textColor     = NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.08, alpha: 1.0)
-        nameLbl.backgroundColor = .clear
-        nameLbl.drawsBackground = false
-        nameLbl.lineBreakMode = .byClipping
+        let (fontSize, displayText) = fitFontSizeAndSplit(text: family, maxWidth: labelWidth)
+        nameLbl = OutlinedLabel(frame: NSRect(x: 18, y: H * 0.28, width: labelWidth, height: H * 0.60))
+        nameLbl.text       = displayText
+        nameLbl.textFont   = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
         content.addSubview(nameLbl)
 
         // Settings button (bottom-right, small)
-        let dotsBtn = NSButton(frame: NSRect(x: W - 28, y: 10, width: 18, height: 18))
-        if let img = NSImage(systemSymbolName: "ellipsis", accessibilityDescription: "Settings") {
-            dotsBtn.image         = img
-            dotsBtn.imageScaling  = .scaleProportionallyDown
-            dotsBtn.contentTintColor = NSColor(calibratedWhite: 0.15, alpha: 0.45)
-        } else {
-            dotsBtn.title = "•••"
-            dotsBtn.font  = NSFont.systemFont(ofSize: 8)
-        }
+        dotsBtn = NSButton(frame: NSRect(x: W - 44, y: 10, width: 28, height: 28))
+        let dotsImg = drawDotsImage(
+            fill: NSColor.white.withAlphaComponent(0.12),
+            stroke: NSColor.white.withAlphaComponent(0.88)
+        )
+        dotsBtn.image = dotsImg
+        dotsBtn.imageScaling = .scaleAxesIndependently
         dotsBtn.bezelStyle = .inline
         dotsBtn.isBordered = false
         dotsBtn.target     = self
@@ -347,20 +488,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         content.addSubview(dotsBtn)
 
         // Mic button — larger, darker, prominent
-        micBtn = MicButton(frame: NSRect(x: W - 64, y: 3, width: 32, height: 32))
-        if let cfg = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold) as NSImage.SymbolConfiguration?,
-           let img = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice input")?
-                        .withSymbolConfiguration(cfg) {
-            micBtn.image        = img
-            micBtn.imageScaling = .scaleProportionallyDown
-        } else if let img = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Voice input") {
-            micBtn.image        = img
-            micBtn.imageScaling = .scaleProportionallyDown
-        } else {
-            micBtn.title = "🎤"
-            micBtn.font  = NSFont.systemFont(ofSize: 14)
-        }
-        micBtn.contentTintColor = micIdleColor
+        micBtn = MicButton(frame: NSRect(x: W - 92, y: 10, width: 40, height: 40))
+        updateMicIcon(color: idleFill)
         micBtn.bezelStyle       = .inline
         micBtn.isBordered       = false
 
@@ -371,7 +500,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         // Voice manager
         voice = VoiceInputManager(locale: Prefs.voiceLocale(for: family))
         voice.onStateChange = { [weak self] active in
-            self?.micBtn.contentTintColor = active ? .systemRed : micIdleColor
+            self?.updateMicIcon(color: active ? .systemRed : (self?.idleFill ?? .black))
         }
         voice.onResult = { [weak self] text in
             self?.injectToSession(text)
@@ -390,8 +519,26 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     func applyPrefs() {
-        window.backgroundColor = Prefs.color(for: family).withAlphaComponent(Prefs.opacity(for: family))
+        let opacity = Prefs.opacity(for: family)
+        let bgColor = Prefs.color(for: family)
+        window.backgroundColor = bgColor.withAlphaComponent(opacity)
         window.level = Prefs.ontop(for: family) ? .floating : .normal
+
+        // Shared dark fill: 85% black + 15% background tint, darker than before
+        let darkFill = (NSColor.black.blended(withFraction: 0.15, of: bgColor) ?? .black)
+            .withAlphaComponent(min(opacity * 1.6, 0.98))
+        idleFill = darkFill
+
+        nameLbl?.fillColor     = darkFill
+        nameLbl?.strokeOpacity = opacity
+        nameLbl?.needsDisplay  = true
+
+        dotsBtn?.alphaValue = opacity
+        micBtn?.alphaValue  = opacity
+        let strokeA = min(opacity * 1.1 + 0.1, 1.0)
+        dotsBtn?.image = drawDotsImage(fill: darkFill, stroke: NSColor.white.withAlphaComponent(strokeA))
+        dotsBtn?.imageScaling = .scaleAxesIndependently
+        updateMicIcon(color: idleFill)
     }
 
     @objc func showConfig(_ sender: NSButton) {
@@ -403,6 +550,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         configPopover = p
     }
 
+    func updateMicIcon(color: NSColor) {
+        let img = drawMicImage(fill: color, stroke: NSColor.white.withAlphaComponent(0.85))
+        micBtn.image = img
+        micBtn.imageScaling = .scaleAxesIndependently
+    }
+
     func showLangPicker() {
         if let p = langPopover, p.isShown { p.close(); return }
         let p = NSPopover()
@@ -411,7 +564,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         p.show(relativeTo: micBtn.bounds, of: micBtn, preferredEdge: .maxY)
         langPopover = p
         // Blue tint while picker is open
-        micBtn.contentTintColor = .systemBlue
+        updateMicIcon(color: .systemBlue)
         p.contentViewController?.view.window?.windowController?.window?.makeKeyAndOrderFront(nil)
     }
 
@@ -435,9 +588,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 else {
                     NSLog("[inject] ✗ name=%@ HTTP status=%d error=%@", self.family, status, error?.localizedDescription ?? "nil")
-                    self.micBtn.contentTintColor = .systemOrange
+                    self.updateMicIcon(color: .systemOrange)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                        self?.micBtn.contentTintColor = micIdleColor
+                        self?.updateMicIcon(color: self?.idleFill ?? .black)
                     }
                     return
                 }
@@ -445,9 +598,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 let tty = json["tty"] as? String ?? "?"
                 NSLog("[inject] ✓ name=%@ injected=%@ tty=%@", self.family, injected ? "true" : "false", tty)
                 // green = live injection into terminal; yellow = inbox only (agent not at prompt)
-                self.micBtn.contentTintColor = injected ? .systemGreen : .systemYellow
+                self.updateMicIcon(color: injected ? .systemGreen : .systemYellow)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                    self?.micBtn.contentTintColor = micIdleColor
+                    self?.updateMicIcon(color: self?.idleFill ?? .black)
                 }
             }
         }.resume()
