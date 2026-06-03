@@ -190,6 +190,17 @@ let supportedLocales: [(name: String, flag: String, id: String)] = [
     ("Deutsch",    "🇩🇪", "de-DE"),
 ]
 
+// Derive a default speech-recognition locale from the TTS voice name.
+// Only Spanish and Brazilian voices deviate from en-US in our NICE_VOICES set.
+func inferLocaleFromVoice(_ voice: String) -> String {
+    let v = voice.lowercased()
+    if v == "paulina" || v == "mónica" || v == "monica" { return "es-MX" }
+    if v.contains("português") || v == "luciana" || v == "felipe" { return "pt-BR" }
+    if v.contains("français") || v == "thomas" || v == "aurelie" { return "fr-FR" }
+    if v.contains("deutsch") || v == "anna" || v == "markus" || v == "petra" { return "de-DE" }
+    return "en-US"
+}
+
 class LangPickerVC: NSViewController {
     let family: String
     weak var widget: WidgetWindow?
@@ -458,6 +469,7 @@ func drawDotsImage(fill: NSColor, stroke: NSColor) -> NSImage {
 class WidgetWindow: NSObject, NSWindowDelegate {
     let family: String
     let agentPath: String
+    let agentVoice: String
     let window: NSWindow
     var onClose: (() -> Void)?
     var configPopover: NSPopover?
@@ -465,10 +477,18 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var nameLbl: OutlinedLabel!
     var dotsBtn: NSButton!
     var micBtn: MicButton!
+    var infoBtn: NSButton!
     var voice: VoiceInputManager!
     var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
 
-    init(family: String, index: Int, path: String) {
+    var isInfoExpanded = false
+    var infoPanelView: NSView?
+    var infoKeyLabels: [NSTextField] = []
+    var infoValLabels: [NSTextField] = []
+
+    static let infoH: CGFloat = 90
+
+    init(family: String, index: Int, path: String, voice agentVoiceArg: String = "") {
         let W: CGFloat = 300, H: CGFloat = 160
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let x = screen.minX + 60 + CGFloat(index) * 30
@@ -480,8 +500,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        self.family    = family
-        self.agentPath = path
+        self.family     = family
+        self.agentPath  = path
+        self.agentVoice = agentVoiceArg
         super.init()
 
         window.title = family
@@ -526,7 +547,20 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         micBtn.onLongPress  = { [weak self] in self?.showLangPicker() }
         content.addSubview(micBtn)
 
-        // Voice manager
+        // Info button — bottom-left
+        infoBtn = NSButton(frame: NSRect(x: 10, y: 10, width: 28, height: 28))
+        infoBtn.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info")
+        infoBtn.imageScaling = .scaleProportionallyUpOrDown
+        infoBtn.bezelStyle = .inline
+        infoBtn.isBordered = false
+        infoBtn.target = self
+        infoBtn.action = #selector(toggleInfo(_:))
+        content.addSubview(infoBtn)
+
+        // Voice manager — seed locale from TTS voice on first run if user never set it
+        if UserDefaults.standard.string(forKey: "voiceLocale.\(family)") == nil && !agentVoice.isEmpty {
+            Prefs.save(voiceLocale: inferLocaleFromVoice(agentVoice), for: family)
+        }
         voice = VoiceInputManager(locale: Prefs.voiceLocale(for: family))
         voice.onStateChange = { [weak self] active in
             self?.updateMicIcon(color: active ? .systemRed : (self?.idleFill ?? .black))
@@ -564,10 +598,22 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
         dotsBtn?.alphaValue = opacity
         micBtn?.alphaValue  = opacity
+        infoBtn?.alphaValue = opacity
         let strokeA = min(opacity * 1.1 + 0.1, 1.0)
         dotsBtn?.image = drawDotsImage(fill: darkFill, stroke: NSColor.white.withAlphaComponent(strokeA))
         dotsBtn?.imageScaling = .scaleAxesIndependently
         updateMicIcon(color: idleFill)
+        let infoBtnTint = isInfoExpanded
+            ? NSColor.white.withAlphaComponent(min(strokeA + 0.15, 1.0))
+            : NSColor.white.withAlphaComponent(strokeA)
+        infoBtn?.contentTintColor = infoBtnTint
+
+        if isInfoExpanded {
+            let (panelBg, textColor) = infoPanelColors()
+            infoPanelView?.layer?.backgroundColor = panelBg.cgColor
+            for lbl in infoKeyLabels { lbl.textColor = textColor.withAlphaComponent(0.60) }
+            for lbl in infoValLabels { lbl.textColor = textColor }
+        }
     }
 
     @objc func showConfig(_ sender: NSButton) {
@@ -583,6 +629,122 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         let img = drawMicImage(fill: color, stroke: NSColor.white.withAlphaComponent(0.85))
         micBtn.image = img
         micBtn.imageScaling = .scaleAxesIndependently
+    }
+
+    // MARK: Info panel
+
+    @objc func toggleInfo(_ sender: NSButton) {
+        isInfoExpanded.toggle()
+        let content = window.contentView!
+        let curFrame = window.frame
+        let addH = WidgetWindow.infoH
+
+        if isInfoExpanded {
+            let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY - addH,
+                                     width: curFrame.width, height: curFrame.height + addH)
+            window.setFrame(newWinFrame, display: false)
+            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
+            infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: family) * 1.1 + 0.25, 1.0))
+            fetchAgentPorts { [weak self] ports in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    let panel = self.makeInfoPanel(ports: ports)
+                    content.addSubview(panel)
+                    self.infoPanelView = panel
+                    self.window.display()
+                }
+            }
+        } else {
+            infoPanelView?.removeFromSuperview()
+            infoPanelView = nil
+            infoKeyLabels = []
+            infoValLabels = []
+            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
+            let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY + addH,
+                                     width: curFrame.width, height: curFrame.height - addH)
+            window.setFrame(newWinFrame, display: true)
+            infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: family) * 1.1 + 0.1, 1.0))
+        }
+    }
+
+    private func infoPanelColors() -> (bg: NSColor, text: NSColor) {
+        let bgColor = Prefs.color(for: family)
+        let panelBg  = bgColor.blended(withFraction: 0.22, of: NSColor.black) ?? bgColor
+        let textColor = panelBg.blended(withFraction: 0.32, of: NSColor.white) ?? NSColor.white
+        return (panelBg, textColor)
+    }
+
+    private func makeInfoPanel(ports: [Int]) -> NSView {
+        let W: CGFloat = 300
+        let H = WidgetWindow.infoH
+        let (panelBg, textColor) = infoPanelColors()
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = panelBg.cgColor
+
+        let sep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = textColor.withAlphaComponent(0.20).cgColor
+        panel.addSubview(sep)
+
+        let rows: [(key: String, value: String)] = [
+            ("Voice",  agentVoice.isEmpty ? "—" : agentVoice),
+            ("Speech", localeName(for: Prefs.voiceLocale(for: family))),
+            ("Ports",  ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
+        ]
+
+        infoKeyLabels = []
+        infoValLabels = []
+
+        for (i, row) in rows.enumerated() {
+            let yPos: CGFloat = H - 22 - CGFloat(i) * 22
+
+            let keyLbl = NSTextField(labelWithString: row.key)
+            keyLbl.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+            keyLbl.textColor = textColor.withAlphaComponent(0.60)
+            keyLbl.backgroundColor = .clear
+            keyLbl.drawsBackground = false
+            keyLbl.frame = NSRect(x: 16, y: yPos, width: 52, height: 15)
+            panel.addSubview(keyLbl)
+            infoKeyLabels.append(keyLbl)
+
+            let valLbl = NSTextField(labelWithString: row.value)
+            valLbl.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            valLbl.textColor = textColor
+            valLbl.backgroundColor = .clear
+            valLbl.drawsBackground = false
+            valLbl.frame = NSRect(x: 72, y: yPos, width: W - 88, height: 15)
+            panel.addSubview(valLbl)
+            infoValLabels.append(valLbl)
+        }
+
+        return panel
+    }
+
+    private func localeName(for localeId: String) -> String {
+        supportedLocales.first(where: { $0.id == localeId })
+            .map { "\($0.flag) \($0.name)" } ?? localeId
+    }
+
+    private func fetchAgentPorts(completion: @escaping ([Int]) -> Void) {
+        guard let url = URL(string: "http://localhost:8700/ports") else {
+            completion([]); return
+        }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self = self,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]]
+            else { completion([]); return }
+            let ports = json.compactMap { (_, val) -> Int? in
+                // Old registrations use "agent_family"; new /ports/claim uses "local_agent"
+                let fam = (val["agent_family"] as? String) ?? (val["local_agent"] as? String)
+                guard let fam = fam, fam == self.family,
+                      let p = val["port"] as? Int else { return nil }
+                return p
+            }.sorted()
+            completion(ports)
+        }.resume()
     }
 
     func showLangPicker() {
@@ -734,8 +896,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let agents = fetchAgents() else { return }
         for (idx, family) in agents.keys.sorted().enumerated() {
             guard let info = agents[family] else { continue }
-            let path = info["path"] as? String ?? ""
-            spawnWidget(family: family, index: idx, path: path)
+            let path  = info["path"]  as? String ?? ""
+            let voice = info["voice"] as? String ?? ""
+            spawnWidget(family: family, index: idx, path: path, voice: voice)
         }
     }
 
@@ -753,8 +916,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let agents = fetchAgents() else { return true }
             for (idx, family) in agents.keys.sorted().enumerated() {
                 guard let info = agents[family] else { continue }
-                let path = info["path"] as? String ?? ""
-                spawnWidget(family: family, index: idx, path: path)
+                let path  = info["path"]  as? String ?? ""
+                let voice = info["voice"] as? String ?? ""
+                spawnWidget(family: family, index: idx, path: path, voice: voice)
             }
         }
         return true
@@ -786,14 +950,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         guard let agents = fetchAgents(), let info = agents[family] else { return }
-        let idx  = agents.keys.sorted().firstIndex(of: family) ?? 0
-        let path = info["path"] as? String ?? ""
-        spawnWidget(family: family, index: idx, path: path)
+        let idx   = agents.keys.sorted().firstIndex(of: family) ?? 0
+        let path  = info["path"]  as? String ?? ""
+        let voice = info["voice"] as? String ?? ""
+        spawnWidget(family: family, index: idx, path: path, voice: voice)
     }
 
-    private func spawnWidget(family: String, index: Int, path: String) {
+    private func spawnWidget(family: String, index: Int, path: String, voice: String = "") {
         guard widgets[family] == nil else { return }
-        let widget = WidgetWindow(family: family, index: index, path: path)
+        let widget = WidgetWindow(family: family, index: index, path: path, voice: voice)
         widget.onClose = { [weak self] in
             self?.closedByUser.insert(family)
             self?.widgets.removeValue(forKey: family)
