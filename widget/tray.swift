@@ -269,7 +269,7 @@ class VoiceInputManager {
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var lastText: String = ""
     private(set) var isRecording = false
 
@@ -278,6 +278,29 @@ class VoiceInputManager {
 
     init(locale: String = "es-MX") {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale))
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(engineConfigChanged),
+            name: .AVAudioEngineConfigurationChange,
+            object: engine
+        )
+    }
+
+    // Fired when another app interrupts the audio hardware (video, music, etc.)
+    @objc private func engineConfigChanged(_ notification: Notification) {
+        guard isRecording else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.teardownEngine()
+            self.engine = AVAudioEngine()
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(self.engineConfigChanged),
+                name: .AVAudioEngineConfigurationChange,
+                object: self.engine
+            )
+            self.startRecording()
+        }
     }
 
     func setLocale(_ identifier: String) {
@@ -327,14 +350,20 @@ class VoiceInputManager {
         }
     }
 
-    func stopRecording() {
-        guard isRecording else { return }
-        isRecording = false
-        let text = lastText
+    private func teardownEngine() {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
         task?.cancel()
+        request = nil
+        task = nil
+    }
+
+    func stopRecording() {
+        guard isRecording else { return }
+        isRecording = false
+        let text = lastText
+        teardownEngine()
         onStateChange?(false)
         if !text.isEmpty {
             DispatchQueue.main.async { self.onResult?(text) }
