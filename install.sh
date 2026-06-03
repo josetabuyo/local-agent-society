@@ -21,6 +21,9 @@ swiftc "$INSTALL_DIR/widget/tray.swift" \
     -target arm64-apple-macos12 \
     -o "$APP/Contents/MacOS/tray"
 codesign --force --deep --sign - "$APP"
+# Reset mic/speech permissions so macOS re-prompts after recompile
+tccutil reset Microphone com.localagentsociety.tray 2>/dev/null || true
+tccutil reset SpeechRecognition com.localagentsociety.tray 2>/dev/null || true
 cat > "$APP/Contents/Info.plist" <<INFOPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
