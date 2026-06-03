@@ -18,6 +18,7 @@ APP="$INSTALL_DIR/widget/Local Agent Society.app"
 mkdir -p "$APP/Contents/MacOS"
 swiftc "$INSTALL_DIR/widget/tray.swift" \
     -framework AppKit -framework Foundation -framework Speech -framework AVFoundation \
+    -target arm64-apple-macos12 \
     -o "$APP/Contents/MacOS/tray"
 codesign --force --deep --sign - "$APP"
 cat > "$APP/Contents/Info.plist" <<INFOPLIST
