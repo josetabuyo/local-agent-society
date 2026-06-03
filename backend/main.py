@@ -84,6 +84,15 @@ class PortRegistration(BaseModel):
     path:         str
 
 
+class PortClaimRequest(BaseModel):
+    port:        Optional[int] = None
+    app:         str
+    local_agent: str
+    path:        str
+    start:       int = 9000
+    end:         int = 9999
+
+
 class SpeakRequest(BaseModel):
     text:   str
     voice:  str
@@ -154,6 +163,16 @@ def unregister_agent(name: str):
     return {"ok": True}
 
 
+_ports_lock = threading.Lock()
+
+
+def _port_is_free(port: int, registered: set) -> bool:
+    if port in registered:
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("localhost", port)) != 0
+
+
 # ── ports ─────────────────────────────────────────────────────────────────────
 
 @app.get("/ports")
@@ -187,12 +206,39 @@ def get_free_port(start: int = 9000, end: int = 9999):
     ports = load_json(PORTS_FILE, {})
     registered = {int(k) for k in ports.keys()}
     for port in range(start, end):
-        if port in registered:
-            continue
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            if s.connect_ex(("localhost", port)) != 0:
-                return {"port": port}
+        if _port_is_free(port, registered):
+            return {"port": port}
     raise HTTPException(status_code=503, detail="No free ports available")
+
+
+@app.post("/ports/claim")
+def claim_port(req: PortClaimRequest):
+    with _ports_lock:
+        ports = load_json(PORTS_FILE, {})
+        registered = {int(k) for k in ports.keys()}
+
+        if req.port is not None:
+            if not _port_is_free(req.port, registered):
+                raise HTTPException(status_code=409, detail=f"Port {req.port} is already taken")
+            chosen = req.port
+        else:
+            chosen = None
+            for p in range(req.start, req.end):
+                if _port_is_free(p, registered):
+                    chosen = p
+                    break
+            if chosen is None:
+                raise HTTPException(status_code=503, detail="No free ports available in range")
+
+        ports[str(chosen)] = {
+            "port": chosen,
+            "app": req.app,
+            "local_agent": req.local_agent,
+            "path": req.path,
+            "registered_at": datetime.now().isoformat(),
+        }
+        save_json(PORTS_FILE, ports)
+        return {"port": chosen}
 
 
 # ── TTS queue ─────────────────────────────────────────────────────────────────
