@@ -108,8 +108,15 @@ enum Prefs {
     static func save(ontop v: Bool, for f: String) {
         UserDefaults.standard.set(v, forKey: "ontop.\(f)")
     }
+    static func expandOnSpaceChange(for f: String) -> Bool {
+        guard UserDefaults.standard.object(forKey: "expandOnSpace.\(f)") != nil else { return false }
+        return UserDefaults.standard.bool(forKey: "expandOnSpace.\(f)")
+    }
     static func save(voiceLocale locale: String, for f: String) {
         UserDefaults.standard.set(locale, forKey: "voiceLocale.\(f)")
+    }
+    static func save(expandOnSpaceChange v: Bool, for f: String) {
+        UserDefaults.standard.set(v, forKey: "expandOnSpace.\(f)")
     }
 }
 
@@ -121,6 +128,7 @@ class ConfigVC: NSViewController {
     var colorWell: NSColorWell!
     var opacitySlider: NSSlider!
     var ontopCheck: NSButton!
+    var expandCheck: NSButton!
 
     init(family: String, widget: WidgetWindow) {
         self.family = family
@@ -133,29 +141,35 @@ class ConfigVC: NSViewController {
         let W: CGFloat = 208, pad: CGFloat = 14
 
         let colorLbl = rowLabel("Color")
-        colorLbl.frame = NSRect(x: pad, y: 108, width: 60, height: 15)
+        colorLbl.frame = NSRect(x: pad, y: 132, width: 60, height: 15)
 
-        colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 104, width: 36, height: 24))
+        colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 128, width: 36, height: 24))
         colorWell.color = Prefs.color(for: family)
         colorWell.target = self
         colorWell.action = #selector(colorChanged(_:))
 
         let opacLbl = rowLabel("Opacity")
-        opacLbl.frame = NSRect(x: pad, y: 74, width: 60, height: 15)
+        opacLbl.frame = NSRect(x: pad, y: 98, width: 60, height: 15)
 
         opacitySlider = NSSlider(value: Prefs.opacity(for: family),
                                   minValue: 0.1, maxValue: 1.0,
                                   target: self, action: #selector(opacityChanged(_:)))
-        opacitySlider.frame = NSRect(x: pad, y: 52, width: W - pad * 2, height: 18)
+        opacitySlider.frame = NSRect(x: pad, y: 76, width: W - pad * 2, height: 18)
 
         ontopCheck = NSButton(checkboxWithTitle: "Always on top",
                                target: self, action: #selector(ontopChanged(_:)))
         ontopCheck.state = Prefs.ontop(for: family) ? .on : .off
-        ontopCheck.frame = NSRect(x: pad, y: 16, width: W - pad * 2, height: 20)
+        ontopCheck.frame = NSRect(x: pad, y: 40, width: W - pad * 2, height: 20)
         ontopCheck.font = NSFont.systemFont(ofSize: 11)
 
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: 144))
-        [colorLbl, colorWell, opacLbl, opacitySlider, ontopCheck].forEach { v.addSubview($0) }
+        expandCheck = NSButton(checkboxWithTitle: "Expand on space change",
+                                target: self, action: #selector(expandChanged(_:)))
+        expandCheck.state = Prefs.expandOnSpaceChange(for: family) ? .on : .off
+        expandCheck.frame = NSRect(x: pad, y: 16, width: W - pad * 2, height: 20)
+        expandCheck.font = NSFont.systemFont(ofSize: 11)
+
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: 168))
+        [colorLbl, colorWell, opacLbl, opacitySlider, ontopCheck, expandCheck].forEach { v.addSubview($0) }
         self.view = v
     }
 
@@ -177,6 +191,9 @@ class ConfigVC: NSViewController {
     @objc func ontopChanged(_ sender: NSButton) {
         Prefs.save(ontop: sender.state == .on, for: family)
         widget?.applyPrefs()
+    }
+    @objc func expandChanged(_ sender: NSButton) {
+        Prefs.save(expandOnSpaceChange: sender.state == .on, for: family)
     }
 }
 
@@ -486,6 +503,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var infoKeyLabels: [NSTextField] = []
     var infoValLabels: [NSTextField] = []
 
+    var isOccluded  = false
+    var shrinkTimer: Timer?
+    var savedFrame:  NSRect?
+
     static let infoH: CGFloat = 90
 
     init(family: String, index: Int, path: String, voice agentVoiceArg: String = "") {
@@ -579,6 +600,13 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         ) { [weak self] _ in
             self?.window.orderFrontRegardless()
         }
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeSpaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil
+        )
     }
 
     func applyPrefs() {
@@ -797,7 +825,96 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }.resume()
     }
 
-    func windowWillClose(_: Notification) { onClose?() }
+    // MARK: Space-change expand/shrink
+
+    @objc func activeSpaceChanged() {
+        guard Prefs.expandOnSpaceChange(for: family) else { return }
+        let onCurrentSpace = window.isOnActiveSpace
+        if onCurrentSpace && isOccluded {
+            isOccluded = false
+            // Stay expanded for 2s so user sees the big widget when switching back
+            shrinkTimer?.invalidate()
+            shrinkTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+                self?.setOccludedExpanded(false)
+            }
+        } else if !onCurrentSpace && !isOccluded {
+            isOccluded = true
+            setOccludedExpanded(true)
+        }
+    }
+
+    private func collapseInfoPanelIfNeeded() {
+        guard isInfoExpanded else { return }
+        let content = window.contentView!
+        let addH = WidgetWindow.infoH
+        infoPanelView?.removeFromSuperview()
+        infoPanelView = nil
+        infoKeyLabels = []
+        infoValLabels = []
+        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
+        let curFrame = window.frame
+        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
+                               width: curFrame.width, height: curFrame.height - addH), display: true)
+        infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: family) * 1.1 + 0.1, 1.0))
+        isInfoExpanded = false
+    }
+
+    func setOccludedExpanded(_ expanded: Bool) {
+        if expanded {
+            collapseInfoPanelIfNeeded()
+            savedFrame = window.frame
+
+            let screen = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            window.setFrame(screen, display: true, animate: false)
+            window.backgroundColor = Prefs.color(for: family).withAlphaComponent(Prefs.opacity(for: family))
+            window.level = .floating
+
+            dotsBtn.isHidden = true
+            micBtn.isHidden  = true
+            infoBtn.isHidden = true
+
+            let W = screen.width, H = screen.height
+            let labelH = H * 0.30
+            let labelW = W - 80
+            nameLbl.frame = NSRect(x: 40, y: H * 0.58, width: labelW, height: labelH)
+            let (fontSize, displayText) = fitFontSizeAndSplit(text: family, maxWidth: labelW, start: 300)
+            nameLbl.text     = displayText
+            nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
+            nameLbl.needsDisplay = true
+        } else {
+            dotsBtn.isHidden = false
+            micBtn.isHidden  = false
+            infoBtn.isHidden = false
+
+            let W: CGFloat = 300, H: CGFloat = 160
+            let target: NSRect
+            if let saved = savedFrame {
+                target    = saved
+                savedFrame = nil
+            } else {
+                let f = window.frame
+                target = NSRect(x: f.origin.x, y: f.origin.y + f.height - H, width: W, height: H)
+            }
+            window.setFrame(target, display: true, animate: false)
+            window.backgroundColor = Prefs.color(for: family).withAlphaComponent(Prefs.opacity(for: family))
+            window.level = Prefs.ontop(for: family) ? .floating : .normal
+
+            let labelWidth = W - 28
+            nameLbl.frame = NSRect(x: 18, y: H * 0.28, width: labelWidth, height: H * 0.60)
+            let (fontSize, displayText) = fitFontSizeAndSplit(text: family, maxWidth: labelWidth, start: 62)
+            nameLbl.text     = displayText
+            nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
+            nameLbl.needsDisplay = true
+
+            dotsBtn.frame = NSRect(x: W - 44, y: 10, width: 28, height: 28)
+            micBtn.frame  = NSRect(x: W - 92, y: 10, width: 40, height: 40)
+        }
+    }
+
+    func windowWillClose(_: Notification) {
+        shrinkTimer?.invalidate()
+        onClose?()
+    }
 }
 
 // MARK: - App icon
