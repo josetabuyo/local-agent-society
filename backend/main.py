@@ -330,11 +330,11 @@ def inject_message(name: str, body: InjectRequest):
 
     # Build context prefix so the agent always knows who's talking
     if body.source == "agent" and body.from_agent:
-        prefix = f"[Mensaje de {body.from_agent}]"
+        prefix = f"[Message from {body.from_agent}]"
     elif body.source == "voice":
-        prefix = "[Voz]"
+        prefix = "[Voice]"
     else:
-        prefix = "[Externo]"
+        prefix = "[External]"
 
     timestamp       = datetime.now().strftime("%H:%M")
     inbox_line      = f"\n[{timestamp} | {prefix}]: {message}\n"

@@ -127,10 +127,10 @@ def test_voice_source_adds_prefix():
         return
 
     after = inbox.read_text() if inbox.exists() else ""
-    if "[Voz]" in after and marker in after:
-        ok("voice source adds [Voz] prefix to inbox")
+    if "[Voice]" in after and marker in after:
+        ok("voice source adds [Voice] prefix to inbox")
     else:
-        fail("voice source adds [Voz] prefix to inbox", f"inbox content: {repr(after[-200:])}")
+        fail("voice source adds [Voice] prefix to inbox", f"inbox content: {repr(after[-200:])}")
 
     inbox.write_text(before)
 
