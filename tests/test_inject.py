@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for POST /agents/{family}/inject endpoint.
+Tests for POST /agents/{name}/inject endpoint.
 Usage: python3 tests/test_inject.py
 """
 import json
@@ -57,8 +57,8 @@ def first_agent() -> tuple[str, dict]:
     if not agents:
         print("FAIL  no agents registered — cannot run tests")
         sys.exit(1)
-    family, info = next(iter(agents.items()))
-    return family, info
+    name, info = next(iter(agents.items()))
+    return name, info
 
 
 # ── tests ─────────────────────────────────────────────────────────────────────
@@ -72,14 +72,14 @@ def test_unknown_family_returns_404():
 
 
 def test_inject_writes_to_inbox():
-    family, info = first_agent()
+    name, info = first_agent()
     path = Path(info.get("path", ""))
     inbox = path / "session" / "extern-inbox.md"
 
     before = inbox.read_text() if inbox.exists() else ""
     marker = "__test_inject_marker__"
 
-    status, body = post(f"/agents/{family}/inject", {"message": marker})
+    status, body = post(f"/agents/{name}/inject", {"message": marker})
     if status != 200:
         fail("inbox write", f"HTTP {status}")
         return
@@ -97,8 +97,8 @@ def test_inject_writes_to_inbox():
 
 
 def test_inject_response_shape():
-    family, _ = first_agent()
-    status, body = post(f"/agents/{family}/inject", {"message": "shape test"})
+    name, _ = first_agent()
+    status, body = post(f"/agents/{name}/inject", {"message": "shape test"})
     if status != 200:
         fail("response shape", f"HTTP {status}")
         return
@@ -109,40 +109,40 @@ def test_inject_response_shape():
             return
     ok("response contains ok, injected, inbox, tty")
 
-    family, info = first_agent()
+    name, info = first_agent()
     inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
     if inbox.exists():
         inbox.write_text(inbox.read_text().replace("\nshape test\n", ""))
 
 
 def test_voice_source_adds_prefix():
-    family, info = first_agent()
+    name, info = first_agent()
     inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
     before = inbox.read_text() if inbox.exists() else ""
 
     marker = "__voice_prefix_test__"
-    status, body = post(f"/agents/{family}/inject", {"message": marker, "source": "voice"})
+    status, body = post(f"/agents/{name}/inject", {"message": marker, "source": "voice"})
     if status != 200:
         fail("voice prefix", f"HTTP {status}")
         return
 
     after = inbox.read_text() if inbox.exists() else ""
-    if "[Voice]" in after and marker in after:
-        ok("voice source adds [Voice] prefix to inbox")
+    if "[Widget Voice]" in after and marker in after:
+        ok("voice source adds [Widget Voice] prefix to inbox")
     else:
-        fail("voice source adds [Voice] prefix to inbox", f"inbox content: {repr(after[-200:])}")
+        fail("voice source adds [Widget Voice] prefix to inbox", f"inbox content: {repr(after[-200:])}")
 
     inbox.write_text(before)
 
 
 def test_agent_source_adds_family_prefix():
-    family, info = first_agent()
+    name, info = first_agent()
     inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
     before = inbox.read_text() if inbox.exists() else ""
 
     marker = "__agent_prefix_test__"
     status, body = post(
-        f"/agents/{family}/inject",
+        f"/agents/{name}/inject",
         {"message": marker, "source": "agent", "from_family": "TestBot"},
     )
     if status != 200:
@@ -159,12 +159,12 @@ def test_agent_source_adds_family_prefix():
 
 
 def test_inbox_entry_has_timestamp():
-    family, info = first_agent()
+    name, info = first_agent()
     inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
     before = inbox.read_text() if inbox.exists() else ""
 
     marker = "__timestamp_test__"
-    post(f"/agents/{family}/inject", {"message": marker})
+    post(f"/agents/{name}/inject", {"message": marker})
 
     after = inbox.read_text() if inbox.exists() else ""
     import re
@@ -177,22 +177,22 @@ def test_inbox_entry_has_timestamp():
 
 
 def test_newlines_in_message_dont_crash():
-    family, _ = first_agent()
-    status, _ = post(f"/agents/{family}/inject", {"message": "line1\nline2\r\nline3"})
+    name, _ = first_agent()
+    status, _ = post(f"/agents/{name}/inject", {"message": "line1\nline2\r\nline3"})
     if status in (200, 422):
         ok("newlines in message don't cause 500")
     else:
         fail("newlines in message don't cause 500", f"HTTP {status}")
 
-    family, info = first_agent()
+    name, info = first_agent()
     inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
     if inbox.exists():
         inbox.write_text(inbox.read_text().replace("line1 line2  line3", ""))
 
 
 def test_empty_message_accepted():
-    family, _ = first_agent()
-    status, _ = post(f"/agents/{family}/inject", {"message": ""})
+    name, _ = first_agent()
+    status, _ = post(f"/agents/{name}/inject", {"message": ""})
     if status == 200:
         ok("empty message accepted without error")
     else:

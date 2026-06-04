@@ -7,7 +7,7 @@ allowed-tools: Bash(python3:*) Bash(say:*)
 # /local-agent-pronunciation — Set Agent Pronunciation
 
 The pronunciation field stores a phonetic hint used by TTS when speaking the agent's name.
-Example: family `Garantido` → pronunciation `Ga-ran-ti-do` (slowed spelling helps some voices).
+Example: agent `Garantido` → pronunciation `Ga-ran-ti-do` (slowed spelling helps some voices).
 
 ## Parameters
 - `$1` — Pronunciation text (required). Phonetic hint for the TTS engine.
@@ -16,7 +16,7 @@ Example: family `Garantido` → pronunciation `Ga-ran-ti-do` (slowed spelling he
 
 ### 1. Read .agent.json
 ```bash
-python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name') or d.get('agent-family'), d.get('voice','Samantha'), d.get('pronunciation',''))"
+python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name'), d.get('voice','Samantha'), d.get('pronunciation',''))"
 ```
 If file does not exist: tell user no agent is baptized here.
 

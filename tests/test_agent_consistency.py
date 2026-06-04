@@ -33,7 +33,7 @@ def check_skill_new_local_agent(install_dir: Path) -> list[str]:
     return errors
 
 
-def check_agent(family: str, info: dict) -> list[str]:
+def check_agent(name: str, info: dict) -> list[str]:
     path = Path(info.get("path", ""))
     errors = []
 
@@ -94,21 +94,21 @@ def main():
     if inject_errors:
         all_errors["[backend]"] = inject_errors
 
-    for family, info in agents.items():
-        errs = check_agent(family, info)
+    for name, info in agents.items():
+        errs = check_agent(name, info)
         if errs:
-            all_errors[family] = errs
+            all_errors[name] = errs
 
     if not all_errors:
         print(f"OK  {len(agents)} agents verified, all consistent")
-        for family in sorted(agents):
-            members = agents[family].get("members", [])
-            print(f"    {family}: {' · '.join(m.upper() for m in members)}")
+        for name in sorted(agents):
+            members = agents[name].get("members", [])
+            print(f"    {name}: {' · '.join(m.upper() for m in members)}")
         sys.exit(0)
     else:
         print("FAIL  inconsistencies found:\n")
-        for family, errs in all_errors.items():
-            print(f"  {family}:")
+        for name, errs in all_errors.items():
+            print(f"  {name}:")
             for e in errs:
                 print(f"    - {e}")
         sys.exit(1)

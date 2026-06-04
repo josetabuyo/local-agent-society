@@ -1,12 +1,12 @@
 ---
 name: new-local-agent
-description: Baptize a new agent family in the current directory. Creates .agent.json, registers with the backend, launches the sticky widget, and assigns a voice.
+description: Register a new agent in the current directory. Creates .agent.json, registers with the backend, launches the sticky widget, and assigns a voice.
 allowed-tools: Bash(curl:*) Bash(python3:*)
 ---
 
 # /new-local-agent — Baptize a Local Agent Family
 
-Creates a named agent family in the **current working directory**.
+Creates a named agent in the **current working directory**.
 
 ## Parameters
 - `$1` — Family name (required). e.g. `System`, `Garantido`, `Vacaciones`
@@ -54,7 +54,7 @@ curl -s -X POST http://localhost:8700/agents \
 ```
 
 ### 6. Launch widget
-Tell the running `Local Agent Society.app` to open a widget for this family via URL scheme:
+Tell the running `Local Agent Society.app` to open a widget for this agent via URL scheme:
 ```bash
 open "localagentsociety://FAMILY"
 ```
@@ -65,7 +65,7 @@ SLUG = FAMILY lowercased.
 
 ```bash
 mkdir -p CWD/session
-touch CWD/session/SLUG-inbox.md    # inter-family messages
+touch CWD/session/SLUG-inbox.md    # inter-agent messages
 touch CWD/session/extern-inbox.md  # external injection channel
 touch CWD/session/bitacora.md      # conversation log
 ```

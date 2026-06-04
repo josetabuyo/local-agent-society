@@ -108,9 +108,10 @@ class AttributionEntry(BaseModel):
 
 
 class InjectRequest(BaseModel):
-    message:    str
-    source:     str           = "voice"   # "voice" | "agent" | "external"
-    from_agent: Optional[str] = None
+    message:     str
+    source:      str           = "voice"   # "voice" | "agent" | "external"
+    from_agent:  Optional[str] = None
+    from_family: Optional[str] = None      # alias used by widget and tests
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -118,6 +119,7 @@ class InjectRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok", "time": datetime.now().isoformat()}
+
 
 
 @app.get("/voices/random")
@@ -267,14 +269,25 @@ def clear_queue():
 def _find_claude_tty(agent_path: str) -> str | None:
     """Find the TTY of a claude process whose cwd is exactly agent_path or a subdir."""
     try:
-        pids = subprocess.run(
-            ["pgrep", "-f", "claude"], capture_output=True, text=True, timeout=5
-        ).stdout.strip().split()
+        ps_out = subprocess.run(
+            ["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, timeout=5
+        ).stdout
+        pids = []
+        for line in ps_out.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                continue
+            pid, cmd = parts
+            if pid.isdigit() and "claude" in cmd and "Claude.app" not in cmd:
+                pids.append(pid)
         for pid in pids:
             if not pid.isdigit():
                 continue
             lsof_out = subprocess.run(
-                ["lsof", "-p", pid, "-a", "-d", "cwd"],
+                ["/usr/sbin/lsof", "-p", pid, "-a", "-d", "cwd"],
                 capture_output=True, text=True, timeout=5
             ).stdout
             # Parse cwd from lsof output — avoid substring false matches
@@ -296,12 +309,6 @@ def _find_claude_tty(agent_path: str) -> str | None:
 
 
 def _inject_via_iterm(tty: str, message: str) -> dict:
-    """Type text into the iTerm2 session and send Enter within the same tell block.
-
-    Enter is sent via write text (ASCII character 13) inside the tell s block so it
-    targets the specific TTY session rather than whatever iTerm2 window is frontmost.
-    This eliminates the race condition with System Events key code 36.
-    """
     safe = (message
             .replace("\\", "\\\\")
             .replace('"', '\\"')
@@ -339,7 +346,7 @@ return "not_found|sessions=" & sessionCount
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     try:
         result = subprocess.run(
-            ["osascript", "-e", script], capture_output=True, text=True, timeout=10
+            ["osascript", "-e", script], capture_output=True, text=True, timeout=4
         )
         success = result.returncode == 0 and "ok" in result.stdout
         return {
@@ -375,10 +382,13 @@ def inject_message(name: str, body: InjectRequest):
     message = body.message
 
     # Build context prefix so the agent always knows who's talking
-    if body.source == "agent" and body.from_agent:
-        prefix = f"[Message from {body.from_agent}]"
+    sender = body.from_agent or body.from_family
+    if body.source == "agent" and sender:
+        prefix = f"[Message from {sender}]"
     elif body.source == "voice":
-        prefix = "[Voice]"
+        prefix = "[Widget Voice]"
+    elif sender:
+        prefix = f"[External: {sender}]"
     else:
         prefix = "[External]"
 

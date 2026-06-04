@@ -1,7 +1,7 @@
 #!/bin/bash
 # Local Agent Society — installer
-# Usage: ./install.sh [FamilyName]
-# Default family name: System
+# Usage: ./install.sh [AgentName]
+# Default agent name: System
 set -e
 
 INSTALL_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -9,7 +9,7 @@ FAMILY="${1:-System}"
 
 echo "Local Agent Society — installing"
 echo "  Directory : $INSTALL_DIR"
-echo "  Family    : $FAMILY"
+echo "  Agent     : $FAMILY"
 echo ""
 
 # ── 1. Compile tray app bundle ────────────────────────────────────────────────
@@ -21,9 +21,12 @@ swiftc "$INSTALL_DIR/widget/tray.swift" \
     -target arm64-apple-macos12 \
     -o "$APP/Contents/MacOS/tray"
 codesign --force --deep --sign - "$APP"
-# Reset mic/speech permissions so macOS re-prompts after recompile
-tccutil reset Microphone com.localagentsociety.tray 2>/dev/null || true
-tccutil reset SpeechRecognition com.localagentsociety.tray 2>/dev/null || true
+# Only reset TCC permissions on first install (no existing binary).
+# Re-running install.sh to update code must NOT break granted permissions.
+if [ ! -f "$APP/Contents/Info.plist" ]; then
+    tccutil reset Microphone com.localagentsociety.tray 2>/dev/null || true
+    tccutil reset SpeechRecognition com.localagentsociety.tray 2>/dev/null || true
+fi
 cat > "$APP/Contents/Info.plist" <<INFOPLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,7 +109,7 @@ PYEOF
 
 # ── Initialize session channels ───────────────────────────────────────────────
 SLUG=$(echo "$FAMILY" | tr '[:upper:]' '[:lower:]')
-touch "$INSTALL_DIR/session/${SLUG}-inbox.md"   # inter-family messages
+touch "$INSTALL_DIR/session/${SLUG}-inbox.md"   # inter-agent messages
 touch "$INSTALL_DIR/session/extern-inbox.md"    # external injection channel
 touch "$INSTALL_DIR/session/bitacora.md"        # conversation log
 

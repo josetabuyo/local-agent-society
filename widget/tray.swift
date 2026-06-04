@@ -78,7 +78,7 @@ func fitFontSizeAndSplit(text: String, maxWidth: CGFloat, start: CGFloat = 62, m
     return (min, text)
 }
 
-// MARK: - Persistent prefs per widget family
+// MARK: - Persistent prefs per agent
 
 enum Prefs {
     static func color(for f: String) -> NSColor {
@@ -123,15 +123,15 @@ enum Prefs {
 // MARK: - Config popover
 
 class ConfigVC: NSViewController {
-    let family: String
+    let agentName: String
     weak var widget: WidgetWindow?
     var colorWell: NSColorWell!
     var opacitySlider: NSSlider!
     var ontopCheck: NSButton!
     var expandCheck: NSButton!
 
-    init(family: String, widget: WidgetWindow) {
-        self.family = family
+    init(agentName: String, widget: WidgetWindow) {
+        self.agentName = agentName
         self.widget = widget
         super.init(nibName: nil, bundle: nil)
     }
@@ -144,27 +144,27 @@ class ConfigVC: NSViewController {
         colorLbl.frame = NSRect(x: pad, y: 132, width: 60, height: 15)
 
         colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 128, width: 36, height: 24))
-        colorWell.color = Prefs.color(for: family)
+        colorWell.color = Prefs.color(for: agentName)
         colorWell.target = self
         colorWell.action = #selector(colorChanged(_:))
 
         let opacLbl = rowLabel("Opacity")
         opacLbl.frame = NSRect(x: pad, y: 98, width: 60, height: 15)
 
-        opacitySlider = NSSlider(value: Prefs.opacity(for: family),
+        opacitySlider = NSSlider(value: Prefs.opacity(for: agentName),
                                   minValue: 0.1, maxValue: 1.0,
                                   target: self, action: #selector(opacityChanged(_:)))
         opacitySlider.frame = NSRect(x: pad, y: 76, width: W - pad * 2, height: 18)
 
         ontopCheck = NSButton(checkboxWithTitle: "Always on top",
                                target: self, action: #selector(ontopChanged(_:)))
-        ontopCheck.state = Prefs.ontop(for: family) ? .on : .off
+        ontopCheck.state = Prefs.ontop(for: agentName) ? .on : .off
         ontopCheck.frame = NSRect(x: pad, y: 40, width: W - pad * 2, height: 20)
         ontopCheck.font = NSFont.systemFont(ofSize: 11)
 
         expandCheck = NSButton(checkboxWithTitle: "Expand on space change",
                                 target: self, action: #selector(expandChanged(_:)))
-        expandCheck.state = Prefs.expandOnSpaceChange(for: family) ? .on : .off
+        expandCheck.state = Prefs.expandOnSpaceChange(for: agentName) ? .on : .off
         expandCheck.frame = NSRect(x: pad, y: 16, width: W - pad * 2, height: 20)
         expandCheck.font = NSFont.systemFont(ofSize: 11)
 
@@ -181,19 +181,19 @@ class ConfigVC: NSViewController {
     }
 
     @objc func colorChanged(_ sender: NSColorWell) {
-        Prefs.save(color: sender.color, for: family)
+        Prefs.save(color: sender.color, for: agentName)
         widget?.applyPrefs()
     }
     @objc func opacityChanged(_ sender: NSSlider) {
-        Prefs.save(opacity: sender.doubleValue, for: family)
+        Prefs.save(opacity: sender.doubleValue, for: agentName)
         widget?.applyPrefs()
     }
     @objc func ontopChanged(_ sender: NSButton) {
-        Prefs.save(ontop: sender.state == .on, for: family)
+        Prefs.save(ontop: sender.state == .on, for: agentName)
         widget?.applyPrefs()
     }
     @objc func expandChanged(_ sender: NSButton) {
-        Prefs.save(expandOnSpaceChange: sender.state == .on, for: family)
+        Prefs.save(expandOnSpaceChange: sender.state == .on, for: agentName)
     }
 }
 
@@ -219,12 +219,12 @@ func inferLocaleFromVoice(_ voice: String) -> String {
 }
 
 class LangPickerVC: NSViewController {
-    let family: String
+    let agentName: String
     weak var widget: WidgetWindow?
     weak var popover: NSPopover?
 
-    init(family: String, widget: WidgetWindow, popover: NSPopover) {
-        self.family  = family
+    init(agentName: String, widget: WidgetWindow, popover: NSPopover) {
+        self.agentName  = agentName
         self.widget  = widget
         self.popover = popover
         super.init(nibName: nil, bundle: nil)
@@ -236,7 +236,7 @@ class LangPickerVC: NSViewController {
         let H = CGFloat(supportedLocales.count) * rowH + pad * 2
         let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
 
-        let current = Prefs.voiceLocale(for: family)
+        let current = Prefs.voiceLocale(for: agentName)
         for (i, lang) in supportedLocales.enumerated() {
             let y = H - pad - CGFloat(i + 1) * rowH
             let btn = NSButton(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: rowH - 2))
@@ -257,7 +257,7 @@ class LangPickerVC: NSViewController {
 
     @objc func selectLang(_ sender: NSButton) {
         let lang = supportedLocales[sender.tag]
-        Prefs.save(voiceLocale: lang.id, for: family)
+        Prefs.save(voiceLocale: lang.id, for: agentName)
         widget?.voice.setLocale(lang.id)
         popover?.close()
     }
@@ -303,9 +303,26 @@ class VoiceInputManager {
 
     var onResult: ((String) -> Void)?
     var onStateChange: ((Bool) -> Void)?
+    var onPermissionDenied: (() -> Void)?
 
     init(locale: String = "es-MX") {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale))
+        registerEngineObserver()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    private func registerEngineObserver() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(engineConfigChanged),
@@ -314,19 +331,30 @@ class VoiceInputManager {
         )
     }
 
+    @objc private func systemWillSleep(_ notification: Notification) {
+        if isRecording {
+            DispatchQueue.main.async { [weak self] in self?.stopRecording() }
+        }
+    }
+
+    @objc private func systemDidWake(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: self.engine)
+            self.engine = AVAudioEngine()
+            self.registerEngineObserver()
+        }
+    }
+
     // Fired when another app interrupts the audio hardware (video, music, etc.)
     @objc private func engineConfigChanged(_ notification: Notification) {
         guard isRecording else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.teardownEngine()
+            NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: self.engine)
             self.engine = AVAudioEngine()
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(self.engineConfigChanged),
-                name: .AVAudioEngineConfigurationChange,
-                object: self.engine
-            )
+            self.registerEngineObserver()
             self.startRecording()
         }
     }
@@ -342,7 +370,11 @@ class VoiceInputManager {
 
     private func requestPermissionsAndStart() {
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
-            guard let self = self, status == .authorized else { return }
+            guard let self = self else { return }
+            guard status == .authorized else {
+                DispatchQueue.main.async { self.onPermissionDenied?() }
+                return
+            }
             DispatchQueue.main.async { self.startRecording() }
         }
     }
@@ -484,7 +516,7 @@ func drawDotsImage(fill: NSColor, stroke: NSColor) -> NSImage {
 
 
 class WidgetWindow: NSObject, NSWindowDelegate {
-    let family: String
+    let agentName: String
     let agentPath: String
     let agentVoice: String
     let window: NSWindow
@@ -509,7 +541,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
     static let infoH: CGFloat = 90
 
-    init(family: String, index: Int, path: String, voice agentVoiceArg: String = "") {
+    init(agentName: String, index: Int, path: String, voice agentVoiceArg: String = "") {
         let W: CGFloat = 300, H: CGFloat = 160
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let x = screen.minX + 60 + CGFloat(index) * 30
@@ -521,12 +553,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        self.family     = family
+        self.agentName     = agentName
         self.agentPath  = path
         self.agentVoice = agentVoiceArg
         super.init()
 
-        window.title = family
+        window.title = agentName
         window.collectionBehavior    = [.managed, .participatesInCycle]
         window.isOpaque              = false
         window.titlebarAppearsTransparent = true
@@ -536,9 +568,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
         let content = window.contentView!
 
-        // Family name label
+        // Agent name label
         let labelWidth = W - 28
-        let (fontSize, displayText) = fitFontSizeAndSplit(text: family, maxWidth: labelWidth)
+        let (fontSize, displayText) = fitFontSizeAndSplit(text: agentName, maxWidth: labelWidth)
         nameLbl = OutlinedLabel(frame: NSRect(x: 18, y: H * 0.28, width: labelWidth, height: H * 0.60))
         nameLbl.text       = displayText
         nameLbl.textFont   = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
@@ -579,15 +611,22 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         content.addSubview(infoBtn)
 
         // Voice manager — seed locale from TTS voice on first run if user never set it
-        if UserDefaults.standard.string(forKey: "voiceLocale.\(family)") == nil && !agentVoice.isEmpty {
-            Prefs.save(voiceLocale: inferLocaleFromVoice(agentVoice), for: family)
+        if UserDefaults.standard.string(forKey: "voiceLocale.\(agentName)") == nil && !agentVoice.isEmpty {
+            Prefs.save(voiceLocale: inferLocaleFromVoice(agentVoice), for: agentName)
         }
-        voice = VoiceInputManager(locale: Prefs.voiceLocale(for: family))
+        voice = VoiceInputManager(locale: Prefs.voiceLocale(for: agentName))
         voice.onStateChange = { [weak self] active in
             self?.updateMicIcon(color: active ? .systemRed : (self?.idleFill ?? .black))
         }
         voice.onResult = { [weak self] text in
             self?.injectToSession(text)
+        }
+        voice.onPermissionDenied = { [weak self] in
+            guard let self = self else { return }
+            self.updateMicIcon(color: .systemOrange)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.updateMicIcon(color: self?.idleFill ?? .black)
+            }
         }
 
         applyPrefs()
@@ -595,7 +634,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("com.localagentsociety.focus.\(family)"),
+            forName: Notification.Name("com.localagentsociety.focus.\(agentName)"),
             object: nil, queue: .main
         ) { [weak self] _ in
             self?.window.orderFrontRegardless()
@@ -610,10 +649,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     func applyPrefs() {
-        let opacity = Prefs.opacity(for: family)
-        let bgColor = Prefs.color(for: family)
+        let opacity = Prefs.opacity(for: agentName)
+        let bgColor = Prefs.color(for: agentName)
         window.backgroundColor = bgColor.withAlphaComponent(opacity)
-        window.level = Prefs.ontop(for: family) ? .floating : .normal
+        window.level = Prefs.ontop(for: agentName) ? .floating : .normal
 
         // Shared dark fill: 85% black + 15% background tint, darker than before
         let darkFill = (NSColor.black.blended(withFraction: 0.15, of: bgColor) ?? .black)
@@ -647,7 +686,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     @objc func showConfig(_ sender: NSButton) {
         if let p = configPopover, p.isShown { p.close(); return }
         let p = NSPopover()
-        p.contentViewController = ConfigVC(family: family, widget: self)
+        p.contentViewController = ConfigVC(agentName: agentName, widget: self)
         p.behavior = .transient
         p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         configPopover = p
@@ -672,7 +711,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                                      width: curFrame.width, height: curFrame.height + addH)
             window.setFrame(newWinFrame, display: false)
             for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
-            infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: family) * 1.1 + 0.25, 1.0))
+            infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: agentName) * 1.1 + 0.25, 1.0))
             fetchAgentPorts { [weak self] ports in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
@@ -691,12 +730,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY + addH,
                                      width: curFrame.width, height: curFrame.height - addH)
             window.setFrame(newWinFrame, display: true)
-            infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: family) * 1.1 + 0.1, 1.0))
+            infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: agentName) * 1.1 + 0.1, 1.0))
         }
     }
 
     private func infoPanelColors() -> (bg: NSColor, text: NSColor) {
-        let bgColor = Prefs.color(for: family)
+        let bgColor = Prefs.color(for: agentName)
         let panelBg  = bgColor.blended(withFraction: 0.22, of: NSColor.black) ?? bgColor
         let textColor = panelBg.blended(withFraction: 0.32, of: NSColor.white) ?? NSColor.white
         return (panelBg, textColor)
@@ -718,7 +757,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
         let rows: [(key: String, value: String)] = [
             ("Voice",  agentVoice.isEmpty ? "—" : agentVoice),
-            ("Speech", localeName(for: Prefs.voiceLocale(for: family))),
+            ("Speech", localeName(for: Prefs.voiceLocale(for: agentName))),
             ("Ports",  ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
         ]
 
@@ -765,9 +804,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]]
             else { completion([]); return }
             let ports = json.compactMap { (_, val) -> Int? in
-                // Old registrations use "agent_family"; new /ports/claim uses "local_agent"
-                let fam = (val["agent_family"] as? String) ?? (val["local_agent"] as? String)
-                guard let fam = fam, fam == self.family,
+                guard let n = val["local_agent"] as? String, n == self.agentName,
                       let p = val["port"] as? Int else { return nil }
                 return p
             }.sorted()
@@ -778,7 +815,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     func showLangPicker() {
         if let p = langPopover, p.isShown { p.close(); return }
         let p = NSPopover()
-        p.contentViewController = LangPickerVC(family: family, widget: self, popover: p)
+        p.contentViewController = LangPickerVC(agentName: agentName, widget: self, popover: p)
         p.behavior = .transient
         p.show(relativeTo: micBtn.bounds, of: micBtn, preferredEdge: .maxY)
         langPopover = p
@@ -788,8 +825,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     private func injectToSession(_ text: String) {
-        NSLog("[inject] → name=%@ len=%d text=%@", family, text.count, text)
-        guard let url = URL(string: "http://localhost:8700/agents/\(family)/inject") else { return }
+        NSLog("[inject] → name=%@ len=%d text=%@", agentName, text.count, text)
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/inject") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -806,7 +843,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 guard status == 200, let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 else {
-                    NSLog("[inject] ✗ name=%@ HTTP status=%d error=%@", self.family, status, error?.localizedDescription ?? "nil")
+                    NSLog("[inject] ✗ name=%@ HTTP status=%d error=%@", self.agentName, status, error?.localizedDescription ?? "nil")
                     self.updateMicIcon(color: .systemOrange)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                         self?.updateMicIcon(color: self?.idleFill ?? .black)
@@ -815,7 +852,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 }
                 let injected = json["injected"] as? Bool ?? false
                 let tty = json["tty"] as? String ?? "?"
-                NSLog("[inject] ✓ name=%@ injected=%@ tty=%@", self.family, injected ? "true" : "false", tty)
+                NSLog("[inject] ✓ name=%@ injected=%@ tty=%@", self.agentName, injected ? "true" : "false", tty)
                 // green = live injection into terminal; yellow = inbox only (agent not at prompt)
                 self.updateMicIcon(color: injected ? .systemGreen : .systemYellow)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
@@ -828,15 +865,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     // MARK: Space-change expand/shrink
 
     @objc func activeSpaceChanged() {
-        guard Prefs.expandOnSpaceChange(for: family) else { return }
+        guard Prefs.expandOnSpaceChange(for: agentName) else { return }
         let onCurrentSpace = window.isOnActiveSpace
         if onCurrentSpace && isOccluded {
             isOccluded = false
-            // Stay expanded for 2s so user sees the big widget when switching back
             shrinkTimer?.invalidate()
-            shrinkTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
-                self?.setOccludedExpanded(false)
-            }
+            setOccludedExpanded(false)
         } else if !onCurrentSpace && !isOccluded {
             isOccluded = true
             setOccludedExpanded(true)
@@ -855,7 +889,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         let curFrame = window.frame
         window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
                                width: curFrame.width, height: curFrame.height - addH), display: true)
-        infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: family) * 1.1 + 0.1, 1.0))
+        infoBtn?.contentTintColor = NSColor.white.withAlphaComponent(min(Prefs.opacity(for: agentName) * 1.1 + 0.1, 1.0))
         isInfoExpanded = false
     }
 
@@ -866,7 +900,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
             let screen = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
             window.setFrame(screen, display: true, animate: false)
-            window.backgroundColor = Prefs.color(for: family).withAlphaComponent(Prefs.opacity(for: family))
+            window.backgroundColor = Prefs.color(for: agentName).withAlphaComponent(Prefs.opacity(for: agentName))
             window.level = .floating
 
             dotsBtn.isHidden = true
@@ -877,7 +911,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             let labelH = H * 0.30
             let labelW = W - 80
             nameLbl.frame = NSRect(x: 40, y: H * 0.58, width: labelW, height: labelH)
-            let (fontSize, displayText) = fitFontSizeAndSplit(text: family, maxWidth: labelW, start: 300)
+            let (fontSize, displayText) = fitFontSizeAndSplit(text: agentName, maxWidth: labelW, start: 300)
             nameLbl.text     = displayText
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
@@ -896,12 +930,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 target = NSRect(x: f.origin.x, y: f.origin.y + f.height - H, width: W, height: H)
             }
             window.setFrame(target, display: true, animate: false)
-            window.backgroundColor = Prefs.color(for: family).withAlphaComponent(Prefs.opacity(for: family))
-            window.level = Prefs.ontop(for: family) ? .floating : .normal
+            window.backgroundColor = Prefs.color(for: agentName).withAlphaComponent(Prefs.opacity(for: agentName))
+            window.level = Prefs.ontop(for: agentName) ? .floating : .normal
 
             let labelWidth = W - 28
             nameLbl.frame = NSRect(x: 18, y: H * 0.28, width: labelWidth, height: H * 0.60)
-            let (fontSize, displayText) = fitFontSizeAndSplit(text: family, maxWidth: labelWidth, start: 62)
+            let (fontSize, displayText) = fitFontSizeAndSplit(text: agentName, maxWidth: labelWidth, start: 62)
             nameLbl.text     = displayText
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
@@ -1011,19 +1045,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.applicationIconImage = makeAppIcon()
 
         guard let agents = fetchAgents() else { return }
-        for (idx, family) in agents.keys.sorted().enumerated() {
-            guard let info = agents[family] else { continue }
+        for (idx, name) in agents.keys.sorted().enumerated() {
+            guard let info = agents[name] else { continue }
             let path  = info["path"]  as? String ?? ""
             let voice = info["voice"] as? String ?? ""
-            spawnWidget(family: family, index: idx, path: path, voice: voice)
+            spawnWidget(agentName: name, index: idx, path: path, voice: voice)
         }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard url.scheme == "localagentsociety",
-                  let family = url.host, !family.isEmpty else { continue }
-            openWidget(for: family)
+                  let name = url.host, !name.isEmpty else { continue }
+            openWidget(for: name)
         }
     }
 
@@ -1031,11 +1065,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !hasVisibleWindows {
             closedByUser.removeAll()
             guard let agents = fetchAgents() else { return true }
-            for (idx, family) in agents.keys.sorted().enumerated() {
-                guard let info = agents[family] else { continue }
+            for (idx, name) in agents.keys.sorted().enumerated() {
+                guard let info = agents[name] else { continue }
                 let path  = info["path"]  as? String ?? ""
                 let voice = info["voice"] as? String ?? ""
-                spawnWidget(family: family, index: idx, path: path, voice: voice)
+                spawnWidget(agentName: name, index: idx, path: path, voice: voice)
             }
         }
         return true
@@ -1044,43 +1078,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDockMenu(_: NSApplication) -> NSMenu? {
         guard let agents = fetchAgents(), !agents.isEmpty else { return nil }
         let menu = NSMenu()
-        for family in agents.keys.sorted() {
-            let item = NSMenuItem(title: family, action: #selector(focusAgent(_:)), keyEquivalent: "")
+        for name in agents.keys.sorted() {
+            let item = NSMenuItem(title: name, action: #selector(focusAgent(_:)), keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
             item.target = self
-            item.representedObject = family
+            item.representedObject = name
             menu.addItem(item)
         }
         return menu
     }
 
     @objc func focusAgent(_ sender: NSMenuItem) {
-        guard let family = sender.representedObject as? String else { return }
-        openWidget(for: family)
+        guard let name = sender.representedObject as? String else { return }
+        openWidget(for: name)
     }
 
-    func openWidget(for family: String) {
-        closedByUser.remove(family)
-        if let w = widgets[family] {
+    func openWidget(for name: String) {
+        closedByUser.remove(name)
+        if let w = widgets[name] {
             w.window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        guard let agents = fetchAgents(), let info = agents[family] else { return }
-        let idx   = agents.keys.sorted().firstIndex(of: family) ?? 0
+        guard let agents = fetchAgents(), let info = agents[name] else { return }
+        let idx   = agents.keys.sorted().firstIndex(of: name) ?? 0
         let path  = info["path"]  as? String ?? ""
         let voice = info["voice"] as? String ?? ""
-        spawnWidget(family: family, index: idx, path: path, voice: voice)
+        spawnWidget(agentName: name, index: idx, path: path, voice: voice)
     }
 
-    private func spawnWidget(family: String, index: Int, path: String, voice: String = "") {
-        guard widgets[family] == nil else { return }
-        let widget = WidgetWindow(family: family, index: index, path: path, voice: voice)
+    private func spawnWidget(agentName: String, index: Int, path: String, voice: String = "") {
+        guard widgets[agentName] == nil else { return }
+        let widget = WidgetWindow(agentName: agentName, index: index, path: path, voice: voice)
         widget.onClose = { [weak self] in
-            self?.closedByUser.insert(family)
-            self?.widgets.removeValue(forKey: family)
+            self?.closedByUser.insert(agentName)
+            self?.widgets.removeValue(forKey: agentName)
         }
-        widgets[family] = widget
+        widgets[agentName] = widget
     }
 
     func fetchAgents() -> [String: [String: Any]]? {
