@@ -1,7 +1,7 @@
 ---
 name: local-agent-widget
 description: Open or focus the widget for the local agent in the current directory.
-allowed-tools: Bash(las:*)
+allowed-tools: Bash(python3:*) Bash(open:*)
 ---
 
 # /local-agent-widget — Reopen the widget on the current Space
@@ -11,14 +11,15 @@ Reads the agent name from `.agent.json` in the current directory automatically.
 
 ## Steps
 
-### 1. Reopen the widget
+### 1. Read agent name from .agent.json
 ```bash
-las widget
+python3 -c "import json; print(json.load(open('.agent.json'))['name'])"
 ```
-
-`las widget` reads `.agent.json` in the CWD and reopens the widget via the `localagentsociety://` URL scheme.
-Pass a name explicitly to target a different agent: `las widget HomeControl`.
-
 If `.agent.json` doesn't exist, tell the user to run `/new-local-agent` first.
 
-Report: "Widget reopened on this Space."
+### 2. Reopen the widget
+```bash
+open "localagentsociety://NAME?action=reopen"
+```
+
+Report: "Widget reopened on this Space for NAME."

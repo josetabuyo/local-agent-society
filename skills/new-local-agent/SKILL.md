@@ -1,7 +1,7 @@
 ---
 name: new-local-agent
 description: Register a new agent in the current directory. Creates .agent.json, registers with the backend, launches the sticky widget, and assigns a voice.
-allowed-tools: Bash(curl:*) Bash(python3:*) Bash(las:*)
+allowed-tools: Bash(curl:*) Bash(python3:*) Bash(open:*)
 ---
 
 # /new-local-agent — Baptize a Local Agent Family
@@ -18,11 +18,11 @@ Creates a named agent in the **current working directory**.
 
 ### 2. Ensure system is running
 ```bash
-las status
+curl -s http://localhost:8700/health
 ```
-If this fails (backend not running), start it:
+If this fails, start it:
 ```bash
-las start && sleep 2
+bash INSTALL_DIR/start.sh && sleep 2
 ```
 
 ### 3. Get unique voice
@@ -55,7 +55,7 @@ curl -s -X POST http://localhost:8700/agents \
 
 ### 6. Launch widget
 ```bash
-las widget FAMILY
+open "localagentsociety://FAMILY"
 ```
 
 ### 7. Create session channels
@@ -74,7 +74,9 @@ If this fails, report the errors to the user before continuing.
 
 ### 9. Announce
 ```bash
-las speak "Here! FAMILY" --name FAMILY
+curl -s -X POST http://localhost:8700/queue/speak \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Here! FAMILY","voice":"VOICE","name":"FAMILY"}'
 ```
 
 ### 10. Report
