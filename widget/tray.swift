@@ -539,7 +539,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var shrinkTimer: Timer?
     var savedFrame:  NSRect?
 
-    static let infoH: CGFloat = 90
+    static let infoH: CGFloat = 130
 
     init(agentName: String, index: Int, path: String, voice agentVoiceArg: String = "") {
         let W: CGFloat = 300, H: CGFloat = 160
@@ -741,6 +741,25 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         return (panelBg, textColor)
     }
 
+    private func currentGitBranch(for path: String) -> String {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.arguments = ["-C", path, "branch", "--show-current"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError  = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data   = pipe.fileHandleForReading.readDataToEndOfFile()
+            let branch = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return branch.isEmpty ? "—" : branch
+        } catch {
+            return "—"
+        }
+    }
+
     private func makeInfoPanel(ports: [Int]) -> NSView {
         let W: CGFloat = 300
         let H = WidgetWindow.infoH
@@ -755,10 +774,15 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         sep.layer?.backgroundColor = textColor.withAlphaComponent(0.20).cgColor
         panel.addSubview(sep)
 
+        let folderName = agentPath.isEmpty ? "—" : URL(fileURLWithPath: agentPath).lastPathComponent
+        let branch     = agentPath.isEmpty ? "—" : currentGitBranch(for: agentPath)
+
         let rows: [(key: String, value: String)] = [
             ("Voice",  agentVoice.isEmpty ? "—" : agentVoice),
             ("Speech", localeName(for: Prefs.voiceLocale(for: agentName))),
             ("Ports",  ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
+            ("Folder", folderName),
+            ("Branch", branch),
         ]
 
         infoKeyLabels = []
