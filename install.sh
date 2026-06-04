@@ -164,6 +164,15 @@ if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
 JSON
 fi
 
+# ── Install `las` CLI ─────────────────────────────────────────────────────────
+echo "[ +1 ] Installing las CLI..."
+if command -v pipx &>/dev/null; then
+    pipx install -e "$INSTALL_DIR" --force -q && echo "         las → installed via pipx"
+else
+    pip3 install -e "$INSTALL_DIR" -q && echo "         las → installed via pip"
+fi
+
 echo ""
 echo "Done! Start with:"
-echo "  bash $INSTALL_DIR/start.sh"
+echo "  las start"
+echo "  las status"

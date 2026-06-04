@@ -1,7 +1,7 @@
 ---
 name: new-local-agent
 description: Register a new agent in the current directory. Creates .agent.json, registers with the backend, launches the sticky widget, and assigns a voice.
-allowed-tools: Bash(curl:*) Bash(python3:*)
+allowed-tools: Bash(curl:*) Bash(python3:*) Bash(las:*)
 ---
 
 # /new-local-agent — Baptize a Local Agent Family
@@ -18,11 +18,11 @@ Creates a named agent in the **current working directory**.
 
 ### 2. Ensure system is running
 ```bash
-curl -s http://localhost:8700/health
+las status
 ```
-If this fails, start everything silently:
+If this fails (backend not running), start it:
 ```bash
-bash INSTALL_DIR/start.sh && sleep 2
+las start && sleep 2
 ```
 
 ### 3. Get unique voice
@@ -54,34 +54,28 @@ curl -s -X POST http://localhost:8700/agents \
 ```
 
 ### 6. Launch widget
-Tell the running `Local Agent Society.app` to open a widget for this agent via URL scheme:
 ```bash
-open "localagentsociety://FAMILY"
+las widget FAMILY
 ```
-If `start.sh` was called in step 2, the tray app is already running. The URL scheme triggers `openWidget(for:)` which spawns a full `WidgetWindow` with the ··· config button (color, opacity, always-on-top).
 
 ### 7. Create session channels
 SLUG = FAMILY lowercased.
 
 ```bash
 mkdir -p CWD/session
-touch CWD/session/SLUG-inbox.md    # inter-agent messages
-touch CWD/session/extern-inbox.md  # external injection channel
-touch CWD/session/bitacora.md      # conversation log
+touch CWD/session/bitacora.md
 ```
 
-### 9. Verify consistency
+### 8. Verify consistency
 ```bash
 python3 INSTALL_DIR/tests/test_agent_consistency.py
 ```
 If this fails, report the errors to the user before continuing.
 
-### 10. Announce
+### 9. Announce
 ```bash
-curl -s -X POST http://localhost:8700/queue/speak \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Here! FAMILY","voice":"VOICE","name":"FAMILY"}'
+las speak "Here! FAMILY" --name FAMILY
 ```
 
-### 11. Report
+### 10. Report
 Confirm: name, voice, .agent.json created, widget launched.

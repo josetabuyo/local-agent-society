@@ -21,5 +21,10 @@ widget/Local Agent Society.app/
 # Agent instance config
 .agent.json
 
+# Python build artifacts
+__pycache__/
+*.pyc
+*.egg-info/
+
 # macOS
 .DS_Store
