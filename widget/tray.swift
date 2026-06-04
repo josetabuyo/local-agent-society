@@ -1081,7 +1081,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls {
             guard url.scheme == "localagentsociety",
                   let name = url.host, !name.isEmpty else { continue }
-            openWidget(for: name)
+            let action = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "action" })?.value
+            if action == "reopen" {
+                reopenWidget(for: name)
+            } else {
+                openWidget(for: name)
+            }
         }
     }
 
@@ -1129,6 +1135,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let path  = info["path"]  as? String ?? ""
         let voice = info["voice"] as? String ?? ""
         spawnWidget(agentName: name, index: idx, path: path, voice: voice)
+    }
+
+    func reopenWidget(for name: String) {
+        if let w = widgets[name] {
+            w.window.close()
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.closedByUser.remove(name)
+            guard let agents = self.fetchAgents(), let info = agents[name] else { return }
+            let idx   = agents.keys.sorted().firstIndex(of: name) ?? 0
+            let path  = info["path"]  as? String ?? ""
+            let voice = info["voice"] as? String ?? ""
+            self.spawnWidget(agentName: name, index: idx, path: path, voice: voice)
+        }
     }
 
     private func spawnWidget(agentName: String, index: Int, path: String, voice: String = "") {
