@@ -1,7 +1,7 @@
 ---
 name: local-agent-voice
 description: Change the TTS voice of the local agent in the current directory.
-allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
+allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*) Bash(las:*)
 ---
 
 # /local-agent-voice — Change Agent Voice
@@ -38,10 +38,12 @@ print('Updated')
 ```
 
 ### 5. Update backend registry
+Re-register with same data but new voice via `POST /agents`:
 ```bash
-curl -s http://localhost:8700/agents
+curl -s -X POST http://localhost:8700/agents \
+  -H "Content-Type: application/json" \
+  -d '{"name":"FAMILY","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/FAMILY"}'
 ```
-Re-register with same data but new voice via `POST /agents`.
 
 ### 6. Confirm to user
 Show: agent name, old voice → new voice.
