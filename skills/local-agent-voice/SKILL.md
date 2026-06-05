@@ -1,7 +1,7 @@
 ---
 name: local-agent-voice
 description: Change the TTS voice of the local agent in the current directory.
-allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*) Bash(las:*)
+allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
 ---
 
 # /local-agent-voice — Change Agent Voice
