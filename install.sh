@@ -191,8 +191,10 @@ if [ -f "$LAS_BIN" ]; then
     done
 fi
 
-# Warn if las still not found in current PATH
-if ! command -v las &>/dev/null; then
+# Warn only if las is genuinely unreachable (symlink not created and not in PATH)
+if ! command -v las &>/dev/null \
+   && [ ! -f "/opt/homebrew/bin/las" ] \
+   && [ ! -f "/usr/local/bin/las" ]; then
     echo ""
     echo "  ⚠️  'las' not found in PATH. Add this to ~/.zshrc and reopen your terminal:"
     echo "       export PATH=\"\$HOME/.local/bin:\$PATH\""
