@@ -130,6 +130,29 @@ def test_empty_message_accepted():
         fail("empty message accepted without error", f"HTTP {status}")
 
 
+def test_raw_source_no_prefix():
+    """Verify that source=raw is accepted and returns ok=true (no prefix added)."""
+    import importlib.util
+    main_py = Path(__file__).parent.parent / "backend" / "main.py"
+    spec = importlib.util.spec_from_file_location("main", main_py)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    name, _ = first_agent()
+    status, body = post(f"/agents/{name}/inject", {"message": "/clear", "source": "raw"})
+    if status == 200 and body.get("ok"):
+        ok("raw source inject returns ok=true")
+    else:
+        fail("raw source inject returns ok=true", f"HTTP {status} body={body}")
+
+    import inspect
+    src = inspect.getsource(mod.inject_message)
+    if '"raw"' in src or "'raw'" in src:
+        ok("backend handles source=raw branch")
+    else:
+        fail("backend handles source=raw branch", "no 'raw' branch found in inject_message")
+
+
 def test_inject_sends_return_via_iterm():
     """Verify _inject_via_iterm sends Enter within the iTerm2 tell block (not via System Events)."""
     import importlib.util, inspect
@@ -157,6 +180,7 @@ def main():
     test_agent_source_returns_ok()
     test_newlines_in_message_dont_crash()
     test_empty_message_accepted()
+    test_raw_source_no_prefix()
     test_inject_sends_return_via_iterm()
 
     print(f"\n══════════════════════════════════")
