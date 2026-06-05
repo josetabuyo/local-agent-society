@@ -789,7 +789,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     @objc func clearSession(_ sender: NSButton) {
-        injectToSession("/clear")
+        injectToSession("/clear", source: "raw")
     }
 
     func updateSpeakerIcon() {
@@ -963,7 +963,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         p.contentViewController?.view.window?.windowController?.window?.makeKeyAndOrderFront(nil)
     }
 
-    private func injectToSession(_ text: String) {
+    private func injectToSession(_ text: String, source: String = "voice") {
         NSLog("[inject] → name=%@ len=%d text=%@", agentName, text.count, text)
         guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/inject") else { return }
         var req = URLRequest(url: url)
@@ -971,7 +971,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "message": text,
-            "source":  "voice",
+            "source":  source,
         ])
         req.timeoutInterval = 5
 

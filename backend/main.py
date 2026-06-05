@@ -388,16 +388,16 @@ def inject_message(name: str, body: InjectRequest):
 
     # Build context prefix so the agent always knows who's talking
     sender = body.from_agent
-    if body.source == "agent" and sender:
-        prefix = f"[Message from {sender}]"
+    if body.source == "raw":
+        terminal_text = message
+    elif body.source == "agent" and sender:
+        terminal_text = f"[Message from {sender}]: {message}"
     elif body.source == "voice":
-        prefix = "[Widget Voice]"
+        terminal_text = f"[Widget Voice]: {message}"
     elif sender:
-        prefix = f"[External: {sender}]"
+        terminal_text = f"[External: {sender}]: {message}"
     else:
-        prefix = "[External]"
-
-    terminal_text = f"{prefix}: {message}"
+        terminal_text = f"[External]: {message}"
 
     # Find the live claude session and inject directly into the terminal
     tty    = _find_claude_tty(path)
