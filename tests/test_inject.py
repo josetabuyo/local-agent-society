@@ -63,37 +63,12 @@ def first_agent() -> tuple[str, dict]:
 
 # ── tests ─────────────────────────────────────────────────────────────────────
 
-def test_unknown_family_returns_404():
-    status, _ = post("/agents/__nonexistent_family__/inject", {"message": "test"})
+def test_unknown_agent_returns_404():
+    status, _ = post("/agents/__nonexistent_agent__/inject", {"message": "test"})
     if status == 404:
-        ok("unknown family → 404")
+        ok("unknown agent → 404")
     else:
-        fail("unknown family → 404", f"got {status}")
-
-
-def test_inject_writes_to_inbox():
-    name, info = first_agent()
-    path = Path(info.get("path", ""))
-    inbox = path / "session" / "extern-inbox.md"
-
-    before = inbox.read_text() if inbox.exists() else ""
-    marker = "__test_inject_marker__"
-
-    status, body = post(f"/agents/{name}/inject", {"message": marker})
-    if status != 200:
-        fail("inbox write", f"HTTP {status}")
-        return
-    if not body.get("ok"):
-        fail("inbox write", f"ok=false: {body}")
-        return
-
-    after = inbox.read_text() if inbox.exists() else ""
-    if marker in after:
-        ok("inject writes message to extern-inbox")
-    else:
-        fail("inject writes message to extern-inbox", "marker not found in inbox")
-
-    inbox.write_text(before)
+        fail("unknown agent → 404", f"got {status}")
 
 
 def test_inject_response_shape():
@@ -103,77 +78,37 @@ def test_inject_response_shape():
         fail("response shape", f"HTTP {status}")
         return
 
-    for key in ("ok", "injected", "inbox", "tty"):
+    for key in ("ok", "injected", "tty"):
         if key not in body:
             fail("response shape", f"missing field '{key}'")
             return
-    ok("response contains ok, injected, inbox, tty")
-
-    name, info = first_agent()
-    inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
-    if inbox.exists():
-        inbox.write_text(inbox.read_text().replace("\nshape test\n", ""))
+    if "inbox" in body:
+        fail("response shape", "inbox field should not exist — inbox was removed")
+        return
+    ok("response contains ok, injected, tty (no inbox)")
 
 
-def test_voice_source_adds_prefix():
-    name, info = first_agent()
-    inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
-    before = inbox.read_text() if inbox.exists() else ""
-
+def test_voice_source_returns_ok():
+    name, _ = first_agent()
     marker = "__voice_prefix_test__"
     status, body = post(f"/agents/{name}/inject", {"message": marker, "source": "voice"})
-    if status != 200:
-        fail("voice prefix", f"HTTP {status}")
-        return
-
-    after = inbox.read_text() if inbox.exists() else ""
-    if "[Widget Voice]" in after and marker in after:
-        ok("voice source adds [Widget Voice] prefix to inbox")
+    if status == 200 and body.get("ok"):
+        ok("voice source inject returns ok=true")
     else:
-        fail("voice source adds [Widget Voice] prefix to inbox", f"inbox content: {repr(after[-200:])}")
-
-    inbox.write_text(before)
+        fail("voice source inject returns ok=true", f"HTTP {status} body={body}")
 
 
-def test_agent_source_adds_family_prefix():
-    name, info = first_agent()
-    inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
-    before = inbox.read_text() if inbox.exists() else ""
-
+def test_agent_source_returns_ok():
+    name, _ = first_agent()
     marker = "__agent_prefix_test__"
     status, body = post(
         f"/agents/{name}/inject",
-        {"message": marker, "source": "agent", "from_family": "TestBot"},
+        {"message": marker, "source": "agent", "from_agent": "TestBot"},
     )
-    if status != 200:
-        fail("agent prefix", f"HTTP {status}")
-        return
-
-    after = inbox.read_text() if inbox.exists() else ""
-    if "TestBot" in after and marker in after:
-        ok("agent source adds from_family prefix to inbox")
+    if status == 200 and body.get("ok"):
+        ok("agent source inject returns ok=true")
     else:
-        fail("agent source adds from_family prefix to inbox", f"inbox content: {repr(after[-200:])}")
-
-    inbox.write_text(before)
-
-
-def test_inbox_entry_has_timestamp():
-    name, info = first_agent()
-    inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
-    before = inbox.read_text() if inbox.exists() else ""
-
-    marker = "__timestamp_test__"
-    post(f"/agents/{name}/inject", {"message": marker})
-
-    after = inbox.read_text() if inbox.exists() else ""
-    import re
-    if re.search(r'\[\d{2}:\d{2} \|', after):
-        ok("inbox entry includes HH:MM timestamp")
-    else:
-        fail("inbox entry includes HH:MM timestamp", f"no timestamp found in: {repr(after[-200:])}")
-
-    inbox.write_text(before)
+        fail("agent source inject returns ok=true", f"HTTP {status} body={body}")
 
 
 def test_newlines_in_message_dont_crash():
@@ -184,10 +119,6 @@ def test_newlines_in_message_dont_crash():
     else:
         fail("newlines in message don't cause 500", f"HTTP {status}")
 
-    name, info = first_agent()
-    inbox = Path(info.get("path", "")) / "session" / "extern-inbox.md"
-    if inbox.exists():
-        inbox.write_text(inbox.read_text().replace("line1 line2  line3", ""))
 
 
 def test_empty_message_accepted():
@@ -220,12 +151,10 @@ def main():
     print("=== Inject Endpoint Tests ===\n")
     get("/health")
 
-    test_unknown_family_returns_404()
-    test_inject_writes_to_inbox()
+    test_unknown_agent_returns_404()
     test_inject_response_shape()
-    test_voice_source_adds_prefix()
-    test_agent_source_adds_family_prefix()
-    test_inbox_entry_has_timestamp()
+    test_voice_source_returns_ok()
+    test_agent_source_returns_ok()
     test_newlines_in_message_dont_crash()
     test_empty_message_accepted()
     test_inject_sends_return_via_iterm()

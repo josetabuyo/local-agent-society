@@ -29,7 +29,7 @@ def check_skill_new_local_agent(install_dir: Path) -> list[str]:
     text = skill.read_text()
     errors = []
     if "localagentsociety://" not in text:
-        errors.append("new-local-agent skill does not use open 'localagentsociety://FAMILY' to launch widgets")
+        errors.append("new-local-agent skill does not use open 'localagentsociety://AGENT' to launch widgets")
     return errors
 
 

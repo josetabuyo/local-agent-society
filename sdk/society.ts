@@ -68,8 +68,8 @@ export interface InjectRequest {
 
 export interface InjectResponse {
   ok: boolean;
-  family: string;
-  source: string;
+  injected: boolean;
+  tty: string;
 }
 
 // ── Client ────────────────────────────────────────────────────────────────────
@@ -123,8 +123,8 @@ export class SocietyClient {
     return this.del(`/agents/${encodeURIComponent(name)}`);
   }
 
-  inject(family: string, req: InjectRequest): Promise<InjectResponse> {
-    return this.post(`/agents/${encodeURIComponent(family)}/inject`, req);
+  inject(agentName: string, req: InjectRequest): Promise<InjectResponse> {
+    return this.post(`/agents/${encodeURIComponent(agentName)}/inject`, req);
   }
 
   // ── Ports ──────────────────────────────────────────────────────────────────

@@ -25,6 +25,7 @@ REGISTRY_FILE = DATA_DIR / "registry.json"
 QUEUE_FILE    = DATA_DIR / "queue.json"
 PORTS_FILE       = DATA_DIR / "ports.json"
 ATTRIBUTION_FILE = DATA_DIR / "attribution.json"
+MUTED_FILE    = DATA_DIR / "muted.json"
 
 NICE_VOICES = [
     "Samantha", "Daniel", "Moira", "Karen", "Tessa", "Rishi",
@@ -56,6 +57,10 @@ def tts_drainer():
         if queue:
             msg = queue.pop(0)
             save_json(QUEUE_FILE, queue)
+            name  = msg.get("name", "")
+            muted = load_json(MUTED_FILE, [])
+            if name in muted:
+                continue
             voice = msg.get("voice", "Samantha")
             text  = msg.get("text", "")
             if text:
@@ -112,7 +117,6 @@ class InjectRequest(BaseModel):
     message:     str
     source:      str           = "voice"   # "voice" | "agent" | "external"
     from_agent:  Optional[str] = None
-    from_family: Optional[str] = None      # alias used by widget and tests
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -383,7 +387,7 @@ def inject_message(name: str, body: InjectRequest):
     message = body.message
 
     # Build context prefix so the agent always knows who's talking
-    sender = body.from_agent or body.from_family
+    sender = body.from_agent
     if body.source == "agent" and sender:
         prefix = f"[Message from {sender}]"
     elif body.source == "voice":
@@ -393,17 +397,7 @@ def inject_message(name: str, body: InjectRequest):
     else:
         prefix = "[External]"
 
-    timestamp       = datetime.now().strftime("%H:%M")
-    inbox_line      = f"\n[{timestamp} | {prefix}]: {message}\n"
-    terminal_text   = f"{prefix}: {message}"
-
-    # Append to extern-inbox (agent reads this at next conversation start)
-    inbox = Path(path) / "session" / "extern-inbox.md"
-    inbox_written = False
-    if inbox.parent.exists():
-        with open(inbox, "a") as f:
-            f.write(inbox_line)
-        inbox_written = True
+    terminal_text = f"{prefix}: {message}"
 
     # Find the live claude session and inject directly into the terminal
     tty    = _find_claude_tty(path)
@@ -432,7 +426,33 @@ def inject_message(name: str, body: InjectRequest):
         with open(log_path, "a") as f:
             f.write(log_line)
 
-    return {"ok": True, "injected": injected, "inbox": inbox_written, "tty": tty or "not found"}
+    return {"ok": True, "injected": injected, "tty": tty or "not found"}
+
+
+# ── agent mute ────────────────────────────────────────────────────────────────
+
+@app.post("/agents/{name}/mute")
+def mute_agent(name: str):
+    muted = load_json(MUTED_FILE, [])
+    if name not in muted:
+        muted.append(name)
+        save_json(MUTED_FILE, muted)
+    return {"ok": True, "muted": True, "name": name}
+
+
+@app.delete("/agents/{name}/mute")
+def unmute_agent(name: str):
+    muted = load_json(MUTED_FILE, [])
+    if name in muted:
+        muted.remove(name)
+        save_json(MUTED_FILE, muted)
+    return {"ok": True, "muted": False, "name": name}
+
+
+@app.get("/agents/{name}/muted")
+def get_muted(name: str):
+    muted = load_json(MUTED_FILE, [])
+    return {"muted": name in muted, "name": name}
 
 
 # ── attribution ───────────────────────────────────────────────────────────────

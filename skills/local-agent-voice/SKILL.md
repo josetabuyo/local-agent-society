@@ -23,7 +23,7 @@ If file does not exist, tell the user this directory has no agent (run `/new-loc
 
 ### 3. Preview the voice
 ```bash
-say -v "VOICE" "Here! FAMILY"
+say -v "VOICE" "Here! AGENT"
 ```
 
 ### 4. Update .agent.json
@@ -42,7 +42,7 @@ Re-register with same data but new voice via `POST /agents`:
 ```bash
 curl -s -X POST http://localhost:8700/agents \
   -H "Content-Type: application/json" \
-  -d '{"name":"FAMILY","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/FAMILY"}'
+  -d '{"name":"AGENT","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/AGENT"}'
 ```
 
 ### 6. Confirm to user

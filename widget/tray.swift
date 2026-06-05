@@ -118,6 +118,12 @@ enum Prefs {
     static func save(expandOnSpaceChange v: Bool, for f: String) {
         UserDefaults.standard.set(v, forKey: "expandOnSpace.\(f)")
     }
+    static func muted(for f: String) -> Bool {
+        return UserDefaults.standard.bool(forKey: "muted.\(f)")
+    }
+    static func save(muted v: Bool, for f: String) {
+        UserDefaults.standard.set(v, forKey: "muted.\(f)")
+    }
 }
 
 // MARK: - Config popover
@@ -263,9 +269,16 @@ class LangPickerVC: NSViewController {
     }
 }
 
+// MARK: - Non-focusable button base (prevents tab-focus highlight in the widget)
+
+class WidgetButton: NSButton {
+    override var acceptsFirstResponder: Bool { false }
+}
+
 // MARK: - Mic button (short press = toggle, long press = language picker)
 
 class MicButton: NSButton {
+    override var acceptsFirstResponder: Bool { false }
     var onShortPress: (() -> Void)?
     var onLongPress:  (() -> Void)?
     private var pressTimer: Timer?
@@ -524,11 +537,13 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var configPopover: NSPopover?
     var langPopover:   NSPopover?
     var nameLbl: OutlinedLabel!
-    var dotsBtn: NSButton!
+    var dotsBtn: WidgetButton!
     var micBtn: MicButton!
-    var infoBtn: NSButton!
+    var speakerBtn: WidgetButton!
+    var infoBtn: WidgetButton!
     var voice: VoiceInputManager!
     var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
+    var isMuted: Bool = false
 
     var isInfoExpanded = false
     var infoPanelView: NSView?
@@ -576,44 +591,54 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         nameLbl.textFont   = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
         content.addSubview(nameLbl)
 
-        // Settings button (bottom-right, small)
-        dotsBtn = NSButton(frame: NSRect(x: W - 44, y: 10, width: 28, height: 28))
-        let dotsImg = drawDotsImage(
-            fill: NSColor.white.withAlphaComponent(0.12),
-            stroke: NSColor.white.withAlphaComponent(0.88)
-        )
-        dotsBtn.image = dotsImg
-        dotsBtn.imageScaling = .scaleAxesIndependently
-        dotsBtn.bezelStyle = .inline
-        dotsBtn.isBordered = false
-        dotsBtn.target     = self
-        dotsBtn.action     = #selector(showConfig(_:))
+        // All bottom buttons: 32×32, y=12, right margin=10, gap=8
+        // Right to left: dots(258), mic(218), speaker(178) | left: info(10)
+
+        // Settings button (bottom-right)
+        dotsBtn = WidgetButton(frame: NSRect(x: W - 42, y: 12, width: 32, height: 32))
+        dotsBtn.imageScaling = .scaleProportionallyUpOrDown
+        dotsBtn.bezelStyle   = .inline
+        dotsBtn.isBordered   = false
+        dotsBtn.focusRingType = .none
+        dotsBtn.target       = self
+        dotsBtn.action       = #selector(showConfig(_:))
         content.addSubview(dotsBtn)
 
-        // Mic button — larger, darker, prominent
-        micBtn = MicButton(frame: NSRect(x: W - 92, y: 10, width: 40, height: 40))
-        updateMicIcon(color: idleFill)
-        micBtn.bezelStyle       = .inline
-        micBtn.isBordered       = false
-
-        micBtn.onShortPress = { [weak self] in self?.voice.toggle() }
-        micBtn.onLongPress  = { [weak self] in self?.showLangPicker() }
+        // Mic button
+        micBtn = MicButton(frame: NSRect(x: W - 82, y: 12, width: 32, height: 32))
+        micBtn.bezelStyle    = .inline
+        micBtn.isBordered    = false
+        micBtn.focusRingType = .none
+        micBtn.onShortPress  = { [weak self] in self?.voice.toggle() }
+        micBtn.onLongPress   = { [weak self] in self?.showLangPicker() }
         content.addSubview(micBtn)
 
+        // Speaker/mute button
+        speakerBtn = WidgetButton(frame: NSRect(x: W - 122, y: 12, width: 32, height: 32))
+        speakerBtn.imageScaling  = .scaleProportionallyUpOrDown
+        speakerBtn.bezelStyle    = .inline
+        speakerBtn.isBordered    = false
+        speakerBtn.focusRingType = .none
+        speakerBtn.target        = self
+        speakerBtn.action        = #selector(toggleMute(_:))
+        content.addSubview(speakerBtn)
+
         // Info button — bottom-left
-        infoBtn = NSButton(frame: NSRect(x: 10, y: 10, width: 28, height: 28))
-        infoBtn.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info")
-        infoBtn.imageScaling = .scaleProportionallyUpOrDown
-        infoBtn.bezelStyle = .inline
-        infoBtn.isBordered = false
-        infoBtn.target = self
-        infoBtn.action = #selector(toggleInfo(_:))
+        infoBtn = WidgetButton(frame: NSRect(x: 10, y: 12, width: 32, height: 32))
+        infoBtn.image         = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info")
+        infoBtn.imageScaling  = .scaleProportionallyUpOrDown
+        infoBtn.bezelStyle    = .inline
+        infoBtn.isBordered    = false
+        infoBtn.focusRingType = .none
+        infoBtn.target        = self
+        infoBtn.action        = #selector(toggleInfo(_:))
         content.addSubview(infoBtn)
 
         // Voice manager — seed locale from TTS voice on first run if user never set it
         if UserDefaults.standard.string(forKey: "voiceLocale.\(agentName)") == nil && !agentVoice.isEmpty {
             Prefs.save(voiceLocale: inferLocaleFromVoice(agentVoice), for: agentName)
         }
+        isMuted = Prefs.muted(for: agentName)
         voice = VoiceInputManager(locale: Prefs.voiceLocale(for: agentName))
         voice.onStateChange = { [weak self] active in
             self?.updateMicIcon(color: active ? .systemRed : (self?.idleFill ?? .black))
@@ -663,13 +688,15 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         nameLbl?.strokeOpacity = opacity
         nameLbl?.needsDisplay  = true
 
-        dotsBtn?.alphaValue = opacity
-        micBtn?.alphaValue  = opacity
-        infoBtn?.alphaValue = opacity
+        dotsBtn?.alphaValue    = opacity
+        micBtn?.alphaValue     = opacity
+        speakerBtn?.alphaValue = opacity
+        infoBtn?.alphaValue    = opacity
         let strokeA = min(opacity * 1.1 + 0.1, 1.0)
         dotsBtn?.image = drawDotsImage(fill: darkFill, stroke: NSColor.white.withAlphaComponent(strokeA))
-        dotsBtn?.imageScaling = .scaleAxesIndependently
+        dotsBtn?.imageScaling = .scaleProportionallyUpOrDown
         updateMicIcon(color: idleFill)
+        updateSpeakerIcon()
         let infoBtnTint = isInfoExpanded
             ? NSColor.white.withAlphaComponent(min(strokeA + 0.15, 1.0))
             : NSColor.white.withAlphaComponent(strokeA)
@@ -695,7 +722,37 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     func updateMicIcon(color: NSColor) {
         let img = drawMicImage(fill: color, stroke: NSColor.white.withAlphaComponent(0.85))
         micBtn.image = img
-        micBtn.imageScaling = .scaleAxesIndependently
+        micBtn.imageScaling = .scaleProportionallyUpOrDown
+    }
+
+    // MARK: Speaker / mute
+
+    @objc func toggleMute(_ sender: NSButton) {
+        isMuted.toggle()
+        Prefs.save(muted: isMuted, for: agentName)
+        updateSpeakerIcon()
+        setBackendMute(isMuted)
+    }
+
+    func updateSpeakerIcon() {
+        let opacity = Prefs.opacity(for: agentName)
+        let strokeA = min(opacity * 1.1 + 0.1, 1.0)
+        if isMuted {
+            speakerBtn.image = NSImage(systemSymbolName: "speaker.slash.fill", accessibilityDescription: "Muted")
+            speakerBtn.contentTintColor = NSColor.systemRed.withAlphaComponent(min(strokeA + 0.15, 1.0))
+        } else {
+            speakerBtn.image = NSImage(systemSymbolName: "speaker.wave.2.fill", accessibilityDescription: "Sound on")
+            speakerBtn.contentTintColor = NSColor.white.withAlphaComponent(strokeA)
+        }
+    }
+
+    private func setBackendMute(_ muted: Bool) {
+        let method = muted ? "POST" : "DELETE"
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/mute") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = 3
+        URLSession.shared.dataTask(with: req).resume()
     }
 
     // MARK: Info panel
@@ -927,9 +984,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             window.backgroundColor = Prefs.color(for: agentName).withAlphaComponent(Prefs.opacity(for: agentName))
             window.level = .floating
 
-            dotsBtn.isHidden = true
-            micBtn.isHidden  = true
-            infoBtn.isHidden = true
+            dotsBtn.isHidden     = true
+            micBtn.isHidden      = true
+            speakerBtn.isHidden  = true
+            infoBtn.isHidden     = true
 
             let W = screen.width, H = screen.height
             let labelH = H * 0.30
@@ -940,9 +998,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
         } else {
-            dotsBtn.isHidden = false
-            micBtn.isHidden  = false
-            infoBtn.isHidden = false
+            dotsBtn.isHidden    = false
+            micBtn.isHidden     = false
+            speakerBtn.isHidden = false
+            infoBtn.isHidden    = false
 
             let W: CGFloat = 300, H: CGFloat = 160
             let target: NSRect
@@ -964,8 +1023,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
 
-            dotsBtn.frame = NSRect(x: W - 44, y: 10, width: 28, height: 28)
-            micBtn.frame  = NSRect(x: W - 92, y: 10, width: 40, height: 40)
+            dotsBtn.frame    = NSRect(x: W - 42,  y: 12, width: 32, height: 32)
+            micBtn.frame     = NSRect(x: W - 82,  y: 12, width: 32, height: 32)
+            speakerBtn.frame = NSRect(x: W - 122, y: 12, width: 32, height: 32)
         }
     }
 

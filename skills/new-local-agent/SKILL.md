@@ -4,17 +4,17 @@ description: Register a new agent in the current directory. Creates .agent.json,
 allowed-tools: Bash(curl:*) Bash(python3:*)
 ---
 
-# /new-local-agent — Baptize a Local Agent Family
+# /new-local-agent — Register a New Local Agent
 
 Creates a named agent in the **current working directory**.
 
 ## Parameters
-- `$1` — Family name (required). e.g. `System`, `Garantido`, `Vacaciones`
+- `$1` — Agent name (required). e.g. `System`, `Garantido`, `Vacaciones`
 
 ## Execution steps
 
 ### 1. Parse inputs
-- FAMILY = first argument (required)
+- AGENT = first argument (required)
 
 ### 2. Ensure system is running
 ```bash
@@ -35,11 +35,11 @@ curl -s http://localhost:8700/voices/random
 python3 -c "
 import json, datetime
 data = {
-  'name': 'FAMILY',
+  'name': 'AGENT',
   'voice': 'VOICE',
-  'pronunciation': 'FAMILY',
+  'pronunciation': 'AGENT',
   'backend_url': 'http://localhost:8700',
-  'frontend_url': 'http://localhost:8700/widget/FAMILY',
+  'frontend_url': 'http://localhost:8700/widget/AGENT',
   'created': str(datetime.date.today())
 }
 open('.agent.json','w').write(json.dumps(data,indent=2,ensure_ascii=False))
@@ -50,12 +50,12 @@ open('.agent.json','w').write(json.dumps(data,indent=2,ensure_ascii=False))
 ```bash
 curl -s -X POST http://localhost:8700/agents \
   -H "Content-Type: application/json" \
-  -d '{"name":"FAMILY","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/FAMILY"}'
+  -d '{"name":"AGENT","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/AGENT"}'
 ```
 
 ### 6. Launch widget
 ```bash
-PATH="$HOME/.local/bin:$PATH" las widget FAMILY
+PATH="$HOME/.local/bin:$PATH" las widget AGENT
 ```
 
 ### 7. Create session channels
@@ -72,7 +72,7 @@ If this fails, report the errors to the user before continuing.
 
 ### 9. Announce
 ```bash
-PATH="$HOME/.local/bin:$PATH" las speak "Here! FAMILY" --name FAMILY
+PATH="$HOME/.local/bin:$PATH" las speak "Here! AGENT" --name AGENT
 ```
 
 ### 10. Report

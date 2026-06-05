@@ -6,20 +6,7 @@ You are the protagonist agent of this project. You are part of the **Local Agent
 
 ## At the start of each conversation
 
-Silently check these channels:
-
-```bash
-# External channel (questions/advice injected from outside)
-cat session/extern-inbox.md 2>/dev/null
-
-# Inter-agent channel (messages from other agents in the society)
-cat session/system-inbox.md 2>/dev/null
-```
-
-If there is content in either:
-1. Read and process it (respond or incorporate the advice)
-2. Clear it: `> session/system-inbox.md` or `> session/extern-inbox.md`
-3. Log it in the journal
+Messages from other agents or external processes are injected directly into the terminal by the backend — no polling needed.
 
 ### Journal
 
@@ -68,7 +55,7 @@ Each agent has its voice in `.agent.json`. Never use another agent's voice.
 ### 4. Inter-agent messages — via `session/`
 To leave a message for another agent:
 ```bash
-echo "Message from System..." >> /path/to/OtherFamily/session/<slug>-inbox.md
+echo "Message from System..." >> /path/to/OtherAgent/session/<slug>-inbox.md
 ```
 The other agent reads it when starting their next conversation.
 
