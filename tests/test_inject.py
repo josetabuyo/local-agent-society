@@ -131,26 +131,33 @@ def test_empty_message_accepted():
 
 
 def test_raw_source_no_prefix():
-    """Verify that source=raw is accepted and returns ok=true (no prefix added)."""
-    import importlib.util
-    main_py = Path(__file__).parent.parent / "backend" / "main.py"
-    spec = importlib.util.spec_from_file_location("main", main_py)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """Verify source=raw injects the message as-is with no prefix."""
+    name, info = first_agent()
+    marker = "__raw_prefix_test__"
 
-    name, _ = first_agent()
-    status, body = post(f"/agents/{name}/inject", {"message": "/clear", "source": "raw"})
-    if status == 200 and body.get("ok"):
-        ok("raw source inject returns ok=true")
-    else:
+    log_path = Path(info["path"]) / "session" / "inject.log"
+    before_size = log_path.stat().st_size if log_path.exists() else 0
+
+    status, body = post(f"/agents/{name}/inject", {"message": marker, "source": "raw"})
+    if not (status == 200 and body.get("ok")):
         fail("raw source inject returns ok=true", f"HTTP {status} body={body}")
+        return
+    ok("raw source inject returns ok=true")
 
-    import inspect
-    src = inspect.getsource(mod.inject_message)
-    if '"raw"' in src or "'raw'" in src:
-        ok("backend handles source=raw branch")
+    # Read only the new lines written after the request
+    if log_path.exists():
+        with open(log_path) as f:
+            f.seek(before_size)
+            new_lines = f.read()
+        if f"msg='{marker}'" in new_lines and f"source=raw" in new_lines:
+            ok("inject.log confirms message injected without prefix")
+        elif marker in new_lines and "[External]" not in new_lines and "[Widget" not in new_lines:
+            ok("inject.log confirms message injected without prefix")
+        else:
+            fail("inject.log confirms message injected without prefix",
+                 f"new log lines: {new_lines!r}")
     else:
-        fail("backend handles source=raw branch", "no 'raw' branch found in inject_message")
+        fail("inject.log confirms message injected without prefix", "log file not found")
 
 
 def test_inject_sends_return_via_iterm():
