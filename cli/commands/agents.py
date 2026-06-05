@@ -38,7 +38,7 @@ def agents_list():
 def restore(name):
     """Restore .agent.json from backend registry (use if accidentally deleted)."""
     cwd = Path.cwd()
-    agents = api.get("/attribution")
+    agents = api.get("/agents")
     if not agents:
         click.echo("Error: no agents registered in backend.")
         raise SystemExit(1)
