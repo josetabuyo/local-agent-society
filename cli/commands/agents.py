@@ -88,6 +88,22 @@ def sync():
     click.echo(f"Synced '{d['name']}' to backend.")
 
 
+@agent.command("delete")
+@click.argument("name", required=False)
+@click.option("--yes", is_flag=True, help="Skip confirmation prompt.")
+def delete(name, yes):
+    """Unregister an agent from the backend (does not delete files)."""
+    if not name:
+        name = _agent_name_from_cwd()
+    if not name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.")
+        raise SystemExit(1)
+    if not yes:
+        click.confirm(f"Unregister '{name}' from the backend?", abort=True)
+    api.delete(f"/agents/{name}")
+    click.echo(f"Agent '{name}' unregistered.")
+
+
 @agent.command("inject")
 @click.argument("name")
 @click.argument("message")
