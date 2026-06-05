@@ -177,21 +177,22 @@ else
     echo "         las → installed via pip"
 fi
 
-# ── Verify `las` is reachable — symlink into a directory always in PATH ───────
-LAS_BIN="$(command -v las 2>/dev/null || echo "$HOME/.local/bin/las")"
+# ── Verify `las` is reachable — symlink into a PATH dir only if needed ────────
+# pip+Homebrew installs directly to /opt/homebrew/bin; pipx installs to ~/.local/bin.
+# Only create a symlink when las lives outside the standard PATH directories.
+LAS_BIN="$HOME/.local/bin/las"
 if [ -f "$LAS_BIN" ]; then
-    # Prefer /opt/homebrew/bin (Apple Silicon, always in PATH, writable without sudo)
-    # Fall back to /usr/local/bin (Intel Macs)
     for TARGET_DIR in /opt/homebrew/bin /usr/local/bin; do
-        if [ -d "$TARGET_DIR" ] && [ -w "$TARGET_DIR" ]; then
-            ln -sf "$LAS_BIN" "$TARGET_DIR/las" 2>/dev/null \
-                && echo "         las → symlinked to $TARGET_DIR/las" \
+        DEST="$TARGET_DIR/las"
+        if [ -d "$TARGET_DIR" ] && [ -w "$TARGET_DIR" ] && [ "$LAS_BIN" != "$DEST" ]; then
+            ln -sf "$LAS_BIN" "$DEST" 2>/dev/null \
+                && echo "         las → symlinked to $DEST" \
                 && break
         fi
     done
 fi
 
-# Warn only if las is genuinely unreachable (symlink not created and not in PATH)
+# Warn only if las is genuinely unreachable
 if ! command -v las &>/dev/null \
    && [ ! -f "/opt/homebrew/bin/las" ] \
    && [ ! -f "/usr/local/bin/las" ]; then
