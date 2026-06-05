@@ -524,6 +524,46 @@ func drawDotsImage(fill: NSColor, stroke: NSColor) -> NSImage {
     }
 }
 
+func drawBroomImage(fill: NSColor, stroke: NSColor) -> NSImage {
+    NSImage(size: NSSize(width: 40, height: 40), flipped: true) { bounds in
+        let cx = bounds.midX
+
+        // Handle: diagonal line from top-right to bottom-left
+        let handle = NSBezierPath()
+        handle.move(to: NSPoint(x: cx + 9, y: 4))
+        handle.line(to: NSPoint(x: cx - 8, y: 28))
+        stroke.setStroke()
+        handle.lineWidth = 2.2
+        handle.lineCapStyle = .round
+        handle.stroke()
+
+        // Bristle head: trapezoid at the bottom-left
+        let head = NSBezierPath()
+        head.move(to:   NSPoint(x: cx - 14, y: 27))
+        head.line(to:   NSPoint(x: cx - 2,  y: 27))
+        head.line(to:   NSPoint(x: cx,      y: 36))
+        head.line(to:   NSPoint(x: cx - 17, y: 36))
+        head.close()
+        fill.setFill();   head.fill()
+        stroke.setStroke(); head.lineWidth = 1.3; head.stroke()
+
+        // Bristle tines (3 short lines at the bottom)
+        let tineColor = stroke.withAlphaComponent(0.6)
+        tineColor.setStroke()
+        for i in 0..<3 {
+            let tx = cx - 14 + CGFloat(i) * 5 + 1.5
+            let tine = NSBezierPath()
+            tine.move(to: NSPoint(x: tx,     y: 36))
+            tine.line(to: NSPoint(x: tx - 1, y: 40))
+            tine.lineWidth = 1.2
+            tine.lineCapStyle = .round
+            tine.stroke()
+        }
+
+        return true
+    }
+}
+
 // MARK: - Widget window
 
 
@@ -540,6 +580,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var dotsBtn: WidgetButton!
     var micBtn: MicButton!
     var speakerBtn: WidgetButton!
+    var clearBtn: WidgetButton!
     var infoBtn: WidgetButton!
     var voice: VoiceInputManager!
     var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
@@ -623,6 +664,16 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         speakerBtn.action        = #selector(toggleMute(_:))
         content.addSubview(speakerBtn)
 
+        // Clear button — bottom-left, next to info
+        clearBtn = WidgetButton(frame: NSRect(x: 50, y: 12, width: 32, height: 32))
+        clearBtn.imageScaling  = .scaleProportionallyUpOrDown
+        clearBtn.bezelStyle    = .inline
+        clearBtn.isBordered    = false
+        clearBtn.focusRingType = .none
+        clearBtn.target        = self
+        clearBtn.action        = #selector(clearSession(_:))
+        content.addSubview(clearBtn)
+
         // Info button — bottom-left
         infoBtn = WidgetButton(frame: NSRect(x: 10, y: 12, width: 32, height: 32))
         infoBtn.image         = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Info")
@@ -691,12 +742,15 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         dotsBtn?.alphaValue    = opacity
         micBtn?.alphaValue     = opacity
         speakerBtn?.alphaValue = opacity
+        clearBtn?.alphaValue   = opacity
         infoBtn?.alphaValue    = opacity
         let strokeA = min(opacity * 1.1 + 0.1, 1.0)
         dotsBtn?.image = drawDotsImage(fill: darkFill, stroke: NSColor.white.withAlphaComponent(strokeA))
         dotsBtn?.imageScaling = .scaleProportionallyUpOrDown
         updateMicIcon(color: idleFill)
         updateSpeakerIcon()
+        clearBtn?.image = drawBroomImage(fill: darkFill, stroke: NSColor.white.withAlphaComponent(strokeA))
+        clearBtn?.imageScaling = .scaleProportionallyUpOrDown
         let infoBtnTint = isInfoExpanded
             ? NSColor.white.withAlphaComponent(min(strokeA + 0.15, 1.0))
             : NSColor.white.withAlphaComponent(strokeA)
@@ -732,6 +786,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         Prefs.save(muted: isMuted, for: agentName)
         updateSpeakerIcon()
         setBackendMute(isMuted)
+    }
+
+    @objc func clearSession(_ sender: NSButton) {
+        injectToSession("/clear")
     }
 
     func updateSpeakerIcon() {
@@ -987,6 +1045,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             dotsBtn.isHidden     = true
             micBtn.isHidden      = true
             speakerBtn.isHidden  = true
+            clearBtn.isHidden    = true
             infoBtn.isHidden     = true
 
             let W = screen.width, H = screen.height
@@ -1001,6 +1060,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             dotsBtn.isHidden    = false
             micBtn.isHidden     = false
             speakerBtn.isHidden = false
+            clearBtn.isHidden   = false
             infoBtn.isHidden    = false
 
             let W: CGFloat = 300, H: CGFloat = 160
@@ -1026,6 +1086,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             dotsBtn.frame    = NSRect(x: W - 42,  y: 12, width: 32, height: 32)
             micBtn.frame     = NSRect(x: W - 82,  y: 12, width: 32, height: 32)
             speakerBtn.frame = NSRect(x: W - 122, y: 12, width: 32, height: 32)
+            clearBtn.frame   = NSRect(x: 50,       y: 12, width: 32, height: 32)
         }
     }
 
