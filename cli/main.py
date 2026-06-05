@@ -3,6 +3,7 @@ from cli.commands.system import status, start_cmd, stop_cmd, logs, install, unin
 from cli.commands.speak import speak
 from cli.commands.agents import agent, agents_list, widget
 from cli.commands.ports import ports
+from cli.commands.voices import voices
 
 
 @click.group()
@@ -22,3 +23,4 @@ cli.add_command(agents_list, name="agents")
 cli.add_command(agent)
 cli.add_command(widget)
 cli.add_command(ports)
+cli.add_command(voices)

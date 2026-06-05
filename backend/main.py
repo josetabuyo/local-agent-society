@@ -70,11 +70,12 @@ threading.Thread(target=tts_drainer, daemon=True).start()
 # ── models ────────────────────────────────────────────────────────────────────
 
 class AgentRegistration(BaseModel):
-    name:         str
-    voice:        str
-    path:         str
-    backend_url:  str
-    frontend_url: str
+    name:          str
+    voice:         str
+    path:          str
+    backend_url:   str
+    frontend_url:  str
+    pronunciation: Optional[str] = None
 
 
 class PortRegistration(BaseModel):

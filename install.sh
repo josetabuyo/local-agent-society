@@ -167,9 +167,35 @@ fi
 # ── Install `las` CLI ─────────────────────────────────────────────────────────
 echo "[ +1 ] Installing las CLI..."
 if command -v pipx &>/dev/null; then
-    pipx install -e "$INSTALL_DIR" --force -q && echo "         las → installed via pipx"
+    pipx install -e "$INSTALL_DIR" --force -q
+    # Ensure ~/.local/bin is in PATH for future shells
+    pipx ensurepath --force -q 2>/dev/null || true
+    echo "         las → installed via pipx"
 else
-    pip3 install -e "$INSTALL_DIR" -q && echo "         las → installed via pip"
+    pip3 install -e "$INSTALL_DIR" -q --break-system-packages 2>/dev/null \
+        || pip3 install -e "$INSTALL_DIR" -q
+    echo "         las → installed via pip"
+fi
+
+# ── Verify `las` is reachable — symlink into a directory always in PATH ───────
+LAS_BIN="$(command -v las 2>/dev/null || echo "$HOME/.local/bin/las")"
+if [ -f "$LAS_BIN" ]; then
+    # Prefer /opt/homebrew/bin (Apple Silicon, always in PATH, writable without sudo)
+    # Fall back to /usr/local/bin (Intel Macs)
+    for TARGET_DIR in /opt/homebrew/bin /usr/local/bin; do
+        if [ -d "$TARGET_DIR" ] && [ -w "$TARGET_DIR" ]; then
+            ln -sf "$LAS_BIN" "$TARGET_DIR/las" 2>/dev/null \
+                && echo "         las → symlinked to $TARGET_DIR/las" \
+                && break
+        fi
+    done
+fi
+
+# Warn if las still not found in current PATH
+if ! command -v las &>/dev/null; then
+    echo ""
+    echo "  ⚠️  'las' not found in PATH. Add this to ~/.zshrc and reopen your terminal:"
+    echo "       export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
 
 echo ""
