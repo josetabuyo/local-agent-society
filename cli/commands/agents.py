@@ -122,6 +122,21 @@ def inject(name, message, from_agent):
     click.echo(f"{name}: {status}")
 
 
+@agent.command("clean")
+@click.argument("name", required=False)
+def clean(name):
+    """Inject /clear into the agent terminal (same as the broom button)."""
+    if not name:
+        name = _agent_name_from_cwd()
+    if not name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.")
+        raise SystemExit(1)
+    result = api.post(f"/agents/{name}/inject", {"message": "/clear", "source": "raw"})
+    injected = result.get("injected", False)
+    status = "cleared" if injected else "agent not live (not injected)"
+    click.echo(f"{name}: {status}")
+
+
 @click.command("widget")
 @click.argument("name", required=False)
 def widget(name):
