@@ -61,7 +61,8 @@ las agent inject Wavi "Hey" --from Me   # send message to another agent's termin
 las agent clean                     # inject /clear into current agent
 las ports                           # view port registry
 las voices                          # available TTS voices
-las boarding                        # open the full onboarding page
+las boarding                        # print path to the onboarding page
+las boarding --open                 # open in browser
 ```
 
 ---
