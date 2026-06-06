@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local Agent Society — Boarding</title>
+  <!-- Test results injected by tests/conftest.py on each pytest run -->
+  <script id="las-test-results" type="application/json">{"timestamp": "2026-06-05 21:41", "duration": 6.708, "total": 8, "passed": 7, "failed": 1, "skipped": 0, "exit_code": 1, "tests": [{"nodeid": "tests/test_inject.py::test_unknown_agent_returns_404", "doc": "", "outcome": "passed", "duration": 0.020455, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_inject_response_shape", "doc": "", "outcome": "passed", "duration": 1.234809, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_voice_source_returns_ok", "doc": "", "outcome": "passed", "duration": 1.123242, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_agent_source_returns_ok", "doc": "", "outcome": "passed", "duration": 1.113047, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_newlines_in_message_dont_crash", "doc": "", "outcome": "passed", "duration": 1.105249, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_empty_message_accepted", "doc": "", "outcome": "passed", "duration": 1.057622, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_raw_source_no_prefix", "doc": "Verify source=raw injects the message as-is with no prefix.", "outcome": "passed", "duration": 1.049995, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_inject_sends_return_via_iterm", "doc": "Verify _inject_via_iterm sends Enter within the iTerm2 tell block (not via System Events).", "outcome": "failed", "duration": 0.003567, "longrepr": "def test_inject_sends_return_via_iterm():
+        \"\"\"Verify _inject_via_iterm sends Enter within the iTerm2 tell block (not via System Events).\"\"\"
+        import importlib.util, inspect
+        main_py = Path(__file__).parent.parent / \"backend\" / \"main.py\"
+        spec = importlib.util.spec_from_file_location(\"main\", main_py)
+        mod = importlib.util.module_from_spec(spec)
+>       spec.loader.exec_module(mod)
+
+tests/test_inject.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+<frozen importlib._bootstrap_external>:995: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    \"\"\"
+    Local Agent Society — Backend
+    Port: 8700
+    \"\"\"
+    
+>   from fastapi import FastAPI, HTTPException
+E   ModuleNotFoundError: No module named 'fastapi'
+
+backend/main.py:6: ModuleNotFoundError"}]}</script>
+  <style>
+    :root {
+      --bg:           #07070f;
+      --bg-card:      #0c0c1e;
+      --bg-card-2:    #10102a;
+      --primary:      #3a3aff;
+      --primary-dim:  rgba(58, 58, 255, 0.10);
+      --primary-glow: rgba(58, 58, 255, 0.22);
+      --accent:       #f0c040;
+      --accent-dim:   rgba(240, 192, 64, 0.10);
+      --ok:           #40c880;
+      --err:          #ff5060;
+      --warn:         #f0a020;
+      --text:         #ccc8e8;
+      --text-dim:     #6860a0;
+      --text-bright:  #f0eeff;
+      --text-code:    #8899ff;
+      --border:       rgba(58, 58, 255, 0.16);
+      --border-mid:   rgba(58, 58, 255, 0.28);
+      --font-serif:   'Georgia', 'Times New Roman', ui-serif;
+      --font-mono:    ui-monospace, 'Courier New', Courier, monospace;
+      --font-ui:      ui-sans-serif, -apple-system, system-ui, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(0, 0, 20, 0.13) 2px, rgba(0, 0, 20, 0.13) 4px
+      );
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    .page { max-width: 960px; margin: 0 auto; padding: 0 32px 80px; }
+
+    /* ── hero ── */
+    .hero {
+      padding: 72px 0 56px;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+
+    .hero::after {
+      content: 'LAS';
+      position: absolute;
+      bottom: -2px; right: 0;
+      font-family: var(--font-serif);
+      font-size: 140px;
+      font-weight: bold;
+      font-style: italic;
+      color: var(--primary);
+      opacity: 0.04;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .hero-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .hero-eyebrow::before {
+      content: '';
+      display: block;
+      width: 24px;
+      height: 1px;
+      background: var(--primary);
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(48px, 7vw, 86px);
+      font-weight: normal;
+      line-height: 0.92;
+      letter-spacing: -0.02em;
+      color: var(--text-bright);
+      margin-bottom: 28px;
+    }
+    h1 span { color: var(--primary); }
+
+    .hero-sub {
+      font-size: 15px;
+      color: var(--text-dim);
+      max-width: 520px;
+      line-height: 1.7;
+    }
+
+    /* ── sections ── */
+    section { padding: 56px 0 0; }
+
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    h2 {
+      font-family: var(--font-serif);
+      font-size: 28px;
+      font-weight: normal;
+      color: var(--text-bright);
+      margin-bottom: 32px;
+      letter-spacing: -0.01em;
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-code);
+      background: rgba(136, 153, 255, 0.08);
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+    pre {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-code);
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      line-height: 1.7;
+      margin-top: 8px;
+    }
+    pre .dim    { color: var(--text-dim); }
+    pre .bright { color: var(--text-bright); }
+    pre .str    { color: var(--accent); }
+    pre .flag   { color: var(--ok); }
+
+    /* ── quick start ── */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    .step {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .step:hover { border-color: var(--border-mid); background: var(--bg-card-2); }
+    .step::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--primary);
+      opacity: 0.45;
+    }
+
+    .step-num {
+      font-family: var(--font-serif);
+      font-size: 52px;
+      line-height: 1;
+      color: var(--primary);
+      opacity: 0.2;
+      position: absolute;
+      top: 14px; right: 18px;
+      font-style: italic;
+    }
+
+    .step-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .step p { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 12px; }
+
+    /* ── cli reference ── */
+    .cmd-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .cmd-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 18px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 0 16px;
+      transition: border-color 0.15s;
+    }
+    .cmd-card:hover { border-color: var(--border-mid); }
+
+    .cmd-name {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-code);
+      font-weight: bold;
+      padding-top: 1px;
+      white-space: nowrap;
+    }
+
+    .cmd-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+    .cmd-subs {
+      grid-column: 2;
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .cmd-sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--primary);
+      background: var(--primary-dim);
+      border: 1px solid rgba(58,58,255,0.18);
+      border-radius: 3px;
+      padding: 1px 6px;
+    }
+
+    /* ── society rules ── */
+    .rules {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .rule {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .rule:last-child { border-bottom: none; }
+    .rule:hover { background: var(--primary-dim); }
+
+    .rule-num {
+      font-family: var(--font-serif);
+      font-size: 22px;
+      font-style: italic;
+      color: var(--primary);
+      opacity: 0.38;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 1px solid var(--border);
+    }
+
+    .rule-body { padding: 18px 24px; }
+
+    .rule-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid rgba(240,192,64,0.18);
+      border-radius: 2px;
+      padding: 1px 5px;
+    }
+
+    .rule-text { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+
+    /* ── test results ── */
+    .tests-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .test-stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px 20px;
+      text-align: center;
+    }
+
+    .test-stat-value {
+      font-family: var(--font-serif);
+      font-size: 36px;
+      font-weight: normal;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .test-stat-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .color-ok   { color: var(--ok); }
+    .color-err  { color: var(--err); }
+    .color-warn { color: var(--warn); }
+    .color-dim  { color: var(--text-dim); }
+
+    .test-meta {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .test-meta .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .tests-list {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .test-row {
+      display: grid;
+      grid-template-columns: 20px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 9px 14px;
+      border-bottom: 1px solid rgba(58,58,255,0.06);
+      font-size: 12px;
+      transition: background 0.1s;
+    }
+    .test-row:last-child { border-bottom: none; }
+    .test-row:hover { background: var(--primary-dim); }
+
+    .test-icon { font-size: 11px; text-align: center; }
+    .test-name { font-family: var(--font-mono); color: var(--text); }
+    .test-doc  { color: var(--text-dim); font-size: 11px; }
+    .test-dur  { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+
+    .no-results {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+    }
+    .no-results p { color: var(--text-dim); font-size: 13px; margin-bottom: 10px; }
+    .no-results code { font-size: 13px; }
+
+    /* ── footer ── */
+    .footer {
+      margin-top: 72px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer-brand { font-family: var(--font-serif); font-size: 13px; font-style: italic; color: var(--text-dim); }
+    .footer-links { display: flex; gap: 20px; }
+    .footer-links a {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--primary); }
+
+    @media (max-width: 680px) {
+      .steps, .cmd-grid { grid-template-columns: 1fr; }
+      .tests-summary { grid-template-columns: repeat(2, 1fr); }
+      h1 { font-size: 48px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── HERO ── -->
+  <header class="hero">
+    <div class="hero-eyebrow">Onboarding · Port 8700</div>
+    <h1>Local<br><span>Agent</span><br>Society</h1>
+    <p class="hero-sub">A society of agents that coexist, respect shared resources, and communicate in an orderly way. Running locally on your machine.</p>
+  </header>
+
+  <!-- ── QUICK START ── -->
+  <section>
+    <div class="section-label">Getting started</div>
+    <h2>Three steps to join the society</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-title">Install</div>
+        <p>Run the installer from the project root. Compiles the widget, sets up LaunchAgents, starts the backend on port 8700.</p>
+        <pre><span class="dim">$</span> <span class="bright">./install.sh</span>
+<span class="dim">$</span> <span class="bright">las status</span></pre>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-title">Create an agent</div>
+        <p>Navigate to your project and run the new-agent skill. It registers the agent, assigns a unique voice, and opens the widget.</p>
+        <pre><span class="dim">$</span> cd ~/Development/MyProject
+<span class="dim">$</span> <span class="dim"># inside Claude Code:</span>
+<span class="bright">/new-local-agent</span></pre>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-title">Speak &amp; inject</div>
+        <p>Agents speak via the queue, never directly. Send messages to other agents via the inject command.</p>
+        <pre><span class="dim">$</span> <span class="bright">las speak</span> <span class="str">"Hello society"</span>
+<span class="dim">$</span> <span class="bright">las agent inject</span> Wavi <span class="str">"Hey"</span> <span class="flag">--from</span> Me</pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CLI REFERENCE ── -->
+  <section>
+    <div class="section-label">Command reference</div>
+    <h2>The <code>las</code> CLI</h2>
+    <div class="cmd-grid">
+      <div class="cmd-card">
+        <div class="cmd-name">las status</div>
+        <div class="cmd-desc">Show backend status, registered agents, and active ports.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las start / stop</div>
+        <div class="cmd-desc">Start or stop the backend server and tray app.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las logs</div>
+        <div class="cmd-desc">Tail the backend log in real time.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las speak</div>
+        <div class="cmd-desc">Enqueue a TTS message. Safe for concurrent agents — never collides.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las agents</div>
+        <div class="cmd-desc">List all registered agents with their voice and project path.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las agent</div>
+        <div>
+          <div class="cmd-desc">Manage a specific agent.</div>
+          <div class="cmd-subs">
+            <span class="cmd-sub">inject</span>
+            <span class="cmd-sub">clean</span>
+            <span class="cmd-sub">sync</span>
+            <span class="cmd-sub">restore</span>
+            <span class="cmd-sub">delete</span>
+          </div>
+        </div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las widget</div>
+        <div class="cmd-desc">Reopen the floating agent widget on the current macOS Space.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las ports</div>
+        <div class="cmd-desc">Manage the port registry. Reserve before binding — never hardcode.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las voices</div>
+        <div class="cmd-desc">Query available TTS voices on this machine.</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las install / update</div>
+        <div class="cmd-desc">Install or update the full system (widget, LaunchAgent, backend).</div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las boarding</div>
+        <div class="cmd-desc">Open this page. Pass <code>--print</code> to get the path for scripting.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SOCIETY RULES ── -->
+  <section>
+    <div class="section-label">Civility contract</div>
+    <h2>The six rules of the society</h2>
+    <div class="rules">
+      <div class="rule">
+        <div class="rule-num">I</div>
+        <div class="rule-body">
+          <div class="rule-title">Voice — never call <code>say</code> directly <span class="badge">mandatory</span></div>
+          <div class="rule-text">All speech goes through <code>POST /queue/speak</code> or <code>las speak</code>. The queue prevents collisions when multiple agents speak simultaneously. Only the protagonist agent speaks; subagents are silent.</div>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-num">II</div>
+        <div class="rule-body">
+          <div class="rule-title">Ports — always from the registry <span class="badge">mandatory</span></div>
+          <div class="rule-text">Never hardcode a port. Check <code>GET /ports</code>, reserve with <code>las ports claim &lt;port&gt;</code>. If your port is taken by another agent, notify them via inject and wait — never steal.</div>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-num">III</div>
+        <div class="rule-body">
+          <div class="rule-title">Voices — unique per agent</div>
+          <div class="rule-text">Each agent declares its voice in <code>.agent.json</code>. Never impersonate another agent's voice. The backend enforces uniqueness across the registry.</div>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-num">IV</div>
+        <div class="rule-body">
+          <div class="rule-title">Inter-agent messages — via inject</div>
+          <div class="rule-text">To send a message to another agent: <code>las agent inject &lt;Name&gt; "message" --from &lt;You&gt;</code>. The text appears directly in their terminal, prefixed with your name.</div>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-num">V</div>
+        <div class="rule-body">
+          <div class="rule-title">External channel — <code>session/extern-inbox.md</code></div>
+          <div class="rule-text">Scripts and external processes write here to reach an agent. Agents read it at the start of each conversation. This is the entry point for the outside world.</div>
+        </div>
+      </div>
+      <div class="rule">
+        <div class="rule-num">VI</div>
+        <div class="rule-body">
+          <div class="rule-title">Language — respond in the configured locale</div>
+          <div class="rule-text">Read <code>.agent.json</code> for <code>"locale"</code>. English if <code>"en"</code>, Spanish if <code>"es"</code>. Code, comments, and system files are always written in English regardless of locale.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── TEST RESULTS ── -->
+  <section>
+    <div class="section-label">Test suite</div>
+    <h2>Latest results</h2>
+    <div id="test-content"></div>
+  </section>
+
+  <!-- ── FOOTER ── -->
+  <footer class="footer">
+    <div class="footer-brand">Local Agent Society</div>
+    <div class="footer-links">
+      <a href="http://localhost:8700/docs" target="_blank">API docs</a>
+      <a href="http://localhost:8700/agents" target="_blank">Agents</a>
+      <a href="http://localhost:8700/ports" target="_blank">Ports</a>
+    </div>
+  </footer>
+
+</div>
+<script>
+  (function () {
+    const el = document.getElementById('test-content');
+    const raw = document.getElementById('las-test-results').textContent.trim();
+    let data = null;
+    try { data = JSON.parse(raw); } catch (_) {}
+
+    if (!data) {
+      el.innerHTML = `
+        <div class="no-results">
+          <p>No test results yet.</p>
+          <p>Run <code>pytest tests/</code> to generate and embed results.</p>
+        </div>`;
+      return;
+    }
+
+    const passed  = data.passed  || 0;
+    const failed  = data.failed  || 0;
+    const skipped = data.skipped || 0;
+    const total   = data.total   || 0;
+    const ok      = failed === 0;
+    const dur     = data.duration != null ? data.duration.toFixed(2) + 's' : '—';
+
+    el.innerHTML = `
+      <div class="test-meta">
+        <span class="dot" style="background:${ok ? 'var(--ok)' : 'var(--err)'}"></span>
+        <span>${ok ? 'All tests passing' : 'Tests failing'}</span>
+        <span>·</span>
+        <span>${data.timestamp || ''}</span>
+        <span>·</span>
+        <span>${dur}</span>
+      </div>
+      <div class="tests-summary">
+        <div class="test-stat">
+          <div class="test-stat-value color-dim">${total}</div>
+          <div class="test-stat-label">Total</div>
+        </div>
+        <div class="test-stat">
+          <div class="test-stat-value color-ok">${passed}</div>
+          <div class="test-stat-label">Passed</div>
+        </div>
+        <div class="test-stat">
+          <div class="test-stat-value ${failed > 0 ? 'color-err' : 'color-dim'}">${failed}</div>
+          <div class="test-stat-label">Failed</div>
+        </div>
+        <div class="test-stat">
+          <div class="test-stat-value color-warn">${skipped}</div>
+          <div class="test-stat-label">Skipped</div>
+        </div>
+      </div>
+      <div class="tests-list">
+        ${(data.tests || []).map(t => {
+          const icon  = t.outcome === 'passed' ? '✓' : t.outcome === 'skipped' ? '–' : '✕';
+          const color = t.outcome === 'passed' ? 'var(--ok)' : t.outcome === 'skipped' ? 'var(--warn)' : 'var(--err)';
+          const id    = (t.nodeid || '').split('::').slice(1).join(' › ');
+          const doc   = t.doc ? `<div class="test-doc">${esc(t.doc)}</div>` : '';
+          const ms    = t.duration != null ? (t.duration * 1000).toFixed(1) + 'ms' : '';
+          return `
+            <div class="test-row">
+              <div class="test-icon" style="color:${color}">${icon}</div>
+              <div>
+                <div class="test-name">${esc(id)}</div>
+                ${doc}
+              </div>
+              <div class="test-dur">${ms}</div>
+            </div>`;
+        }).join('')}
+      </div>`;
+
+    function esc(s) {
+      return String(s || '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  })();
+</script>
+</body>
+</html>

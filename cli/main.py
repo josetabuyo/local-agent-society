@@ -4,6 +4,7 @@ from cli.commands.speak import speak
 from cli.commands.agents import agent, agents_list, widget
 from cli.commands.ports import ports
 from cli.commands.voices import voices
+from cli.commands.boarding import boarding
 
 
 @click.group()
@@ -24,3 +25,4 @@ cli.add_command(agent)
 cli.add_command(widget)
 cli.add_command(ports)
 cli.add_command(voices)
+cli.add_command(boarding)

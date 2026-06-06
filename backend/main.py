@@ -475,7 +475,7 @@ def get_attribution(file: str = None, name: str = None):
     return log
 
 
-# ── widget HTML ───────────────────────────────────────────────────────────────
+# ── widget ────────────────────────────────────────────────────────────────────
 
 @app.get("/widget/{name}", response_class=HTMLResponse)
 def widget(name: str):
