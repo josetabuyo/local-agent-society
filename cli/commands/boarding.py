@@ -22,4 +22,4 @@ def boarding(open_browser: bool):
         raise SystemExit(1)
     click.echo(str(_BOARDING))
     if open_browser:
-        subprocess.run(["open", str(_BOARDING)], check=False)
+        subprocess.run(["open", f"file://{_BOARDING}"], check=False)
