@@ -96,7 +96,13 @@ enum Prefs {
         return UserDefaults.standard.bool(forKey: "ontop.\(f)")
     }
     static func voiceLocale(for f: String) -> String {
-        return UserDefaults.standard.string(forKey: "voiceLocale.\(f)") ?? "es-MX"
+        return UserDefaults.standard.string(forKey: "voiceLocale.\(f)") ?? "en-US"
+    }
+    static func voiceLocaleIsManual(for f: String) -> Bool {
+        return UserDefaults.standard.bool(forKey: "voiceLocaleManual.\(f)")
+    }
+    static func markVoiceLocaleManual(for f: String) {
+        UserDefaults.standard.set(true, forKey: "voiceLocaleManual.\(f)")
     }
     static func save(color c: NSColor, for f: String) {
         let d = try? NSKeyedArchiver.archivedData(withRootObject: c, requiringSecureCoding: true)
@@ -135,6 +141,9 @@ class ConfigVC: NSViewController {
     var opacitySlider: NSSlider!
     var ontopCheck: NSButton!
     var expandCheck: NSButton!
+    var voiceNameVal: NSTextField!
+    var voiceLangVal: NSTextField!
+    var voicePickerPopover: NSPopover?
 
     init(agentName: String, widget: WidgetWindow) {
         self.agentName = agentName
@@ -144,38 +153,87 @@ class ConfigVC: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let W: CGFloat = 208, pad: CGFloat = 14
+        let W: CGFloat = 220, pad: CGFloat = 14
+        let H: CGFloat = 264
 
+        // ── Color ─────────────────────────────────────────────────────────────
         let colorLbl = rowLabel("Color")
-        colorLbl.frame = NSRect(x: pad, y: 132, width: 60, height: 15)
+        colorLbl.frame = NSRect(x: pad, y: 228, width: 60, height: 15)
 
-        colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 128, width: 36, height: 24))
+        colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 224, width: 36, height: 24))
         colorWell.color = Prefs.color(for: agentName)
         colorWell.target = self
         colorWell.action = #selector(colorChanged(_:))
 
+        // ── Opacity ───────────────────────────────────────────────────────────
         let opacLbl = rowLabel("Opacity")
-        opacLbl.frame = NSRect(x: pad, y: 98, width: 60, height: 15)
+        opacLbl.frame = NSRect(x: pad, y: 194, width: 60, height: 15)
 
         opacitySlider = NSSlider(value: Prefs.opacity(for: agentName),
                                   minValue: 0.1, maxValue: 1.0,
                                   target: self, action: #selector(opacityChanged(_:)))
-        opacitySlider.frame = NSRect(x: pad, y: 76, width: W - pad * 2, height: 18)
+        opacitySlider.frame = NSRect(x: pad, y: 172, width: W - pad * 2, height: 18)
 
+        // ── Checkboxes ────────────────────────────────────────────────────────
         ontopCheck = NSButton(checkboxWithTitle: "Always on top",
                                target: self, action: #selector(ontopChanged(_:)))
         ontopCheck.state = Prefs.ontop(for: agentName) ? .on : .off
-        ontopCheck.frame = NSRect(x: pad, y: 40, width: W - pad * 2, height: 20)
+        ontopCheck.frame = NSRect(x: pad, y: 136, width: W - pad * 2, height: 20)
         ontopCheck.font = NSFont.systemFont(ofSize: 11)
 
         expandCheck = NSButton(checkboxWithTitle: "Expand on space change",
                                 target: self, action: #selector(expandChanged(_:)))
         expandCheck.state = Prefs.expandOnSpaceChange(for: agentName) ? .on : .off
-        expandCheck.frame = NSRect(x: pad, y: 16, width: W - pad * 2, height: 20)
+        expandCheck.frame = NSRect(x: pad, y: 112, width: W - pad * 2, height: 20)
         expandCheck.font = NSFont.systemFont(ofSize: 11)
 
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: 168))
-        [colorLbl, colorWell, opacLbl, opacitySlider, ontopCheck, expandCheck].forEach { v.addSubview($0) }
+        // ── Separator ─────────────────────────────────────────────────────────
+        let sep = NSView(frame: NSRect(x: pad, y: 98, width: W - pad * 2, height: 1))
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+
+        // ── Voice section ─────────────────────────────────────────────────────
+        let curVoice = widget?.agentVoice ?? ""
+        let voiceInfo = allVoices.first(where: { $0.name == curVoice })
+
+        let voiceSectionLbl = rowLabel("Voice")
+        voiceSectionLbl.frame = NSRect(x: pad, y: 76, width: 50, height: 15)
+
+        voiceNameVal = NSTextField(labelWithString: curVoice.isEmpty ? "—" : curVoice)
+        voiceNameVal.frame = NSRect(x: pad + 54, y: 76, width: W - pad * 2 - 54, height: 15)
+        voiceNameVal.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        voiceNameVal.textColor = .labelColor
+        voiceNameVal.alignment = .right
+
+        let langSectionLbl = rowLabel("Language")
+        langSectionLbl.frame = NSRect(x: pad, y: 56, width: 64, height: 15)
+
+        let langStr = voiceInfo.map { "\($0.flag) \($0.lang)" } ?? "—"
+        voiceLangVal = NSTextField(labelWithString: langStr)
+        voiceLangVal.frame = NSRect(x: pad + 68, y: 56, width: W - pad * 2 - 68, height: 15)
+        voiceLangVal.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        voiceLangVal.textColor = .secondaryLabelColor
+        voiceLangVal.alignment = .right
+
+        let btnW: CGFloat = (W - pad * 2 - 6) / 2
+        let testBtn = NSButton(frame: NSRect(x: pad, y: 20, width: btnW, height: 22))
+        testBtn.title = "Test voice"
+        testBtn.bezelStyle = .rounded
+        testBtn.font = NSFont.systemFont(ofSize: 10)
+        testBtn.target = self
+        testBtn.action = #selector(testVoiceTapped(_:))
+
+        let changeBtn = NSButton(frame: NSRect(x: pad + btnW + 6, y: 20, width: btnW, height: 22))
+        changeBtn.title = "Change voice…"
+        changeBtn.bezelStyle = .rounded
+        changeBtn.font = NSFont.systemFont(ofSize: 10)
+        changeBtn.target = self
+        changeBtn.action = #selector(changeVoiceTapped(_:))
+
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        [colorLbl, colorWell, opacLbl, opacitySlider, ontopCheck, expandCheck,
+         sep, voiceSectionLbl, voiceNameVal, langSectionLbl, voiceLangVal, testBtn, changeBtn
+        ].forEach { v.addSubview($0) }
         self.view = v
     }
 
@@ -184,6 +242,13 @@ class ConfigVC: NSViewController {
         f.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         f.textColor = .secondaryLabelColor
         return f
+    }
+
+    func refreshVoiceDisplay() {
+        guard let w = widget else { return }
+        let info = allVoices.first(where: { $0.name == w.agentVoice })
+        voiceNameVal.stringValue = w.agentVoice.isEmpty ? "—" : w.agentVoice
+        voiceLangVal.stringValue = info.map { "\($0.flag) \($0.lang)" } ?? "—"
     }
 
     @objc func colorChanged(_ sender: NSColorWell) {
@@ -201,6 +266,43 @@ class ConfigVC: NSViewController {
     @objc func expandChanged(_ sender: NSButton) {
         Prefs.save(expandOnSpaceChange: sender.state == .on, for: agentName)
     }
+
+    @objc func testVoiceTapped(_ sender: NSButton) {
+        guard let w = widget, !w.agentVoice.isEmpty else { return }
+        let lang = allVoices.first(where: { $0.name == w.agentVoice })?.lang ?? "en-US"
+        let text = lang.hasPrefix("es") ? "Hola, soy \(w.agentName)" : "Hello, I'm \(w.agentName)"
+        guard let url = URL(string: "http://localhost:8700/queue/speak") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "text": text, "voice": w.agentVoice, "name": w.agentName,
+        ])
+        req.timeoutInterval = 3
+        URLSession.shared.dataTask(with: req).resume()
+    }
+
+    @objc func changeVoiceTapped(_ sender: NSButton) {
+        if let p = voicePickerPopover, p.isShown { p.close(); voicePickerPopover = nil; return }
+        guard let w = widget else { return }
+        let p = NSPopover()
+        let vc = VoicePickerVC(agentName: agentName, widget: w, popover: p) { [weak self] in
+            self?.refreshVoiceDisplay()
+        }
+        p.contentViewController = vc
+        p.behavior = .transient
+        p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        voicePickerPopover = p
+    }
+}
+
+extension ConfigVC: NSPopoverDelegate {
+    func popoverWillClose(_ notification: Notification) {
+        colorWell.deactivate()
+        if NSColorPanel.shared.isVisible {
+            NSColorPanel.shared.orderOut(nil)
+        }
+    }
 }
 
 // MARK: - Language picker popover
@@ -213,15 +315,25 @@ let supportedLocales: [(name: String, flag: String, id: String)] = [
     ("Deutsch",    "🇩🇪", "de-DE"),
 ]
 
-// Derive a default speech-recognition locale from the TTS voice name.
-// Only Spanish and Brazilian voices deviate from en-US in our NICE_VOICES set.
+// TTS voice catalogue — name must match exactly what `say -v '?'` outputs.
+let allVoices: [(name: String, lang: String, flag: String)] = [
+    ("Samantha",               "en-US", "🇺🇸"),
+    ("Daniel",                 "en-GB", "🇬🇧"),
+    ("Moira",                  "en-IE", "🇮🇪"),
+    ("Karen",                  "en-AU", "🇦🇺"),
+    ("Tessa",                  "en-ZA", "🇿🇦"),
+    ("Rishi",                  "en-IN", "🇮🇳"),
+    ("Paulina",                "es-MX", "🇲🇽"),
+    ("Mónica",                 "es-ES", "🇪🇸"),
+    ("Flo (English (US))",     "en-US", "🇺🇸"),
+    ("Sandy (English (US))",   "en-US", "🇺🇸"),
+    ("Shelley (English (US))", "en-US", "🇺🇸"),
+    ("Reed (English (US))",    "en-US", "🇺🇸"),
+    ("Eddy (English (US))",    "en-US", "🇺🇸"),
+]
+
 func inferLocaleFromVoice(_ voice: String) -> String {
-    let v = voice.lowercased()
-    if v == "paulina" || v == "mónica" || v == "monica" { return "es-MX" }
-    if v.contains("português") || v == "luciana" || v == "felipe" { return "pt-BR" }
-    if v.contains("français") || v == "thomas" || v == "aurelie" { return "fr-FR" }
-    if v.contains("deutsch") || v == "anna" || v == "markus" || v == "petra" { return "de-DE" }
-    return "en-US"
+    return allVoices.first(where: { $0.name == voice })?.lang ?? "en-US"
 }
 
 class LangPickerVC: NSViewController {
@@ -263,9 +375,60 @@ class LangPickerVC: NSViewController {
 
     @objc func selectLang(_ sender: NSButton) {
         let lang = supportedLocales[sender.tag]
+        Prefs.markVoiceLocaleManual(for: agentName)
         Prefs.save(voiceLocale: lang.id, for: agentName)
         widget?.voice.setLocale(lang.id)
         popover?.close()
+    }
+}
+
+// MARK: - Voice picker popover
+
+class VoicePickerVC: NSViewController {
+    let agentName: String
+    weak var widget: WidgetWindow?
+    weak var popover: NSPopover?
+    let onVoiceChanged: () -> Void
+
+    init(agentName: String, widget: WidgetWindow, popover: NSPopover, onVoiceChanged: @escaping () -> Void) {
+        self.agentName = agentName
+        self.widget = widget
+        self.popover = popover
+        self.onVoiceChanged = onVoiceChanged
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let W: CGFloat = 252, rowH: CGFloat = 26, pad: CGFloat = 8
+        let H = CGFloat(allVoices.count) * rowH + pad * 2
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+
+        let current = widget?.agentVoice ?? ""
+        for (i, voice) in allVoices.enumerated() {
+            let y = H - pad - CGFloat(i + 1) * rowH
+            let isSelected = voice.name == current
+            let btn = NSButton(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: rowH - 2))
+            btn.title = "\(voice.flag)  \(voice.name)  ·  \(voice.lang)"
+            btn.tag = i
+            btn.alignment = .left
+            btn.bezelStyle = .rounded
+            btn.isBordered = isSelected
+            btn.font = isSelected
+                ? NSFont.boldSystemFont(ofSize: 11)
+                : NSFont.systemFont(ofSize: 11)
+            btn.target = self
+            btn.action = #selector(selectVoice(_:))
+            v.addSubview(btn)
+        }
+        self.view = v
+    }
+
+    @objc func selectVoice(_ sender: NSButton) {
+        let voice = allVoices[sender.tag]
+        widget?.changeVoice(to: voice.name)
+        popover?.close()
+        onVoiceChanged()
     }
 }
 
@@ -496,7 +659,7 @@ private func phImage(_ base64: String) -> NSImage {
 class WidgetWindow: NSObject, NSWindowDelegate {
     let agentName: String
     let agentPath: String
-    let agentVoice: String
+    var agentVoice: String
     let window: NSWindow
     var onClose: (() -> Void)?
     var configPopover: NSPopover?
@@ -609,8 +772,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         infoBtn.action        = #selector(toggleInfo(_:))
         content.addSubview(infoBtn)
 
-        // Voice manager — seed locale from TTS voice on first run if user never set it
-        if UserDefaults.standard.string(forKey: "voiceLocale.\(agentName)") == nil && !agentVoice.isEmpty {
+        // Sync STT locale to match TTS voice unless user explicitly set it via the language picker
+        if !Prefs.voiceLocaleIsManual(for: agentName) && !agentVoice.isEmpty {
             Prefs.save(voiceLocale: inferLocaleFromVoice(agentVoice), for: agentName)
         }
         isMuted = Prefs.muted(for: agentName)
@@ -695,7 +858,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     @objc func showConfig(_ sender: NSButton) {
         if let p = configPopover, p.isShown { p.close(); return }
         let p = NSPopover()
-        p.contentViewController = ConfigVC(agentName: agentName, widget: self)
+        let configVC = ConfigVC(agentName: agentName, widget: self)
+        p.contentViewController = configVC
+        p.delegate = configVC
         p.behavior = .transient
         p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         configPopover = p
@@ -745,6 +910,44 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/mute") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = method
+        req.timeoutInterval = 3
+        URLSession.shared.dataTask(with: req).resume()
+    }
+
+    func changeVoice(to newVoice: String) {
+        agentVoice = newVoice
+
+        // Re-sync STT locale to match new TTS voice (only if not manually overridden)
+        if !Prefs.voiceLocaleIsManual(for: agentName) {
+            let locale = inferLocaleFromVoice(newVoice)
+            Prefs.save(voiceLocale: locale, for: agentName)
+            voice.setLocale(locale)
+        }
+
+        // Update .agent.json
+        if !agentPath.isEmpty {
+            let jsonURL = URL(fileURLWithPath: agentPath + "/.agent.json")
+            if let data = try? Data(contentsOf: jsonURL),
+               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                json["voice"] = newVoice
+                if let updated = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted) {
+                    try? updated.write(to: jsonURL)
+                }
+            }
+        }
+
+        // Update backend registry
+        guard let url = URL(string: "http://localhost:8700/agents") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "name": agentName,
+            "voice": newVoice,
+            "path": agentPath,
+            "backend_url": "http://localhost:8700",
+            "frontend_url": "http://localhost:8700/widget/\(agentName)",
+        ])
         req.timeoutInterval = 3
         URLSession.shared.dataTask(with: req).resume()
     }

@@ -25,10 +25,15 @@ If this fails (backend not running), start it:
 PATH="$HOME/.local/bin:$PATH" las start && sleep 2
 ```
 
-### 3. Get unique voice
+### 3. Get unique voice and its language
 ```bash
 curl -s http://localhost:8700/voices/random
 ```
+Save VOICE name. Then look up its language:
+```bash
+curl -s http://localhost:8700/voices/VOICE
+```
+Save LANG (e.g. `en-US`). If 404, default to `en-US`.
 
 ### 4. Write .agent.json in CWD
 ```bash
@@ -37,6 +42,7 @@ import json, datetime
 data = {
   'name': 'AGENT',
   'voice': 'VOICE',
+  'locale': 'LANG',
   'pronunciation': 'AGENT',
   'backend_url': 'http://localhost:8700',
   'frontend_url': 'http://localhost:8700/widget/AGENT',

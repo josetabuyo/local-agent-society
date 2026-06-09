@@ -49,8 +49,27 @@ Never hardcode a port. The registry guarantees no conflicts.
 curl -s http://localhost:8700/ports | python3 -c "import sys,json; p=json.load(sys.stdin); print('FREE' if '5173' not in p else f'TAKEN by {p[\"5173\"][\"local_agent\"]}')"
 ```
 
-### 3. Voices — unique per agent
+### 3. Voices — unique per agent, speak in the voice's language
 Each agent has its voice in `.agent.json`. Never use another agent's voice.
+
+**Critical:** the TTS voice has a fixed language — `say -v Samantha` only sounds correct with English text; `say -v Paulina` only sounds correct with Spanish text. Always speak text in the language of the voice, never mix them.
+
+Voice → language reference:
+- Samantha, Daniel, Moira, Karen, Tessa, Rishi, Flo/Sandy/Shelley/Reed/Eddy (English variants) → English text only
+- Paulina, Mónica → Spanish text only
+
+When speaking via the queue, match the text language to the voice:
+```bash
+# English voice → English text
+curl -s -X POST http://localhost:8700/queue/speak \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hello, task complete.","voice":"Samantha","name":"AGENT"}'
+
+# Spanish voice → Spanish text
+curl -s -X POST http://localhost:8700/queue/speak \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hola, tarea completada.","voice":"Paulina","name":"AGENT"}'
+```
 
 ### 4. Inter-agent messages — via `session/`
 To leave a message for another agent:
@@ -66,13 +85,33 @@ echo "Reminder: review tests before deploy" >> session/extern-inbox.md
 ```
 You read them at the start of the conversation. This channel is the entry point for the outside world into the society.
 
-### 6. Language — respond in the agent's configured locale
-Read `.agent.json` to determine the agent's locale:
-- `"locale": "en"` or voice is English → respond in **English**
-- `"locale": "es"` or voice is Spanish → respond in **Spanish**
-- Default: **English**
+### 6. Ports — check BEFORE every server start
+Before starting any HTTP server, **always** run this check:
+```bash
+# Check if your desired port is free
+curl -s http://localhost:8700/ports | python3 -c "
+import sys, json
+p = json.load(sys.stdin)
+port = 'YOUR_PORT'
+if port in p:
+    print(f'TAKEN by {p[port][\"local_agent\"]} — notify them via session/extern-inbox.md and wait')
+else:
+    print('FREE — safe to register and start')
+"
+# Register BEFORE starting
+curl -s -X POST http://localhost:8700/ports/claim \
+  -H "Content-Type: application/json" \
+  -d '{"port":YOUR_PORT,"app":"APP_NAME","local_agent":"AGENT_NAME","path":"CWD"}'
+```
+Skipping this check can break other agents' production apps on this machine. Never hardcode a port.
 
-The user may write in any language (voice input is often in Spanish). Respond in the locale configured for this agent. All code, comments, skills, and system files are always written in **English**.
+### 7. Language — respond in the agent's configured locale
+Read `.agent.json`:
+- `"locale": "en-US"` (or any `en-*`), or voice is one of the English voices → respond in **English**
+- `"locale": "es-MX"` / `"es-ES"` (or any `es-*`), or voice is Paulina/Mónica → respond in **Spanish**
+- No locale field: derive from voice name (see rule 3). Default: **English**
+
+The user may write in any language. Respond in the locale of this agent. All code, comments, skills, and system files are always written in **English**.
 
 ---
 

@@ -28,10 +28,21 @@ ATTRIBUTION_FILE = DATA_DIR / "attribution.json"
 MUTED_FILE    = DATA_DIR / "muted.json"
 
 NICE_VOICES = [
-    "Samantha", "Daniel", "Moira", "Karen", "Tessa", "Rishi",
-    "Paulina", "Mónica", "Flo (English (US))", "Sandy (English (US))",
-    "Shelley (English (US))", "Reed (English (US))", "Eddy (English (US))",
+    {"name": "Samantha",               "lang": "en-US", "flag": "🇺🇸"},
+    {"name": "Daniel",                 "lang": "en-GB", "flag": "🇬🇧"},
+    {"name": "Moira",                  "lang": "en-IE", "flag": "🇮🇪"},
+    {"name": "Karen",                  "lang": "en-AU", "flag": "🇦🇺"},
+    {"name": "Tessa",                  "lang": "en-ZA", "flag": "🇿🇦"},
+    {"name": "Rishi",                  "lang": "en-IN", "flag": "🇮🇳"},
+    {"name": "Paulina",                "lang": "es-MX", "flag": "🇲🇽"},
+    {"name": "Mónica",                 "lang": "es-ES", "flag": "🇪🇸"},
+    {"name": "Flo (English (US))",     "lang": "en-US", "flag": "🇺🇸"},
+    {"name": "Sandy (English (US))",   "lang": "en-US", "flag": "🇺🇸"},
+    {"name": "Shelley (English (US))", "lang": "en-US", "flag": "🇺🇸"},
+    {"name": "Reed (English (US))",    "lang": "en-US", "flag": "🇺🇸"},
+    {"name": "Eddy (English (US))",    "lang": "en-US", "flag": "🇺🇸"},
 ]
+NICE_VOICE_NAMES = [v["name"] for v in NICE_VOICES]
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -131,15 +142,23 @@ def health():
 def random_voice():
     registry = load_json(REGISTRY_FILE, {})
     taken = {v["voice"] for v in registry.values() if "voice" in v}
-    available = [v for v in NICE_VOICES if v not in taken]
+    available = [v["name"] for v in NICE_VOICES if v["name"] not in taken]
     if not available:
-        available = NICE_VOICES  # pool exhausted — allow repeats
+        available = NICE_VOICE_NAMES  # pool exhausted — allow repeats
     return {"voice": random.choice(available)}
 
 
 @app.get("/voices")
 def list_voices():
     return {"voices": NICE_VOICES}
+
+
+@app.get("/voices/{name}")
+def get_voice(name: str):
+    voice = next((v for v in NICE_VOICES if v["name"] == name), None)
+    if not voice:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    return voice
 
 
 # ── agents ────────────────────────────────────────────────────────────────────
