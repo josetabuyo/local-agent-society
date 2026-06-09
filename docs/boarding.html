@@ -533,6 +533,8 @@ backend/main.py:6: ModuleNotFoundError"}]}</script>
           <div class="cmd-subs">
             <span class="cmd-sub">inject</span>
             <span class="cmd-sub">clean</span>
+            <span class="cmd-sub">mute</span>
+            <span class="cmd-sub">unmute</span>
             <span class="cmd-sub">sync</span>
             <span class="cmd-sub">restore</span>
             <span class="cmd-sub">delete</span>
@@ -545,11 +547,36 @@ backend/main.py:6: ModuleNotFoundError"}]}</script>
       </div>
       <div class="cmd-card">
         <div class="cmd-name">las ports</div>
-        <div class="cmd-desc">Manage the port registry. Reserve before binding — never hardcode.</div>
+        <div>
+          <div class="cmd-desc">Manage the port registry. Always claim before binding — never hardcode.</div>
+          <div class="cmd-subs">
+            <span class="cmd-sub">ls</span>
+            <span class="cmd-sub">free</span>
+            <span class="cmd-sub">claim</span>
+            <span class="cmd-sub">release</span>
+          </div>
+        </div>
       </div>
       <div class="cmd-card">
         <div class="cmd-name">las voices</div>
-        <div class="cmd-desc">Query available TTS voices on this machine.</div>
+        <div>
+          <div class="cmd-desc">Query TTS voices — each voice has a fixed language.</div>
+          <div class="cmd-subs">
+            <span class="cmd-sub">list</span>
+            <span class="cmd-sub">info</span>
+            <span class="cmd-sub">random</span>
+          </div>
+        </div>
+      </div>
+      <div class="cmd-card">
+        <div class="cmd-name">las queue</div>
+        <div>
+          <div class="cmd-desc">Inspect and manage the TTS speech queue.</div>
+          <div class="cmd-subs">
+            <span class="cmd-sub">ls</span>
+            <span class="cmd-sub">clear</span>
+          </div>
+        </div>
       </div>
       <div class="cmd-card">
         <div class="cmd-name">las install / update</div>
@@ -557,7 +584,7 @@ backend/main.py:6: ModuleNotFoundError"}]}</script>
       </div>
       <div class="cmd-card">
         <div class="cmd-name">las boarding</div>
-        <div class="cmd-desc">Open this page. Pass <code>--print</code> to get the path for scripting.</div>
+        <div class="cmd-desc">Print the path to this page. Pass <code>--open</code> to launch in the browser.</div>
       </div>
     </div>
   </section>
@@ -584,8 +611,8 @@ backend/main.py:6: ModuleNotFoundError"}]}</script>
       <div class="rule">
         <div class="rule-num">III</div>
         <div class="rule-body">
-          <div class="rule-title">Voices — unique per agent</div>
-          <div class="rule-text">Each agent declares its voice in <code>.agent.json</code>. Never impersonate another agent's voice. The backend enforces uniqueness across the registry.</div>
+          <div class="rule-title">Voices — unique per agent, speak in the voice's language <span class="badge">mandatory</span></div>
+          <div class="rule-text">Each agent declares its voice in <code>.agent.json</code>. Never impersonate another agent's voice. Each TTS voice has a fixed language — English voices only sound correct with English text; Spanish voices only with Spanish. Never mix. Check with <code>las voices info &lt;name&gt;</code> or <code>GET /voices/&lt;name&gt;</code>.</div>
         </div>
       </div>
       <div class="rule">
@@ -606,7 +633,7 @@ backend/main.py:6: ModuleNotFoundError"}]}</script>
         <div class="rule-num">VI</div>
         <div class="rule-body">
           <div class="rule-title">Language — respond in the configured locale</div>
-          <div class="rule-text">Read <code>.agent.json</code> for <code>"locale"</code>. English if <code>"en"</code>, Spanish if <code>"es"</code>. Code, comments, and system files are always written in English regardless of locale.</div>
+          <div class="rule-text">Read <code>.agent.json</code> for <code>"locale"</code> (e.g. <code>"en-US"</code>, <code>"es-MX"</code>). If absent, infer from the voice name (Samantha → English; Paulina/Mónica → Spanish). The spoken text and text responses must both be in the voice's language. Code, comments, and system files are always written in English regardless of locale.</div>
         </div>
       </div>
     </div>
