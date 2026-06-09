@@ -5,6 +5,15 @@ import click
 from cli import api
 
 
+def _infer_locale(voice: str) -> str:
+    """Return a sensible locale code for a TTS voice name."""
+    from cli import api
+    try:
+        return api.get(f"/voices/{voice}").get("lang", "en-US")
+    except Exception:
+        return "en-US"
+
+
 def _agent_name_from_cwd():
     p = Path.cwd() / ".agent.json"
     if p.exists():
@@ -56,9 +65,11 @@ def restore(name):
         name = info.get("name") or next(k for k, v in agents.items() if v is info)
 
     target = cwd / ".agent.json"
+    voice = info.get("voice", "Samantha")
     data = {
         "name": name,
-        "voice": info.get("voice", "Samantha"),
+        "voice": voice,
+        "locale": info.get("locale") or _infer_locale(voice),
         "pronunciation": info.get("pronunciation") or name,
         "backend_url": info.get("backend_url", "http://localhost:8700"),
         "frontend_url": info.get("frontend_url", f"http://localhost:8700/widget/{name}"),
@@ -135,6 +146,32 @@ def clean(name):
     injected = result.get("injected", False)
     status = "cleared" if injected else "agent not live (not injected)"
     click.echo(f"{name}: {status}")
+
+
+@agent.command("mute")
+@click.argument("name", required=False)
+def mute(name):
+    """Mute an agent's TTS voice."""
+    if not name:
+        name = _agent_name_from_cwd()
+    if not name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.")
+        raise SystemExit(1)
+    api.post(f"/agents/{name}/mute", {})
+    click.echo(f"{name}: muted.")
+
+
+@agent.command("unmute")
+@click.argument("name", required=False)
+def unmute(name):
+    """Unmute an agent's TTS voice."""
+    if not name:
+        name = _agent_name_from_cwd()
+    if not name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.")
+        raise SystemExit(1)
+    api.delete(f"/agents/{name}/mute")
+    click.echo(f"{name}: unmuted.")
 
 
 @click.command("widget")
