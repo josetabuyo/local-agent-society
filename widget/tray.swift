@@ -587,10 +587,10 @@ class VoiceInputManager {
     }
 
     private func teardownEngine() {
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        engine.inputNode.removeTap(onBus: 0)  // stop callbacks before endAudio to avoid append-after-endAudio crash
         request?.endAudio()
         task?.cancel()
+        engine.stop()
         request = nil
         task = nil
     }
