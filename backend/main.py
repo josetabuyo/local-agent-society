@@ -124,6 +124,11 @@ class AttributionEntry(BaseModel):
     project:   str
 
 
+class RenameRequest(BaseModel):
+    new_name:      str
+    pronunciation: Optional[str] = None
+
+
 class InjectRequest(BaseModel):
     message:     str
     source:      str           = "voice"   # "voice" | "agent" | "external"
@@ -187,6 +192,28 @@ def unregister_agent(name: str):
     del registry[name]
     save_json(REGISTRY_FILE, registry)
     return {"ok": True}
+
+
+@app.patch("/agents/{name}")
+def rename_agent(name: str, body: RenameRequest):
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    new_name = body.new_name.strip()
+    if not new_name:
+        raise HTTPException(status_code=422, detail="new_name must not be empty")
+    if new_name in registry and new_name != name:
+        raise HTTPException(status_code=409, detail=f"Agent '{new_name}' already exists")
+    entry = registry.pop(name)
+    entry["name"] = new_name
+    entry["frontend_url"] = f"http://localhost:8700/widget/{new_name}"
+    if body.pronunciation is not None:
+        entry["pronunciation"] = body.pronunciation
+    elif entry.get("pronunciation") == name:
+        entry["pronunciation"] = new_name
+    registry[new_name] = entry
+    save_json(REGISTRY_FILE, registry)
+    return {"ok": True, "old_name": name, "new_name": new_name}
 
 
 _ports_lock = threading.Lock()

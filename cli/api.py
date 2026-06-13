@@ -40,3 +40,14 @@ def delete(path):
     except requests.HTTPError as e:
         print(f"Error: {e.response.status_code} {e.response.text}")
         sys.exit(1)
+
+
+def patch(path, data=None):
+    try:
+        return _handle(requests.patch(f"{BASE}{path}", json=data or {}, timeout=5))
+    except requests.ConnectionError:
+        print("Error: backend not running. Try `las start`.")
+        sys.exit(1)
+    except requests.HTTPError as e:
+        print(f"Error: {e.response.status_code} {e.response.text}")
+        sys.exit(1)
