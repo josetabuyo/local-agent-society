@@ -42,7 +42,7 @@ Never hardcode a port. The registry guarantees no conflicts.
 1. Check `/ports` to see if the port you want is already registered by another agent.
 2. Check `/ports/free` to get a free one if you don't have one assigned yet.
 3. Register your port BEFORE starting it.
-4. If your assigned port is occupied by another agent, notify them via their `session/extern-inbox.md` and wait for them to release it — never use another agent's port.
+4. If your assigned port is occupied by another agent, inject a message to them (`las agent inject NAME "..."`) and wait for them to release it — never use another agent's port.
 
 ```bash
 # Verify before starting
@@ -71,21 +71,22 @@ curl -s -X POST http://localhost:8700/queue/speak \
   -d '{"text":"Hola, tarea completada.","voice":"Paulina","name":"AGENT"}'
 ```
 
-### 4. Inter-agent messages — via `session/`
-To leave a message for another agent:
+### 4. Inter-agent messages — via `las agent inject`
+To send a message to another live agent's terminal:
 ```bash
-echo "Message from System..." >> /path/to/OtherAgent/session/<slug>-inbox.md
+las agent inject OtherAgent "message here" --from MyAgentName
 ```
-The other agent reads it when starting their next conversation.
-
-### 5. External channel — `session/extern-inbox.md`
-Any script or external process can inject questions or advice:
+Or via the API:
 ```bash
-echo "Reminder: review tests before deploy" >> session/extern-inbox.md
+curl -s -X POST http://localhost:8700/agents/OtherAgent/inject \
+  -H "Content-Type: application/json" \
+  -d '{"message":"...","source":"agent","from_agent":"MyAgentName"}'
 ```
-You read them at the start of the conversation. This channel is the entry point for the outside world into the society.
+If the target agent has no live terminal, the message is not delivered — try again later or wait for the agent to start a session.
 
-### 6. Ports — check BEFORE every server start
+There are no inbox files. There is no `extern-inbox.md`. Communication is live, direct, and goes through the TTY. No file polling.
+
+### 5. Ports — check BEFORE every server start
 Before starting any HTTP server, **always** run this check:
 ```bash
 # Check if your desired port is free
@@ -94,7 +95,7 @@ import sys, json
 p = json.load(sys.stdin)
 port = 'YOUR_PORT'
 if port in p:
-    print(f'TAKEN by {p[port][\"local_agent\"]} — notify them via session/extern-inbox.md and wait')
+    print(f'TAKEN by {p[port][\"local_agent\"]} — inject a message to them and wait')
 else:
     print('FREE — safe to register and start')
 "

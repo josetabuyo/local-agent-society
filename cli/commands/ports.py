@@ -64,3 +64,69 @@ def ports_release(port):
     """Release a registered port."""
     api.delete(f"/ports/{port}")
     click.echo(f"Port {port} released.")
+
+
+@ports.command("audit")
+def ports_audit():
+    """Cross-check port registry against running processes. Finds violations and ghosts."""
+    import subprocess, sys
+
+    registry = api.get("/ports")
+
+    try:
+        lsof_out = subprocess.check_output(
+            ["lsof", "-i", "-P"], stderr=subprocess.DEVNULL
+        ).decode()
+    except subprocess.CalledProcessError:
+        click.echo("Error: could not run lsof.")
+        sys.exit(1)
+
+    listening = {}
+    for line in lsof_out.splitlines():
+        if "LISTEN" not in line:
+            continue
+        parts = line.split()
+        if len(parts) < 9:
+            continue
+        proc, pid, addr = parts[0], parts[1], parts[8]
+        port = addr.rsplit(":", 1)[-1]
+        listening.setdefault(port, []).append((proc, pid))
+
+    IGNORED = {
+        "caddy", "ollama", "rapportd", "ControlCe", "sharingd",
+        "bluetoot", "useractiv", "SCHelper", "UserEvent", "AirPlay",
+    }
+
+    ghosts, ok_ports, unregistered = [], [], []
+
+    for port, info in sorted(registry.items(), key=lambda x: int(x[0])):
+        owner = info["local_agent"]
+        app = info["app"]
+        procs = listening.get(port, [])
+        if not procs:
+            ghosts.append((port, owner, app))
+        else:
+            ok_ports.append((port, owner, app, procs))
+
+    for port, procs in sorted(listening.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+        if port in registry:
+            continue
+        for proc, pid in procs:
+            if proc in IGNORED or not port.isdigit() or int(port) > 50000:
+                continue
+            unregistered.append((port, proc, pid))
+
+    click.echo(f"\n{'PORT':<7} {'OWNER':<20} {'STATUS'}")
+    click.echo("─" * 60)
+    for port, owner, app, procs in ok_ports:
+        proc_str = ", ".join(f"{p}({pid})" for p, pid in procs)
+        click.echo(f":{port:<6} {owner:<20} OK  — {proc_str}")
+    for port, owner, app in ghosts:
+        click.echo(f":{port:<6} {owner:<20} GHOST — registered but not running")
+    if unregistered:
+        click.echo()
+        click.echo("UNREGISTERED LISTENERS:")
+        for port, proc, pid in unregistered:
+            click.echo(f"  :{port:<6} {proc} pid={pid}")
+    click.echo()
+    click.echo(f"{len(ok_ports)} OK, {len(ghosts)} ghost(s), {len(unregistered)} unregistered")

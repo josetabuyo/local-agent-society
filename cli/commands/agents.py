@@ -129,8 +129,44 @@ def inject(name, message, from_agent):
         payload["from_agent"] = from_agent
     result = api.post(f"/agents/{name}/inject", payload)
     injected = result.get("injected", False)
-    status = "injected into terminal" if injected else "written to inbox (agent not live)"
+    status = "injected into terminal" if injected else "agent not live — not delivered"
     click.echo(f"{name}: {status}")
+
+
+@agent.command("rename")
+@click.argument("old_name", required=False)
+@click.argument("new_name")
+@click.option("--pronunciation", default=None, help="Override pronunciation (defaults to new name).")
+def rename(old_name, new_name, pronunciation):
+    """Rename an agent in the backend registry and update .agent.json."""
+    cwd_agent_file = Path.cwd() / ".agent.json"
+
+    if not old_name:
+        old_name = _agent_name_from_cwd()
+    if not old_name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.")
+        raise SystemExit(1)
+
+    result = api.patch(f"/agents/{old_name}", {
+        "new_name": new_name,
+        **({"pronunciation": pronunciation} if pronunciation else {}),
+    })
+    click.echo(f"Renamed '{old_name}' → '{new_name}' in backend registry.")
+
+    if cwd_agent_file.exists():
+        try:
+            d = json.loads(cwd_agent_file.read_text())
+            if d.get("name") == old_name:
+                d["name"] = new_name
+                d["frontend_url"] = f"http://localhost:8700/widget/{new_name}"
+                if pronunciation:
+                    d["pronunciation"] = pronunciation
+                elif d.get("pronunciation") == old_name:
+                    d["pronunciation"] = new_name
+                cwd_agent_file.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+                click.echo(f"Updated .agent.json (name, pronunciation, frontend_url).")
+        except Exception as exc:
+            click.echo(f"Warning: could not update .agent.json — {exc}")
 
 
 @agent.command("clean")

@@ -59,10 +59,10 @@ curl -s -X POST http://localhost:8700/agents \
   -d '{"name":"AGENT","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/AGENT"}'
 ```
 
-### 6. Create session channels
+### 6. Create session directory
 ```bash
 mkdir -p CWD/session
-touch CWD/session/bitacora.md CWD/session/extern-inbox.md
+touch CWD/session/bitacora.md
 ```
 
 ### 7. Register ports (MANDATORY)
@@ -71,22 +71,23 @@ Before the agent can start any HTTP server, it must register its ports.
 
 Get a free port for each server this agent will run:
 ```bash
-curl -s http://localhost:8700/ports/free
+las ports free
 ```
 
-Register each port before use:
+Claim it:
 ```bash
-curl -s -X POST http://localhost:8700/ports/claim \
-  -H "Content-Type: application/json" \
-  -d '{"port": PORT, "app": "APP_DESCRIPTION", "local_agent": "AGENT", "path": "CWD"}'
+las ports claim "APP_DESCRIPTION" --port PORT
 ```
 
-**Show the agent its registered ports and write them into any start scripts or config files (package.json, .env, etc.).**
+**Write the port into the project's config files (package.json, .env, start scripts, etc.) so it never gets changed.**
 
-Remind the agent of the port contract:
-- **Never hardcode a port** that isn't in the registry.
-- **Always check `/ports` before starting a server** — if occupied by another agent, notify them via their `session/extern-inbox.md` and wait.
-- Using another agent's port crashes widgets and audio across the entire Society.
+Port contract:
+- Never hardcode a port not in the registry.
+- Before starting a server: `las ports audit` to check for conflicts.
+- If a port is taken by another agent, inject a message to them and wait:
+  ```bash
+  las agent inject OtherAgent "Port PORT is needed — can you release it?" --from AGENT
+  ```
 
 ### 8. Launch widget
 ```bash
