@@ -1,3 +1,4 @@
+import datetime
 import json
 import subprocess
 from pathlib import Path
@@ -40,6 +41,83 @@ def agents_list():
     click.echo("-" * 70)
     for name, info in data.items():
         click.echo(f"{name:<20} {info.get('voice','?'):<25} {info.get('path','?')}")
+
+
+@agent.command("new")
+@click.argument("name")
+@click.option("--voice", default=None, help="TTS voice name. Auto-assigned if omitted.")
+@click.option("--dir", "target_dir", default=None,
+              help="Directory for the agent (default: current directory).")
+def new(name, voice, target_dir):
+    """Create a new agent: writes .agent.json, registers with backend, launches widget."""
+    cwd = Path(target_dir).resolve() if target_dir else Path.cwd()
+
+    # Ensure target dir exists
+    cwd.mkdir(parents=True, exist_ok=True)
+
+    # Guard: don't overwrite an existing agent
+    agent_file = cwd / ".agent.json"
+    if agent_file.exists():
+        existing = json.loads(agent_file.read_text()).get("name", "?")
+        click.echo(f"Error: {agent_file} already exists (agent '{existing}'). "
+                   "Use `las agent rename` or delete it first.")
+        raise SystemExit(1)
+
+    # Pick voice
+    if voice:
+        chosen_voice = voice
+    else:
+        data = api.get("/voices/random")
+        chosen_voice = data.get("voice") or data.get("name", "Samantha")
+
+    # Resolve locale from voice
+    try:
+        locale = api.get(f"/voices/{chosen_voice}").get("lang", "en-US")
+    except SystemExit:
+        locale = "en-US"
+
+    backend_url = "http://localhost:8700"
+    frontend_url = f"{backend_url}/widget/{name}"
+
+    # Write .agent.json
+    agent_data = {
+        "name": name,
+        "voice": chosen_voice,
+        "locale": locale,
+        "pronunciation": name,
+        "backend_url": backend_url,
+        "frontend_url": frontend_url,
+        "created": str(datetime.date.today()),
+    }
+    agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
+    click.echo(f"Created {agent_file}")
+
+    # Register with backend
+    api.post("/agents", {
+        "name": name,
+        "voice": chosen_voice,
+        "path": str(cwd),
+        "backend_url": backend_url,
+        "frontend_url": frontend_url,
+    })
+    click.echo(f"Registered '{name}' with backend.")
+
+    # Create session dir
+    session_dir = cwd / "session"
+    session_dir.mkdir(exist_ok=True)
+    (session_dir / "bitacora.md").touch()
+    click.echo(f"Created {session_dir}/")
+
+    # Launch widget
+    subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
+    click.echo(f"Widget launched.")
+
+    # Announce
+    lang = locale.split("-")[0]
+    greeting = f"Hello, I am {name}, ready." if lang != "es" else f"Hola, soy {name}, listo."
+    api.post("/queue/speak", {"text": greeting, "voice": chosen_voice, "name": name})
+
+    click.echo(f"\nAgent '{name}' created — voice: {chosen_voice}, locale: {locale}")
 
 
 @agent.command("restore")
