@@ -1,5 +1,6 @@
 import click
 from cli import api
+from cli.commands import complete_voice_names
 
 
 @click.group()
@@ -26,7 +27,7 @@ def list_voices():
 
 
 @voices.command("info")
-@click.argument("name")
+@click.argument("name", shell_complete=complete_voice_names)
 def voice_info(name):
     """Show language info for a specific voice."""
     data = api.get(f"/voices/{name}")

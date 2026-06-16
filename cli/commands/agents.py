@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 import click
 from cli import api
+from cli.commands import complete_agent_names, complete_voice_names
 
 
 def _infer_locale(voice: str) -> str:
@@ -45,7 +46,7 @@ def agents_list():
 
 @agent.command("new")
 @click.argument("name")
-@click.option("--voice", default=None, help="TTS voice name. Auto-assigned if omitted.")
+@click.option("--voice", default=None, shell_complete=complete_voice_names, help="TTS voice name. Auto-assigned if omitted.")
 @click.option("--dir", "target_dir", default=None,
               help="Directory for the agent (default: current directory).")
 def new(name, voice, target_dir):
@@ -121,7 +122,7 @@ def new(name, voice, target_dir):
 
 
 @agent.command("restore")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete_agent_names)
 def restore(name):
     """Restore .agent.json from backend registry (use if accidentally deleted)."""
     cwd = Path.cwd()
@@ -178,7 +179,7 @@ def sync():
 
 
 @agent.command("delete")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete_agent_names)
 @click.option("--yes", is_flag=True, help="Skip confirmation prompt.")
 def delete(name, yes):
     """Unregister an agent from the backend (does not delete files)."""
@@ -194,7 +195,7 @@ def delete(name, yes):
 
 
 @agent.command("inject")
-@click.argument("name")
+@click.argument("name", shell_complete=complete_agent_names)
 @click.argument("message")
 @click.option("--from", "from_agent", default=None, help="Sender name shown in the terminal prefix")
 def inject(name, message, from_agent):
@@ -212,7 +213,7 @@ def inject(name, message, from_agent):
 
 
 @agent.command("rename")
-@click.argument("old_name", required=False)
+@click.argument("old_name", required=False, shell_complete=complete_agent_names)
 @click.argument("new_name")
 @click.option("--pronunciation", default=None, help="Override pronunciation (defaults to new name).")
 def rename(old_name, new_name, pronunciation):
@@ -248,7 +249,7 @@ def rename(old_name, new_name, pronunciation):
 
 
 @agent.command("clean")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete_agent_names)
 def clean(name):
     """Inject /clear into the agent terminal (same as the broom button)."""
     if not name:
@@ -263,7 +264,7 @@ def clean(name):
 
 
 @agent.command("mute")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete_agent_names)
 def mute(name):
     """Mute an agent's TTS voice."""
     if not name:
@@ -276,7 +277,7 @@ def mute(name):
 
 
 @agent.command("unmute")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete_agent_names)
 def unmute(name):
     """Unmute an agent's TTS voice."""
     if not name:
@@ -289,7 +290,7 @@ def unmute(name):
 
 
 @click.command("widget")
-@click.argument("name", required=False)
+@click.argument("name", required=False, shell_complete=complete_agent_names)
 def widget(name):
     """Reopen the agent widget on the current Space."""
     if not name:

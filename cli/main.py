@@ -6,6 +6,7 @@ from cli.commands.ports import ports
 from cli.commands.voices import voices
 from cli.commands.queue import queue
 from cli.commands.boarding import boarding
+from cli.commands.completion import completion
 
 
 @click.group()
@@ -28,3 +29,4 @@ cli.add_command(ports)
 cli.add_command(voices)
 cli.add_command(queue)
 cli.add_command(boarding)
+cli.add_command(completion)
