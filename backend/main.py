@@ -466,24 +466,30 @@ set foundIt to false
 set sessionCount to 0
 set seenTTYs to ""
 tell application "iTerm2"
-    repeat with w in windows
-        set wRef to w
-        repeat with t in tabs of w
-            repeat with s in sessions of t
+    set winCount to count of windows
+    repeat with wi from 1 to winCount
+        set tabCount to count of tabs of window wi
+        repeat with ti from 1 to tabCount
+            set sesCount to count of sessions of tab ti of window wi
+            repeat with si from 1 to sesCount
                 set sessionCount to sessionCount + 1
+                set sessionTty to ""
                 try
-                    set theTTY to tty of s
-                    set seenTTYs to seenTTYs & theTTY & "|"
-                    if theTTY contains "{tty}" then
-                        set foundIt to true
-                        try
-                            set index of wRef to 1
-                            set current tab of wRef to t
-                            set current session of t to s
-                            activate
-                        end try
-                    end if
+                    set sessionTty to tty of session si of tab ti of window wi
+                    set seenTTYs to seenTTYs & sessionTty & "|"
                 end try
+                if sessionTty contains "{tty}" then
+                    set foundIt to true
+                    -- capture references before reordering (index shifts after set index)
+                    set theWin to window wi
+                    set theTab to tab ti of theWin
+                    set theSes to session si of theTab
+                    set index of theWin to 1
+                    set current tab of theWin to theTab
+                    tell theSes to select
+                    activate
+                    return "ok|sessions=" & sessionCount & "|ttys=" & seenTTYs
+                end if
             end repeat
         end repeat
     end repeat

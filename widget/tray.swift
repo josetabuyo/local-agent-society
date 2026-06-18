@@ -825,9 +825,26 @@ private func phImage(_ base64: String) -> NSImage {
     return img
 }
 
+// MARK: - File logger
+
+let widgetLogPath = "/Users/josetabuyo/Development/local-agent-society/session/widget.log"
+
+func wlog(_ msg: String) {
+    let ts = ISO8601DateFormatter().string(from: Date())
+    let line = "[\(ts)] \(msg)\n"
+    NSLog("%@", line.trimmingCharacters(in: .newlines))
+    if let data = line.data(using: .utf8) {
+        if FileManager.default.fileExists(atPath: widgetLogPath) {
+            if let fh = FileHandle(forWritingAtPath: widgetLogPath) {
+                fh.seekToEndOfFile(); fh.write(data); fh.closeFile()
+            }
+        } else {
+            try? data.write(to: URL(fileURLWithPath: widgetLogPath))
+        }
+    }
+}
+
 // MARK: - Widget window
-
-
 
 class WidgetWindow: NSObject, NSWindowDelegate {
     let agentName: String
@@ -1006,6 +1023,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             forName: Notification.Name("com.localagentsociety.focus.\(agentName)"),
             object: nil, queue: .main
         ) { [weak self] _ in
+            self?.applyPrefs()
             self?.window.orderFrontRegardless()
         }
 
@@ -1085,15 +1103,42 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     @objc func focusAgentTerminal(_ sender: NSButton) {
-        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/ttys") else { return }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self = self,
-                  let data = data,
+        wlog("[focus] button tapped agent=\(agentName)")
+        window.level = .normal
+        // Activate iTerm2 NOW (no TCC needed) so it's already frontmost when the
+        // backend AppleScript runs — makes set-current-tab an internal op, not a focus steal.
+        if let iterm = NSRunningApplication.runningApplications(withBundleIdentifier: "com.googlecode.iterm2").first {
+            let ok = iterm.activate(options: .activateIgnoringOtherApps)
+            wlog("[focus] pre-activate iTerm2 ok=\(ok)")
+        }
+        guard let ttysURL = URL(string: "http://localhost:8700/agents/\(agentName)/ttys") else {
+            wlog("[focus] ERROR: could not build /ttys URL")
+            return
+        }
+        URLSession.shared.dataTask(with: ttysURL) { [weak self] data, resp, error in
+            guard let self = self else { return }
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if let error = error {
+                wlog("[focus] ✗ ERROR /ttys network error: \(error.localizedDescription)")
+                return
+            }
+            wlog("[focus] /ttys HTTP \(status)")
+            guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let ttys = json["ttys"] as? [String],
-                  let tty = ttys.first else { return }
+                  let tty  = ttys.first else {
+                let raw = data.flatMap { String(data: $0, encoding: .utf8) } ?? "nil"
+                wlog("[focus] ✗ ERROR /ttys parse failed or empty — raw=\(raw)")
+                return
+            }
+            wlog("[focus] got tty=\(tty) (of \(ttys.count) total)")
             DispatchQueue.main.async {
-                self.focusSession(tty: tty)
+                self.focusSession(tty: tty) {
+                    wlog("[focus] ✓ DONE — injecting !las widget")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        self.injectCommand("!las widget", tty: tty)
+                    }
+                }
             }
         }.resume()
     }
@@ -1402,36 +1447,34 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }.resume()
     }
 
-    func focusSession(tty: String) {
-        let ttyShort = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
-        let script = """
-        tell application id "com.googlecode.iterm2"
-            set winCount to count of windows
-            repeat with wi from 1 to winCount
-                set w to window wi
-                set tabCount to count of tabs of w
-                repeat with ti from 1 to tabCount
-                    set t to tab ti of w
-                    set sesCount to count of sessions of t
-                    repeat with si from 1 to sesCount
-                        set s to session si of t
-                        set sessionTty to ""
-                        try
-                            set sessionTty to (tty of s)
-                        end try
-                        if sessionTty contains "\(ttyShort)" then
-                            set index of w to 1
-                            activate
-                            return "ok"
-                        end if
-                    end repeat
-                end repeat
-            end repeat
-            return "not_found"
-        end tell
-        """
-        var err: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&err)
+    func focusSession(tty: String, then completion: (() -> Void)? = nil) {
+        wlog("[focusSession] /focus tty=\(tty)")
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/focus") else {
+            completion?(); return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let focused = (try? JSONSerialization.jsonObject(with: data ?? Data()) as? [String: Any])?["focused"] as? Bool ?? false
+            wlog("[focusSession] /focus HTTP \(status) focused=\(focused)")
+            DispatchQueue.main.async { completion?() }
+        }.resume()
+    }
+
+    private func injectCommand(_ command: String, tty: String) {
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/inject") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = ["message": command, "source": "raw", "tty": tty]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        req.timeoutInterval = 5
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            let injected = (try? JSONSerialization.jsonObject(with: data ?? Data()) as? [String: Any])?["injected"] as? Bool ?? false
+            wlog("[focus] \(command) injected=\(injected)")
+        }.resume()
     }
 
     private func injectToSession(_ text: String, source: String = "voice") {
@@ -1720,6 +1763,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func openWidget(for name: String) {
         closedByUser.remove(name)
         if let w = widgets[name] {
+            w.applyPrefs()  // restores window level after focus action lowered it
             w.window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return

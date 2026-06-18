@@ -194,6 +194,20 @@ def delete(name, yes):
     click.echo(f"Agent '{name}' unregistered.")
 
 
+@agent.command("focus")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def focus(name):
+    """Bring the agent's iTerm2 window to the front."""
+    if not name:
+        name = _agent_name_from_cwd()
+    if not name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.")
+        raise SystemExit(1)
+    result = api.post(f"/agents/{name}/focus", {})
+    focused = result.get("focused", False)
+    click.echo(f"{name}: {'focused' if focused else 'session not found'}")
+
+
 @agent.command("inject")
 @click.argument("name", shell_complete=complete_agent_names)
 @click.argument("message")
