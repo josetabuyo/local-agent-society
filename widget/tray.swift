@@ -315,6 +315,28 @@ let supportedLocales: [(name: String, flag: String, id: String)] = [
     ("Deutsch",    "🇩🇪", "de-DE"),
 ]
 
+struct ClaudeSession {
+    let id: UUID
+    let model: String
+    let modelId: String?
+    let terminalTitle: String
+    var tty: String?
+
+    init(model: String, modelId: String?) {
+        self.id = UUID()
+        self.model = model
+        self.modelId = modelId
+        self.terminalTitle = "claude \(model)"
+    }
+}
+
+let claudeModels: [(name: String, modelId: String?)] = [
+    ("Default", nil),
+    ("Haiku",   "claude-haiku-4-5-20251001"),
+    ("Sonnet",  "claude-sonnet-4-6"),
+    ("Opus",    "claude-opus-4-8"),
+]
+
 // TTS voice catalogue — name must match exactly what `say -v '?'` outputs.
 let allVoices: [(name: String, lang: String, flag: String)] = [
     ("Samantha",               "en-US", "🇺🇸"),
@@ -432,6 +454,153 @@ class VoicePickerVC: NSViewController {
     }
 }
 
+// MARK: - Model picker popover
+
+class ModelPickerVC: NSViewController {
+    weak var widget: WidgetWindow?
+    weak var popover: NSPopover?
+
+    init(widget: WidgetWindow, popover: NSPopover) {
+        self.widget = widget
+        self.popover = popover
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let W: CGFloat = 160, rowH: CGFloat = 30, pad: CGFloat = 8
+        let H = CGFloat(claudeModels.count) * rowH + pad * 2
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        for (i, m) in claudeModels.enumerated() {
+            let y = H - pad - CGFloat(i + 1) * rowH
+            let btn = NSButton(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: rowH - 2))
+            btn.title = m.name
+            btn.tag = i
+            btn.alignment = .left
+            btn.bezelStyle = .rounded
+            btn.isBordered = false
+            btn.font = NSFont.systemFont(ofSize: 12)
+            btn.target = self
+            btn.action = #selector(selectModel(_:))
+            v.addSubview(btn)
+        }
+        self.view = v
+    }
+
+    @objc func selectModel(_ sender: NSButton) {
+        let m = claudeModels[sender.tag]
+        widget?.launchTerminal(name: m.name, modelId: m.modelId)
+        popover?.close()
+    }
+}
+
+// MARK: - Mic options popover (language + session routing)
+
+class MicOptionsVC: NSViewController {
+    let agentName: String
+    weak var widget: WidgetWindow?
+    weak var popover: NSPopover?
+    let discoveredTTYs: [String]
+
+    init(agentName: String, widget: WidgetWindow, popover: NSPopover, ttys: [String] = []) {
+        self.agentName = agentName
+        self.widget = widget
+        self.popover = popover
+        self.discoveredTTYs = ttys
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let W: CGFloat = 210, rowH: CGFloat = 30, headerH: CGFloat = 20, pad: CGFloat = 8
+
+        let langSectionH = headerH + CGFloat(supportedLocales.count) * rowH
+        let sessSectionH: CGFloat = discoveredTTYs.isEmpty ? 0
+            : (2 * pad + 1 + pad + headerH + CGFloat(discoveredTTYs.count) * rowH)
+        let H = pad + langSectionH + sessSectionH + pad
+
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+
+        // Language header
+        var curY = H - pad - headerH
+        v.addSubview(makeHeader("Language", y: curY, w: W, pad: pad, h: headerH))
+
+        // Language buttons
+        let currentLocale = Prefs.voiceLocale(for: agentName)
+        for (i, lang) in supportedLocales.enumerated() {
+            curY -= rowH
+            let isSel = lang.id == currentLocale
+            let btn = NSButton(frame: NSRect(x: pad, y: curY, width: W - pad * 2, height: rowH - 2))
+            btn.title = "\(lang.flag)  \(lang.name)"
+            btn.tag = i
+            btn.alignment = .left
+            btn.bezelStyle = .rounded
+            btn.isBordered = isSel
+            btn.font = isSel ? NSFont.boldSystemFont(ofSize: 12) : NSFont.systemFont(ofSize: 12)
+            btn.target = self
+            btn.action = #selector(selectLang(_:))
+            v.addSubview(btn)
+        }
+
+        if !discoveredTTYs.isEmpty {
+            curY -= pad
+            curY -= 1
+            let sep = NSView(frame: NSRect(x: pad, y: curY, width: W - pad * 2, height: 1))
+            sep.wantsLayer = true
+            sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+            v.addSubview(sep)
+            curY -= pad
+
+            curY -= headerH
+            v.addSubview(makeHeader("Route to", y: curY, w: W, pad: pad, h: headerH))
+
+            let sessions = widget?.sessions ?? []
+            for (i, tty) in discoveredTTYs.enumerated() {
+                curY -= rowH
+                // Match TTY to a known session name, fallback to "Terminal N"
+                let label = sessions.first(where: { $0.tty == tty })?.model ?? "Terminal \(i + 1)"
+                let isSel = tty == widget?.selectedTTY
+                let btn = NSButton(frame: NSRect(x: pad, y: curY, width: W - pad * 2, height: rowH - 2))
+                btn.title = "🖥  \(label)  · \(tty)"
+                btn.tag = i
+                btn.alignment = .left
+                btn.bezelStyle = .rounded
+                btn.isBordered = isSel
+                btn.font = isSel ? NSFont.boldSystemFont(ofSize: 11) : NSFont.systemFont(ofSize: 11)
+                btn.target = self
+                btn.action = #selector(selectSession(_:))
+                v.addSubview(btn)
+            }
+        }
+
+        self.view = v
+    }
+
+    private func makeHeader(_ title: String, y: CGFloat, w: CGFloat, pad: CGFloat, h: CGFloat) -> NSTextField {
+        let lbl = NSTextField(labelWithString: title.uppercased())
+        lbl.frame = NSRect(x: pad, y: y, width: w - pad * 2, height: h)
+        lbl.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        lbl.textColor = .secondaryLabelColor
+        return lbl
+    }
+
+    @objc func selectLang(_ sender: NSButton) {
+        let lang = supportedLocales[sender.tag]
+        Prefs.markVoiceLocaleManual(for: agentName)
+        Prefs.save(voiceLocale: lang.id, for: agentName)
+        widget?.voice.setLocale(lang.id)
+        popover?.close()
+    }
+
+    @objc func selectSession(_ sender: NSButton) {
+        guard sender.tag < discoveredTTYs.count else { return }
+        let tty = discoveredTTYs[sender.tag]
+        widget?.selectedTTY = tty
+        widget?.focusSession(tty: tty)
+        popover?.close()
+    }
+}
+
 // MARK: - Non-focusable button base (prevents tab-focus highlight in the widget)
 
 class WidgetButton: NSButton {
@@ -466,6 +635,10 @@ class MicButton: NSButton {
         pressTimer = nil
     }
 }
+
+// MARK: - Terminal button (short press = launch default, long press = model picker)
+
+class TerminalButton: MicButton {}
 
 // MARK: - Voice input manager
 
@@ -670,9 +843,15 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var speakerBtn: WidgetButton!
     var clearBtn: WidgetButton!
     var infoBtn: WidgetButton!
+    var terminalBtn: TerminalButton!
+    var focusBtn: WidgetButton!
     var voice: VoiceInputManager!
     var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
     var isMuted: Bool = false
+    var modelPopover: NSPopover?
+    var sessions: [ClaudeSession] = []
+    var activeSessionId: UUID?
+    var selectedTTY: String?
 
     var isInfoExpanded = false
     var infoPanelView: NSView?
@@ -762,6 +941,16 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         clearBtn.action        = #selector(clearSession(_:))
         content.addSubview(clearBtn)
 
+        // Terminal button — between clearBtn and speakerBtn
+        terminalBtn = TerminalButton(frame: NSRect(x: W - 186, y: 16, width: 32, height: 32))
+        terminalBtn.bezelStyle    = .inline
+        terminalBtn.isBordered    = false
+        terminalBtn.focusRingType = .none
+        terminalBtn.imageScaling  = .scaleProportionallyUpOrDown
+        terminalBtn.onShortPress  = { [weak self] in self?.launchTerminal(name: "Default", modelId: nil) }
+        terminalBtn.onLongPress   = { [weak self] in self?.showModelPicker() }
+        content.addSubview(terminalBtn)
+
         // Info button — bottom-left
         infoBtn = WidgetButton(frame: NSRect(x: 18, y: 16, width: 32, height: 32))
         infoBtn.imageScaling  = .scaleProportionallyUpOrDown
@@ -771,6 +960,16 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         infoBtn.target        = self
         infoBtn.action        = #selector(toggleInfo(_:))
         content.addSubview(infoBtn)
+
+        // Focus button — top-right
+        focusBtn = WidgetButton(frame: NSRect(x: W - 38, y: H - 56, width: 28, height: 28))
+        focusBtn.imageScaling  = .scaleProportionallyUpOrDown
+        focusBtn.bezelStyle    = .inline
+        focusBtn.isBordered    = false
+        focusBtn.focusRingType = .none
+        focusBtn.target        = self
+        focusBtn.action        = #selector(focusAgentTerminal(_:))
+        content.addSubview(focusBtn)
 
         // Sync STT locale to match TTS voice unless user explicitly set it via the language picker
         if !Prefs.voiceLocaleIsManual(for: agentName) && !agentVoice.isEmpty {
@@ -793,6 +992,13 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }
 
         applyPrefs()
+
+        // Discover any already-running iTerm2 session for this agent at startup
+        fetchActiveTTYs { [weak self] ttys in
+            guard let self = self, let first = ttys.first else { return }
+            if self.selectedTTY == nil { self.selectedTTY = first }
+        }
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -826,11 +1032,13 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         nameLbl?.strokeOpacity = opacity
         nameLbl?.needsDisplay  = true
 
-        dotsBtn?.alphaValue    = opacity
-        micBtn?.alphaValue     = opacity
-        speakerBtn?.alphaValue = opacity
-        clearBtn?.alphaValue   = opacity
-        infoBtn?.alphaValue    = opacity
+        dotsBtn?.alphaValue       = opacity
+        micBtn?.alphaValue        = opacity
+        speakerBtn?.alphaValue    = opacity
+        clearBtn?.alphaValue      = opacity
+        infoBtn?.alphaValue       = opacity
+        terminalBtn?.alphaValue   = opacity
+        focusBtn?.alphaValue      = opacity
         let strokeA = min(opacity * 1.1 + 0.1, 1.0)
         let iconColor = NSColor.white.withAlphaComponent(strokeA)
         dotsBtn?.image = phImage(phGearPNG)
@@ -844,6 +1052,16 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         updateMicIcon(color: idleFill)
         infoBtn?.image = phImage(phInfoPNG)
         infoBtn?.imageScaling = .scaleProportionallyUpOrDown
+        let termCfg = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+        terminalBtn?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
+            .withSymbolConfiguration(termCfg)
+        terminalBtn?.imageScaling = .scaleProportionallyUpOrDown
+        terminalBtn?.contentTintColor = iconColor
+        let focusCfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        focusBtn?.image = NSImage(systemSymbolName: "scope", accessibilityDescription: "Focus terminal")?
+            .withSymbolConfiguration(focusCfg)
+        focusBtn?.imageScaling = .scaleProportionallyUpOrDown
+        focusBtn?.contentTintColor = iconColor
         updateSpeakerIcon()
         updateInfoIcon()
 
@@ -864,6 +1082,20 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         p.behavior = .transient
         p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         configPopover = p
+    }
+
+    @objc func focusAgentTerminal(_ sender: NSButton) {
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/ttys") else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self = self,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ttys = json["ttys"] as? [String],
+                  let tty = ttys.first else { return }
+            DispatchQueue.main.async {
+                self.focusSession(tty: tty)
+            }
+        }.resume()
     }
 
     func updateMicIcon(color: NSColor) {
@@ -1092,14 +1324,114 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
     func showLangPicker() {
         if let p = langPopover, p.isShown { p.close(); return }
+        fetchActiveTTYs { [weak self] ttys in
+            guard let self = self else { return }
+            let p = NSPopover()
+            p.contentViewController = MicOptionsVC(agentName: self.agentName, widget: self, popover: p, ttys: ttys)
+            p.behavior = .transient
+            p.show(relativeTo: self.micBtn.bounds, of: self.micBtn, preferredEdge: .maxY)
+            self.langPopover = p
+            self.updateMicIcon(color: .systemBlue)
+            p.contentViewController?.view.window?.windowController?.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private func fetchActiveTTYs(completion: @escaping ([String]) -> Void) {
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/ttys") else {
+            completion([]); return
+        }
+        URLSession.shared.dataTask(with: url) { data, _, _ in
+            let ttys: [String]
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let list = json["ttys"] as? [String] {
+                ttys = list
+            } else {
+                ttys = []
+            }
+            DispatchQueue.main.async { completion(ttys) }
+        }.resume()
+    }
+
+    func showModelPicker() {
+        if let p = modelPopover, p.isShown { p.close(); return }
         let p = NSPopover()
-        p.contentViewController = LangPickerVC(agentName: agentName, widget: self, popover: p)
+        p.contentViewController = ModelPickerVC(widget: self, popover: p)
         p.behavior = .transient
-        p.show(relativeTo: micBtn.bounds, of: micBtn, preferredEdge: .maxY)
-        langPopover = p
-        // Blue tint while picker is open
-        updateMicIcon(color: .systemBlue)
+        p.show(relativeTo: terminalBtn.bounds, of: terminalBtn, preferredEdge: .maxY)
+        modelPopover = p
         p.contentViewController?.view.window?.windowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    func launchTerminal(name: String, modelId: String?) {
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/terminal") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var payload: [String: Any] = ["model": name]
+        if let mid = modelId { payload["model_id"] = mid }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
+        req.timeoutInterval = 12
+
+        let session = ClaudeSession(model: name, modelId: modelId)
+        sessions.append(session)
+        let sessionId = session.id
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if status != 200 {
+                    NSLog("[terminal] open_terminal failed status=%d error=%@", status, error?.localizedDescription ?? "nil")
+                    return
+                }
+                // Discover new TTY after the process starts, tag it back onto the session
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                    self?.fetchActiveTTYs { ttys in
+                        guard let self = self else { return }
+                        let assignedTTYs = Set(self.sessions.compactMap { $0.tty })
+                        for tty in ttys where !assignedTTYs.contains(tty) {
+                            if let idx = self.sessions.firstIndex(where: { $0.id == sessionId && $0.tty == nil }) {
+                                self.sessions[idx].tty = tty
+                                self.selectedTTY = tty
+                            }
+                        }
+                    }
+                }
+            }
+        }.resume()
+    }
+
+    func focusSession(tty: String) {
+        let ttyShort = tty.hasPrefix("/dev/") ? String(tty.dropFirst(5)) : tty
+        let script = """
+        tell application id "com.googlecode.iterm2"
+            set winCount to count of windows
+            repeat with wi from 1 to winCount
+                set w to window wi
+                set tabCount to count of tabs of w
+                repeat with ti from 1 to tabCount
+                    set t to tab ti of w
+                    set sesCount to count of sessions of t
+                    repeat with si from 1 to sesCount
+                        set s to session si of t
+                        set sessionTty to ""
+                        try
+                            set sessionTty to (tty of s)
+                        end try
+                        if sessionTty contains "\(ttyShort)" then
+                            set index of w to 1
+                            activate
+                            return "ok"
+                        end if
+                    end repeat
+                end repeat
+            end repeat
+            return "not_found"
+        end tell
+        """
+        var err: NSDictionary?
+        NSAppleScript(source: script)?.executeAndReturnError(&err)
     }
 
     private func injectToSession(_ text: String, source: String = "voice") {
@@ -1108,10 +1440,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "message": text,
-            "source":  source,
-        ])
+        var payload: [String: Any] = ["message": text, "source": source]
+        if let tty = selectedTTY { payload["tty"] = tty }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         req.timeoutInterval = 5
 
         URLSession.shared.dataTask(with: req) { [weak self] data, response, error in
@@ -1186,6 +1517,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             speakerBtn.isHidden  = true
             clearBtn.isHidden    = true
             infoBtn.isHidden     = true
+            terminalBtn.isHidden = true
 
             let W = screen.width, H = screen.height
             let labelH = H * 0.30
@@ -1196,11 +1528,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
         } else {
-            dotsBtn.isHidden    = false
-            micBtn.isHidden     = false
-            speakerBtn.isHidden = false
-            clearBtn.isHidden   = false
-            infoBtn.isHidden    = false
+            dotsBtn.isHidden     = false
+            micBtn.isHidden      = false
+            speakerBtn.isHidden  = false
+            clearBtn.isHidden    = false
+            infoBtn.isHidden     = false
+            terminalBtn.isHidden = false
 
             let W: CGFloat = 300, H: CGFloat = 160
             let target: NSRect
@@ -1222,10 +1555,11 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
 
-            dotsBtn.frame    = NSRect(x: W - 50,  y: 16, width: 32, height: 32)
-            micBtn.frame     = NSRect(x: W - 90,  y: 16, width: 32, height: 32)
-            speakerBtn.frame = NSRect(x: W - 130, y: 16, width: 32, height: 32)
-            clearBtn.frame   = NSRect(x: 58,       y: 16, width: 32, height: 32)
+            dotsBtn.frame     = NSRect(x: W - 50,  y: 16, width: 32, height: 32)
+            micBtn.frame      = NSRect(x: W - 90,  y: 16, width: 32, height: 32)
+            speakerBtn.frame  = NSRect(x: W - 130, y: 16, width: 32, height: 32)
+            clearBtn.frame    = NSRect(x: 58,      y: 16, width: 32, height: 32)
+            terminalBtn.frame = NSRect(x: 114,     y: 16, width: 32, height: 32)
         }
     }
 

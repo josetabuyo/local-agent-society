@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
+import shlex
 import subprocess
 import threading
 import time
@@ -133,6 +134,12 @@ class InjectRequest(BaseModel):
     message:     str
     source:      str           = "voice"   # "voice" | "agent" | "external"
     from_agent:  Optional[str] = None
+    tty:         Optional[str] = None      # specific TTY to inject into (skips auto-discovery)
+
+
+class TerminalRequest(BaseModel):
+    model:    str            = "Default"
+    model_id: Optional[str] = None        # claude --model flag value
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -317,8 +324,8 @@ def clear_queue():
 
 # ── agent inject ─────────────────────────────────────────────────────────────
 
-def _find_claude_tty(agent_path: str) -> str | None:
-    """Find the TTY of a claude process whose cwd is exactly agent_path or a subdir."""
+def _claude_pids_for_path(agent_path: str) -> list[str]:
+    """Return PIDs of all claude processes whose cwd matches agent_path."""
     try:
         ps_out = subprocess.run(
             ["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, timeout=5
@@ -334,29 +341,58 @@ def _find_claude_tty(agent_path: str) -> str | None:
             pid, cmd = parts
             if pid.isdigit() and "claude" in cmd and "Claude.app" not in cmd:
                 pids.append(pid)
+        matched = []
         for pid in pids:
-            if not pid.isdigit():
-                continue
             lsof_out = subprocess.run(
                 ["/usr/sbin/lsof", "-p", pid, "-a", "-d", "cwd"],
                 capture_output=True, text=True, timeout=5
             ).stdout
-            # Parse cwd from lsof output — avoid substring false matches
             for line in lsof_out.splitlines()[1:]:
                 parts = line.split()
                 if not parts:
                     continue
                 cwd = parts[-1]
                 if cwd == agent_path or cwd.startswith(agent_path + "/"):
-                    tty = subprocess.run(
-                        ["ps", "-p", pid, "-o", "tty="],
-                        capture_output=True, text=True, timeout=5
-                    ).stdout.strip()
-                    if tty and tty != "??":
-                        return tty
+                    matched.append(pid)
+                    break
+        return matched
     except Exception:
-        pass
+        return []
+
+
+def _find_claude_tty(agent_path: str) -> str | None:
+    """Find the TTY of the first claude process whose cwd is agent_path."""
+    for pid in _claude_pids_for_path(agent_path):
+        try:
+            tty = subprocess.run(
+                ["ps", "-p", pid, "-o", "tty="],
+                capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+            if tty and tty != "??":
+                return tty
+        except Exception:
+            continue
     return None
+
+
+def _find_all_claude_ttys(agent_path: str) -> list[str]:
+    """Return ALL TTYs of claude processes whose cwd is agent_path (deduplicated, ordered)."""
+    seen: list[str] = []
+    for pid in _claude_pids_for_path(agent_path):
+        try:
+            ps_out = subprocess.run(
+                ["ps", "-p", pid, "-o", "tty=,comm="],
+                capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+            parts = ps_out.split(None, 1)
+            tty  = parts[0] if parts else ""
+            comm = parts[1] if len(parts) > 1 else ""
+            print(f"[ttys] path={agent_path!r} pid={pid} tty={tty!r} comm={comm!r}", flush=True)
+            if tty and tty != "??" and tty not in seen:
+                seen.append(tty)
+        except Exception:
+            continue
+    return seen
 
 
 def _inject_via_iterm(tty: str, message: str) -> dict:
@@ -423,6 +459,131 @@ return "not_found|sessions=" & sessionCount
         }
 
 
+def _focus_via_iterm(tty: str) -> dict:
+    tty_dev = tty if tty.startswith("/") else f"/dev/{tty}"
+    script = f'''
+set foundIt to false
+set sessionCount to 0
+set seenTTYs to ""
+tell application "iTerm2"
+    repeat with w in windows
+        set wRef to w
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                set sessionCount to sessionCount + 1
+                try
+                    set theTTY to tty of s
+                    set seenTTYs to seenTTYs & theTTY & "|"
+                    if theTTY contains "{tty}" then
+                        set foundIt to true
+                        try
+                            set index of wRef to 1
+                            set current tab of wRef to t
+                            set current session of t to s
+                            activate
+                        end try
+                    end if
+                end try
+            end repeat
+        end repeat
+    end repeat
+end tell
+if foundIt then
+    return "ok|sessions=" & sessionCount & "|ttys=" & seenTTYs
+end if
+return "not_found|sessions=" & sessionCount & "|ttys=" & seenTTYs
+'''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script], capture_output=True, text=True, timeout=4
+        )
+        success = result.returncode == 0 and "ok" in result.stdout
+        return {
+            "success": success,
+            "returncode": result.returncode,
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "tty": tty_dev,
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": str(exc),
+            "tty": tty_dev,
+        }
+
+
+@app.post("/agents/{name}/focus")
+def focus_agent_terminal(name: str):
+    """Bring the agent's iTerm2 window/tab/session to the foreground."""
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    path = registry[name].get("path", "")
+    ttys = _find_all_claude_ttys(path)
+    print(f"[focus] agent={name} path={path} ttys={ttys}", flush=True)
+    for tty in ttys:
+        result = _focus_via_iterm(tty)
+        print(f"[focus]   tty={tty} success={result['success']} stdout={result['stdout']!r}", flush=True)
+        if result["success"]:
+            return {"ok": True, "focused": True, "tty": result["tty"], "ttys_found": len(ttys)}
+    return {"ok": True, "focused": False, "tty": ttys[0] if ttys else "not found", "ttys_found": len(ttys)}
+
+
+@app.get("/debug/iterm_ttys")
+def debug_iterm_ttys():
+    """List all TTYs currently known to iTerm2 via AppleScript."""
+    script = """
+set result to {}
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                set end of result to (tty of s)
+            end repeat
+        end repeat
+    end repeat
+end tell
+return result
+"""
+    out = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
+    raw = out.stdout.strip()
+    ttys = [t.strip() for t in raw.split(",") if t.strip()]
+    return {"iterm_ttys": ttys, "count": len(ttys)}
+
+
+@app.post("/agents/{name}/terminal")
+def open_terminal(name: str, body: TerminalRequest):
+    """Open a new iTerm2 window running claude in the agent's directory."""
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    path = registry[name].get("path", "")
+    claude_cmd = f"claude --model {body.model_id}" if body.model_id else "claude"
+    # shlex.quote wraps path in single quotes — safe to embed inside AppleScript double-quoted string
+    shell_cmd = f"cd {shlex.quote(path)} && {claude_cmd}"
+    script = (
+        'tell application "iTerm2"\n'
+        f'    create window with default profile command "bash -l -c \'{shell_cmd}; exec bash -l\'"\n'
+        'end tell'
+    )
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"osascript error: {result.stderr.strip()}")
+    return {"ok": True, "model": body.model}
+
+
+@app.get("/agents/{name}/ttys")
+def get_agent_ttys(name: str):
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    path = registry[name].get("path", "")
+    return {"ttys": _find_all_claude_ttys(path)}
+
+
 @app.post("/agents/{name}/inject")
 def inject_message(name: str, body: InjectRequest):
     registry = load_json(REGISTRY_FILE, {})
@@ -446,7 +607,7 @@ def inject_message(name: str, body: InjectRequest):
         terminal_text = f"[External]: {message}"
 
     # Find the live claude session and inject directly into the terminal
-    tty    = _find_claude_tty(path)
+    tty    = body.tty or _find_claude_tty(path)
     result = _inject_via_iterm(tty, terminal_text) if tty else None
     injected = result["success"] if result else False
 

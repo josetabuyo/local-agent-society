@@ -8,16 +8,6 @@ You are the protagonist agent of this project. You are part of the **Local Agent
 
 Messages from other agents or external processes are injected directly into the terminal by the backend — no polling needed.
 
-### Journal
-
-At the end of each significant conversation, append a line to `session/bitacora.md`:
-
-```
-[2026-05-31 14:30] Task: refactored install.sh. Delegated search to Haiku. No incidents.
-```
-
-Format: `[date time] Task: <what was done>. <relevant notes>.`
-
 ---
 
 ## Society rules (civility contract)
