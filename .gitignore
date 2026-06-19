@@ -25,6 +25,7 @@ widget/Local Agent Society.app/
 __pycache__/
 *.pyc
 *.egg-info/
+uv.lock
 
 # macOS
 .DS_Store
