@@ -104,6 +104,25 @@ Read `.agent.json`:
 
 The user may write in any language. Respond in the locale of this agent. All code, comments, skills, and system files are always written in **English**.
 
+### 8. Widget management — one tray, reopen not focus
+
+**Never launch `tray.app` directly.** The canonical app is `Local Agent Society.app`. Running both simultaneously causes every agent widget to open twice on different Spaces. The system is managed exclusively via:
+```bash
+las start   # launches backend + Local Agent Society.app
+las stop    # stops both
+```
+
+**`las widget` closes and reopens** on the current Space — it does not just focus. This is guaranteed by `?action=reopen` in the URL scheme. If a widget appears stuck on another Space, run `las widget [name]` and it will move to where you are.
+
+**To diagnose duplicate tray processes:**
+```bash
+ps aux | grep -E "tray" | grep -v grep
+# Should show exactly ONE process: Local Agent Society.app/Contents/MacOS/tray
+# If tray.app also appears: kill its PID immediately
+```
+
+**Tests that enforce these invariants:** `tests/test_widget_reopen.py` — run after any change to `tray.swift`, `start.sh`, or `cli/commands/agents.py`.
+
 ---
 
 ## Backend

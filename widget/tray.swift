@@ -718,22 +718,35 @@ class VoiceInputManager {
     }
 
     private func requestPermissionsAndStart() {
+        wlog("[mic] requestPermissionsAndStart — requesting auth")
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
             guard let self = self else { return }
             guard status == .authorized else {
+                wlog("[mic] permission denied status=\(status.rawValue)")
                 DispatchQueue.main.async { self.onPermissionDenied?() }
                 return
             }
+            wlog("[mic] permission granted — starting recording")
             DispatchQueue.main.async { self.startRecording() }
         }
     }
 
     private func startRecording() {
-        guard let recognizer = recognizer, recognizer.isAvailable else { return }
+        guard let recognizer = recognizer else {
+            wlog("[mic] ERROR startRecording — recognizer is nil")
+            return
+        }
+        guard recognizer.isAvailable else {
+            wlog("[mic] ERROR startRecording — recognizer not available")
+            return
+        }
 
         lastText = ""
         request  = SFSpeechAudioBufferRecognitionRequest()
-        guard let req = request else { return }
+        guard let req = request else {
+            wlog("[mic] ERROR startRecording — could not create request")
+            return
+        }
         req.shouldReportPartialResults = true
 
         let inputNode = engine.inputNode
@@ -745,14 +758,19 @@ class VoiceInputManager {
             engine.prepare()
             try engine.start()
         } catch {
+            wlog("[mic] ERROR engine.start failed: \(error.localizedDescription)")
             engine.inputNode.removeTap(onBus: 0)
             return
         }
 
         isRecording = true
+        wlog("[mic] recording started")
         onStateChange?(true)
 
-        task = recognizer.recognitionTask(with: req) { [weak self] result, _ in
+        task = recognizer.recognitionTask(with: req) { [weak self] result, error in
+            if let error = error {
+                wlog("[mic] recognition error: \(error.localizedDescription)")
+            }
             if let result = result {
                 self?.lastText = result.bestTranscription.formattedString
             }
@@ -772,6 +790,7 @@ class VoiceInputManager {
         guard isRecording else { return }
         isRecording = false
         let text = lastText
+        wlog("[mic] stopRecording text=\(text.isEmpty ? "(empty)" : "'\(text)'")")
         teardownEngine()
         onStateChange?(false)
         if !text.isEmpty {
@@ -1002,7 +1021,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }
         voice.onPermissionDenied = { [weak self] in
             guard let self = self else { return }
+            wlog("[mic] ERROR permission denied — opening System Settings")
             self.updateMicIcon(color: .systemOrange)
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")!)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.updateMicIcon(color: self?.idleFill ?? .black)
             }
