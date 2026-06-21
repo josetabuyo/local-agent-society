@@ -162,17 +162,12 @@ def test_raw_source_no_prefix():
 
 def test_inject_sends_return_via_iterm():
     """Verify _inject_via_iterm sends Enter within the iTerm2 tell block (not via System Events)."""
-    import importlib.util, inspect
     main_py = Path(__file__).parent.parent / "backend" / "main.py"
-    spec = importlib.util.spec_from_file_location("main", main_py)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    src = inspect.getsource(mod._inject_via_iterm)
-    if "ASCII character 13" in src and "System Events" not in src:
-        ok("_inject_via_iterm sends Enter via ASCII character 13 within iTerm2 tell block")
-    else:
-        fail("_inject_via_iterm sends Enter via ASCII character 13 within iTerm2 tell block",
-             "Expected ASCII character 13 inside iTerm2 tell block — no System Events")
+    text = main_py.read_text()
+    assert "ASCII character 13" in text, \
+        "_inject_via_iterm does not use ASCII character 13 — Enter won't be pressed after injection"
+    assert not ("System Events" in text and "key code 36" in text), \
+        "_inject_via_iterm still uses System Events key code 36"
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

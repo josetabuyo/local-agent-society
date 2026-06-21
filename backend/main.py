@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
+import os
 import shlex
 import subprocess
 import threading
@@ -570,9 +571,10 @@ def open_terminal(name: str, body: TerminalRequest):
     claude_cmd = f"claude --model {body.model_id}" if body.model_id else "claude"
     # shlex.quote wraps path in single quotes — safe to embed inside AppleScript double-quoted string
     shell_cmd = f"cd {shlex.quote(path)} && {claude_cmd}"
+    user_shell = os.environ.get("SHELL", "/bin/zsh")
     script = (
         'tell application "iTerm2"\n'
-        f'    create window with default profile command "bash -l -c \'{shell_cmd}; exec bash -l\'"\n'
+        f'    create window with default profile command "{user_shell} -l -c \'{shell_cmd}; exec {user_shell} -l\'"\n'
         'end tell'
     )
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
