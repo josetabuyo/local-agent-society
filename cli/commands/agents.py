@@ -17,12 +17,14 @@ def _infer_locale(voice: str) -> str:
 
 
 def _agent_name_from_cwd():
-    p = Path.cwd() / ".agent.json"
-    if p.exists():
-        try:
-            return json.loads(p.read_text()).get("name")
-        except Exception:
-            pass
+    current = Path.cwd()
+    for directory in [current, *current.parents]:
+        p = directory / ".agent.json"
+        if p.exists():
+            try:
+                return json.loads(p.read_text()).get("name")
+            except Exception:
+                pass
     return None
 
 
@@ -77,17 +79,12 @@ def new(name, voice, target_dir):
     except SystemExit:
         locale = "en-US"
 
-    backend_url = "http://localhost:8700"
-    frontend_url = f"{backend_url}/widget/{name}"
-
     # Write .agent.json
     agent_data = {
         "name": name,
         "voice": chosen_voice,
         "locale": locale,
         "pronunciation": name,
-        "backend_url": backend_url,
-        "frontend_url": frontend_url,
         "created": str(datetime.date.today()),
     }
     agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
@@ -98,8 +95,6 @@ def new(name, voice, target_dir):
         "name": name,
         "voice": chosen_voice,
         "path": str(cwd),
-        "backend_url": backend_url,
-        "frontend_url": frontend_url,
     })
     click.echo(f"Registered '{name}' with backend.")
 
@@ -150,8 +145,6 @@ def restore(name):
         "voice": voice,
         "locale": info.get("locale") or _infer_locale(voice),
         "pronunciation": info.get("pronunciation") or name,
-        "backend_url": info.get("backend_url", "http://localhost:8700"),
-        "frontend_url": info.get("frontend_url", f"http://localhost:8700/widget/{name}"),
         "created": info.get("registered_at", "")[:10],
     }
     target.write_text(json.dumps(data, indent=2, ensure_ascii=False))
@@ -170,8 +163,6 @@ def sync():
         "name":          d["name"],
         "voice":         d.get("voice", "Samantha"),
         "path":          str(Path.cwd()),
-        "backend_url":   d.get("backend_url", "http://localhost:8700"),
-        "frontend_url":  d.get("frontend_url", f"http://localhost:8700/widget/{d['name']}"),
         "pronunciation": d.get("pronunciation"),
     }
     api.post("/agents", payload)
@@ -222,7 +213,15 @@ def inject(name, message, from_agent):
         payload["from_agent"] = from_agent
     result = api.post(f"/agents/{name}/inject", payload)
     injected = result.get("injected", False)
-    status = "injected into terminal" if injected else "agent not live — not delivered"
+    queued   = result.get("queued", False)
+    drained  = result.get("drained", 0)
+    if injected:
+        suffix = f" (+ {drained} queued drained)" if drained else ""
+        status = f"injected into terminal{suffix}"
+    elif queued:
+        status = "agent offline — queued for delivery when live"
+    else:
+        status = "agent not live — not delivered"
     click.echo(f"{name}: {status}")
 
 
@@ -251,13 +250,14 @@ def rename(old_name, new_name, pronunciation):
             d = json.loads(cwd_agent_file.read_text())
             if d.get("name") == old_name:
                 d["name"] = new_name
-                d["frontend_url"] = f"http://localhost:8700/widget/{new_name}"
+                d.pop("frontend_url", None)
+                d.pop("backend_url", None)
                 if pronunciation:
                     d["pronunciation"] = pronunciation
                 elif d.get("pronunciation") == old_name:
                     d["pronunciation"] = new_name
                 cwd_agent_file.write_text(json.dumps(d, indent=2, ensure_ascii=False))
-                click.echo(f"Updated .agent.json (name, pronunciation, frontend_url).")
+                click.echo(f"Updated .agent.json (name, pronunciation).")
         except Exception as exc:
             click.echo(f"Warning: could not update .agent.json — {exc}")
 
