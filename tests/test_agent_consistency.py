@@ -57,6 +57,22 @@ def test_registered_agents_have_agent_json():
     assert not missing, f"Missing .agent.json for: {', '.join(missing)}"
 
 
+def test_install_sh_purges_legacy_watcher_plists():
+    """install.sh must detect and remove orphaned *.haiku.plist / *.opus.plist from ~/Library/LaunchAgents.
+
+    These were left behind by a pre-TTY-injection system where each project
+    ran haiku-watcher.sh and opus-watcher.sh via launchd. The scripts no
+    longer exist; install.sh must clean up any survivors.
+    """
+    text = (ROOT / "install.sh").read_text()
+    assert "haiku.plist" in text and "opus.plist" in text, \
+        "install.sh does not scan for legacy haiku/opus watcher plists"
+    assert "launchctl unload" in text, \
+        "install.sh does not unload plists before deleting them"
+    assert 'rm -f "$plist"' in text or "rm -f" in text, \
+        "install.sh does not delete the orphaned plist files"
+
+
 def test_registered_agents_settings_no_direct_say_hooks():
     """No registered agent's hook settings should invoke 'say -v' directly — use POST /queue/speak."""
     violations = []

@@ -64,8 +64,8 @@ def pytest_sessionfinish(session, exitstatus):
 
     html     = BOARDING_HTML.read_text(encoding="utf-8")
     new_json = json.dumps(results, ensure_ascii=False)
-    updated  = _MARKER.sub(rf"\g<1>{new_json}\3", html)
+    updated  = _MARKER.sub(lambda m: m.group(1) + new_json + m.group(3), html)
 
     if updated != html:
         BOARDING_HTML.write_text(updated, encoding="utf-8")
-        print(f"\n  boarding.html updated → docs/boarding.html")
+        print("\n  boarding.html updated → docs/boarding.html")
