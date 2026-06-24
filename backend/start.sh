@@ -20,7 +20,7 @@ fi
 "$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
 
 cd "$SCRIPT_DIR"
-nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
+PYTHONPATH="$SCRIPT_DIR/.." nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 sleep 2
 

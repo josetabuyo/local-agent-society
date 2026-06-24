@@ -16,15 +16,16 @@ def _infer_locale(voice: str) -> str:
         return "en-US"
 
 
+from cli.path_utils import find_nearest_agent_dir as _find_nearest_agent_dir
+
+
 def _agent_name_from_cwd():
-    current = Path.cwd()
-    for directory in [current, *current.parents]:
-        p = directory / ".agent.json"
-        if p.exists():
-            try:
-                return json.loads(p.read_text()).get("name")
-            except Exception:
-                pass
+    agent_dir = _find_nearest_agent_dir(Path.cwd())
+    if agent_dir:
+        try:
+            return json.loads((Path(agent_dir) / ".agent.json").read_text()).get("name")
+        except Exception:
+            pass
     return None
 
 

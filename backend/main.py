@@ -91,8 +91,8 @@ class AgentRegistration(BaseModel):
     name:          str
     voice:         str
     path:          str
-    backend_url:   str
-    frontend_url:  str
+    backend_url:   Optional[str] = "http://localhost:8700"
+    frontend_url:  Optional[str] = None
     pronunciation: Optional[str] = None
 
 
@@ -136,6 +136,7 @@ class InjectRequest(BaseModel):
     source:      str           = "voice"   # "voice" | "agent" | "external"
     from_agent:  Optional[str] = None
     tty:         Optional[str] = None      # specific TTY to inject into (skips auto-discovery)
+    queue:       bool          = True      # enqueue if agent is offline, deliver on next live inject
 
 
 class TerminalRequest(BaseModel):
@@ -184,10 +185,10 @@ def list_agents():
 @app.post("/agents")
 def register_agent(agent: AgentRegistration):
     registry = load_json(REGISTRY_FILE, {})
-    registry[agent.name] = {
-        **agent.model_dump(),
-        "registered_at": datetime.now().isoformat(),
-    }
+    data = agent.model_dump()
+    data["backend_url"] = "http://localhost:8700"
+    data["frontend_url"] = f"http://localhost:8700/widget/{agent.name}"
+    registry[agent.name] = {**data, "registered_at": datetime.now().isoformat()}
     save_json(REGISTRY_FILE, registry)
     return {"ok": True, "name": agent.name}
 
@@ -323,10 +324,46 @@ def clear_queue():
     return {"ok": True}
 
 
+# ── pending inject queue ──────────────────────────────────────────────────────
+
+def _pending_path(agent_path: str) -> Path:
+    return Path(agent_path) / "session" / "pending-injects.json"
+
+
+def _enqueue_pending(agent_path: str, text: str, source: str) -> None:
+    p = _pending_path(agent_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    queue = load_json(p, [])
+    queue.append({
+        "text": text,
+        "source": source,
+        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    save_json(p, queue)
+
+
+def _drain_pending(agent_path: str, tty: str) -> int:
+    """Inject all queued messages into tty and clear the queue. Returns count delivered."""
+    p = _pending_path(agent_path)
+    queue = load_json(p, [])
+    if not queue:
+        return 0
+    delivered = 0
+    for item in queue:
+        result = _inject_via_iterm(tty, item["text"])
+        if result and result["success"]:
+            delivered += 1
+    save_json(p, [])
+    return delivered
+
+
 # ── agent inject ─────────────────────────────────────────────────────────────
 
+from cli.path_utils import find_nearest_agent_dir as _find_nearest_agent_dir
+
+
 def _claude_pids_for_path(agent_path: str) -> list[str]:
-    """Return PIDs of all claude processes whose cwd matches agent_path."""
+    """Return PIDs of all claude processes whose nearest .agent.json matches agent_path."""
     try:
         ps_out = subprocess.run(
             ["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, timeout=5
@@ -353,7 +390,8 @@ def _claude_pids_for_path(agent_path: str) -> list[str]:
                 if not parts:
                     continue
                 cwd = parts[-1]
-                if cwd == agent_path or cwd.startswith(agent_path + "/"):
+                nearest = _find_nearest_agent_dir(cwd)
+                if nearest == agent_path:
                     matched.append(pid)
                     break
         return matched
@@ -615,9 +653,21 @@ def inject_message(name: str, body: InjectRequest):
         terminal_text = f"[External]: {message}"
 
     # Find the live claude session and inject directly into the terminal
-    tty    = body.tty or _find_claude_tty(path)
-    result = _inject_via_iterm(tty, terminal_text) if tty else None
-    injected = result["success"] if result else False
+    tty = body.tty or _find_claude_tty(path)
+
+    queued   = False
+    drained  = 0
+    if tty:
+        # Drain any pending messages before the new one
+        drained = _drain_pending(path, tty)
+        result  = _inject_via_iterm(tty, terminal_text)
+        injected = result["success"] if result else False
+    else:
+        result   = None
+        injected = False
+        if body.queue:
+            _enqueue_pending(path, terminal_text, body.source)
+            queued = True
 
     # ── structured inject log ──────────────────────────────────────────────────
     log_path = Path(path) / "session" / "inject.log"
@@ -634,14 +684,43 @@ def inject_message(name: str, body: InjectRequest):
                 f"msg={preview!r}\n"
             )
         else:
+            q_tag = "queued" if queued else "dropped"
             log_line = (
                 f"[{ts_full}] name={name} source={body.source} "
-                f"tty=not_found — no live session msg={preview!r}\n"
+                f"tty=not_found — {q_tag} msg={preview!r}\n"
             )
         with open(log_path, "a") as f:
             f.write(log_line)
 
-    return {"ok": True, "injected": injected, "tty": tty or "not found"}
+    return {
+        "ok":      True,
+        "injected": injected,
+        "queued":   queued,
+        "drained":  drained,
+        "tty":      tty or "not found",
+    }
+
+
+@app.get("/agents/{name}/pending")
+def get_pending(name: str):
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    path  = registry[name].get("path", "")
+    queue = load_json(_pending_path(path), [])
+    return {"count": len(queue), "messages": queue}
+
+
+@app.delete("/agents/{name}/pending")
+def clear_pending(name: str):
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    path = registry[name].get("path", "")
+    p    = _pending_path(path)
+    count = len(load_json(p, []))
+    save_json(p, [])
+    return {"ok": True, "cleared": count}
 
 
 # ── agent mute ────────────────────────────────────────────────────────────────
