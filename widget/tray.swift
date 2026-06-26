@@ -1550,16 +1550,28 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         let folderName = agentPath.isEmpty ? "—" : URL(fileURLWithPath: agentPath).lastPathComponent
         let branch     = agentPath.isEmpty ? "—" : currentGitBranch(for: agentPath)
 
+        let agentVoiceLabel: String = {
+            guard !agentVoice.isEmpty else { return "—" }
+            if let v = allVoices.first(where: { $0.name == agentVoice }) {
+                let langName = Locale(identifier: "en").localizedString(forLanguageCode: String(v.lang.prefix(2))) ?? v.lang
+                return "\(agentVoice)  \(v.flag) \(langName)"
+            }
+            return agentVoice
+        }()
+
         let rows: [(key: String, value: String)] = [
-            ("Agent Voice",  agentVoice.isEmpty ? "—" : agentVoice),
-            ("Human Voice",  localeName(for: Prefs.voiceLocale(for: agentName))),
-            ("Ports",  ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
-            ("Folder", folderName),
-            ("Branch", branch),
+            ("Agent Voice", agentVoiceLabel),
+            ("Human Voice", localeName(for: Prefs.voiceLocale(for: agentName))),
+            ("Ports",       ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
+            ("Folder",      folderName),
+            ("Branch",      branch),
         ]
 
         infoKeyLabels = []
         infoValLabels = []
+
+        let keyW: CGFloat = 76
+        let valX: CGFloat = keyW + 12
 
         for (i, row) in rows.enumerated() {
             let yPos: CGFloat = H - 22 - CGFloat(i) * 22
@@ -1569,7 +1581,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             keyLbl.textColor = textColor.withAlphaComponent(0.60)
             keyLbl.backgroundColor = .clear
             keyLbl.drawsBackground = false
-            keyLbl.frame = NSRect(x: 16, y: yPos, width: 52, height: 15)
+            keyLbl.frame = NSRect(x: 16, y: yPos, width: keyW, height: 15)
             panel.addSubview(keyLbl)
             infoKeyLabels.append(keyLbl)
 
@@ -1578,7 +1590,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             valLbl.textColor = textColor
             valLbl.backgroundColor = .clear
             valLbl.drawsBackground = false
-            valLbl.frame = NSRect(x: 72, y: yPos, width: W - 88, height: 15)
+            valLbl.frame = NSRect(x: 16 + valX, y: yPos, width: W - 16 - valX - 8, height: 15)
             panel.addSubview(valLbl)
             infoValLabels.append(valLbl)
         }
