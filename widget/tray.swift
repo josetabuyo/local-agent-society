@@ -196,21 +196,21 @@ class ConfigVC: NSViewController {
         let curVoice = widget?.agentVoice ?? ""
         let voiceInfo = allVoices.first(where: { $0.name == curVoice })
 
-        let voiceSectionLbl = rowLabel("Voice")
-        voiceSectionLbl.frame = NSRect(x: pad, y: 76, width: 50, height: 15)
+        let voiceSectionLbl = rowLabel("Agent Voice")
+        voiceSectionLbl.frame = NSRect(x: pad, y: 76, width: 76, height: 15)
 
         voiceNameVal = NSTextField(labelWithString: curVoice.isEmpty ? "—" : curVoice)
-        voiceNameVal.frame = NSRect(x: pad + 54, y: 76, width: W - pad * 2 - 54, height: 15)
+        voiceNameVal.frame = NSRect(x: pad + 80, y: 76, width: W - pad * 2 - 80, height: 15)
         voiceNameVal.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         voiceNameVal.textColor = .labelColor
         voiceNameVal.alignment = .right
 
-        let langSectionLbl = rowLabel("Language")
-        langSectionLbl.frame = NSRect(x: pad, y: 56, width: 64, height: 15)
+        let langSectionLbl = rowLabel("Human Voice")
+        langSectionLbl.frame = NSRect(x: pad, y: 56, width: 82, height: 15)
 
         let langStr = voiceInfo.map { "\($0.flag) \($0.lang)" } ?? "—"
         voiceLangVal = NSTextField(labelWithString: langStr)
-        voiceLangVal.frame = NSRect(x: pad + 68, y: 56, width: W - pad * 2 - 68, height: 15)
+        voiceLangVal.frame = NSRect(x: pad + 86, y: 56, width: W - pad * 2 - 86, height: 15)
         voiceLangVal.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
         voiceLangVal.textColor = .secondaryLabelColor
         voiceLangVal.alignment = .right
@@ -352,11 +352,14 @@ let allVoices: [(name: String, lang: String, flag: String)] = [
     ("Shelley (English (US))", "en-US", "🇺🇸"),
     ("Reed (English (US))",    "en-US", "🇺🇸"),
     ("Eddy (English (US))",    "en-US", "🇺🇸"),
+    ("Jorge",                  "es-ES", "🇪🇸"),
 ]
 
 func inferLocaleFromVoice(_ voice: String) -> String {
     return allVoices.first(where: { $0.name == voice })?.lang ?? "en-US"
 }
+
+// MARK: - Lang picker (used from voice settings panel)
 
 class LangPickerVC: NSViewController {
     let agentName: String
@@ -454,6 +457,215 @@ class VoicePickerVC: NSViewController {
     }
 }
 
+// MARK: - System volume helpers
+
+private func getSystemVolume() -> Double {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    proc.arguments = ["-e", "output volume of (get volume settings)"]
+    let pipe = Pipe()
+    proc.standardOutput = pipe
+    proc.standardError  = Pipe()
+    try? proc.run()
+    proc.waitUntilExit()
+    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "50"
+    return Double(out) ?? 50.0
+}
+
+private func setSystemVolume(_ level: Double) {
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    proc.arguments = ["-e", "set volume output volume \(Int(level.rounded()))"]
+    proc.standardOutput = Pipe()
+    proc.standardError  = Pipe()
+    try? proc.run()
+}
+
+// MARK: - Speaker options popover (long-press on speaker)
+
+class SpeakerOptionsVC: NSViewController {
+    let agentName: String
+    weak var widget: WidgetWindow?
+    weak var popover: NSPopover?
+    let onVoiceChanged: () -> Void
+
+    var filteredVoices: [(name: String, lang: String, flag: String)] = allVoices
+    var langFilter: String? = nil   // nil = all, "en" = English, "es" = Spanish
+    var textFilter: String = ""
+    var scrollView: NSScrollView!
+    var volumeLabel: NSTextField!
+    var volumeSlider: NSSlider!
+    var langButtons: [NSButton] = []
+    var searchField: NSSearchField!
+
+    let W: CGFloat = 280
+    let volumeH: CGFloat = 58
+    let filterH: CGFloat = 68
+    let listRowH: CGFloat = 26
+    let visibleRows: Int  = 7
+    var listH: CGFloat { CGFloat(visibleRows) * listRowH + 8 }
+
+    init(agentName: String, widget: WidgetWindow, popover: NSPopover, onVoiceChanged: @escaping () -> Void) {
+        self.agentName = agentName
+        self.widget = widget
+        self.popover = popover
+        self.onVoiceChanged = onVoiceChanged
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let totalH = volumeH + filterH + listH
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: totalH))
+
+        // ── Volume section ─────────────────────────────────────────────────
+        let volSectionY = totalH - volumeH
+        v.addSubview(makeSectionHeader("Volume", y: volSectionY + 38))
+
+        let curVol = getSystemVolume()
+        volumeLabel = NSTextField(labelWithString: "\(Int(curVol))%")
+        volumeLabel.frame = NSRect(x: W - 46, y: volSectionY + 38, width: 38, height: 14)
+        volumeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        volumeLabel.alignment = .right
+        v.addSubview(volumeLabel)
+
+        volumeSlider = NSSlider(value: curVol, minValue: 0, maxValue: 100,
+                                 target: self, action: #selector(volumeChanged(_:)))
+        volumeSlider.frame = NSRect(x: 12, y: volSectionY + 8, width: W - 24, height: 22)
+        volumeSlider.isContinuous = true
+        v.addSubview(volumeSlider)
+
+        // ── Separator ─────────────────────────────────────────────────────
+        v.addSubview(makeSeparator(y: totalH - volumeH - 1))
+
+        // ── Filter section ─────────────────────────────────────────────────
+        let filterSectionY = listH
+        v.addSubview(makeSectionHeader("Agent Voice", y: filterSectionY + filterH - 18))
+
+        searchField = NSSearchField(frame: NSRect(x: 12, y: filterSectionY + 30, width: W - 24, height: 22))
+        searchField.placeholderString = "Filter voices…"
+        searchField.font = NSFont.systemFont(ofSize: 11)
+        searchField.target = self
+        searchField.action = #selector(searchChanged(_:))
+        v.addSubview(searchField)
+
+        // Language filter buttons: All / EN / ES
+        let btnLabels: [(String, String?)] = [("All", nil), ("🇺🇸 EN", "en"), ("🇲🇽 ES", "es")]
+        let btnW: CGFloat = (W - 24 - CGFloat(btnLabels.count - 1) * 6) / CGFloat(btnLabels.count)
+        for (i, (title, langCode)) in btnLabels.enumerated() {
+            let btn = NSButton(frame: NSRect(x: 12 + CGFloat(i) * (btnW + 6),
+                                             y: filterSectionY + 6, width: btnW, height: 20))
+            btn.title = title
+            btn.tag   = i
+            btn.bezelStyle = .rounded
+            btn.font  = NSFont.systemFont(ofSize: 10)
+            btn.isBordered = (langCode == langFilter)
+            btn.target = self
+            btn.action = #selector(langFilterTapped(_:))
+            v.addSubview(btn)
+            langButtons.append(btn)
+        }
+
+        // ── Separator ─────────────────────────────────────────────────────
+        v.addSubview(makeSeparator(y: listH - 1))
+
+        // ── Scrollable voice list ─────────────────────────────────────────
+        scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: W, height: listH))
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        v.addSubview(scrollView)
+
+        rebuildVoiceList()
+
+        self.view = v
+    }
+
+    private func makeSectionHeader(_ title: String, y: CGFloat) -> NSTextField {
+        let lbl = NSTextField(labelWithString: title.uppercased())
+        lbl.frame = NSRect(x: 12, y: y, width: W - 24, height: 14)
+        lbl.font = NSFont.systemFont(ofSize: 9, weight: .semibold)
+        lbl.textColor = .secondaryLabelColor
+        return lbl
+    }
+
+    private func makeSeparator(y: CGFloat) -> NSView {
+        let sep = NSView(frame: NSRect(x: 0, y: y, width: W, height: 1))
+        sep.wantsLayer = true
+        sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        return sep
+    }
+
+    private func rebuildVoiceList() {
+        let current = widget?.agentVoice ?? ""
+        let voices  = filteredVoices
+        let rowH    = listRowH
+        let docH    = max(listH, CGFloat(voices.count) * rowH + 8)
+        let doc     = NSView(frame: NSRect(x: 0, y: 0, width: W, height: docH))
+
+        for (i, voice) in voices.enumerated() {
+            let y = docH - 4 - CGFloat(i + 1) * rowH
+            let isSelected = voice.name == current
+            let idx = allVoices.firstIndex(where: { $0.name == voice.name }) ?? i
+            let btn = NSButton(frame: NSRect(x: 8, y: y, width: W - 16, height: rowH - 2))
+            btn.title = "\(voice.flag)  \(voice.name)  ·  \(voice.lang)"
+            btn.tag   = idx
+            btn.alignment  = .left
+            btn.bezelStyle = .rounded
+            btn.isBordered = isSelected
+            btn.font = isSelected
+                ? NSFont.boldSystemFont(ofSize: 11)
+                : NSFont.systemFont(ofSize: 11)
+            btn.target = self
+            btn.action = #selector(selectVoice(_:))
+            doc.addSubview(btn)
+        }
+
+        scrollView.documentView = doc
+        // Scroll to show the top of the list
+        let topY = max(0, docH - listH)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: topY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    @objc func volumeChanged(_ sender: NSSlider) {
+        volumeLabel.stringValue = "\(Int(sender.doubleValue))%"
+        setSystemVolume(sender.doubleValue)
+    }
+
+    @objc func searchChanged(_ sender: NSSearchField) {
+        textFilter = sender.stringValue.lowercased()
+        applyFilters()
+    }
+
+    @objc func langFilterTapped(_ sender: NSButton) {
+        let langs: [String?] = [nil, "en", "es"]
+        langFilter = langs[sender.tag]
+        for (i, btn) in langButtons.enumerated() {
+            btn.isBordered = i == sender.tag
+        }
+        applyFilters()
+    }
+
+    private func applyFilters() {
+        filteredVoices = allVoices.filter { voice in
+            let matchesLang = langFilter == nil || voice.lang.hasPrefix(langFilter!)
+            let matchesText = textFilter.isEmpty || voice.name.lowercased().contains(textFilter)
+            return matchesLang && matchesText
+        }
+        rebuildVoiceList()
+    }
+
+    @objc func selectVoice(_ sender: NSButton) {
+        guard sender.tag < allVoices.count else { return }
+        let voice = allVoices[sender.tag]
+        widget?.changeVoice(to: voice.name)
+        popover?.close()
+        onVoiceChanged()
+    }
+}
+
 // MARK: - Model picker popover
 
 class ModelPickerVC: NSViewController {
@@ -521,11 +733,10 @@ class MicOptionsVC: NSViewController {
 
         let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
 
-        // Language header
+        // Mic language picker
         var curY = H - pad - headerH
-        v.addSubview(makeHeader("Language", y: curY, w: W, pad: pad, h: headerH))
+        v.addSubview(makeHeader("Mic language", y: curY, w: W, pad: pad, h: headerH))
 
-        // Language buttons
         let currentLocale = Prefs.voiceLocale(for: agentName)
         for (i, lang) in supportedLocales.enumerated() {
             curY -= rowH
@@ -557,7 +768,6 @@ class MicOptionsVC: NSViewController {
             let sessions = widget?.sessions ?? []
             for (i, tty) in discoveredTTYs.enumerated() {
                 curY -= rowH
-                // Match TTY to a known session name, fallback to "Terminal N"
                 let label = sessions.first(where: { $0.tty == tty })?.model ?? "Terminal \(i + 1)"
                 let isSel = tty == widget?.selectedTTY
                 let btn = NSButton(frame: NSRect(x: pad, y: curY, width: W - pad * 2, height: rowH - 2))
@@ -782,6 +992,10 @@ class VoiceInputManager {
         request?.endAudio()
         task?.cancel()
         engine.stop()
+        // Reset engine so the next recording starts fresh (reusing a stopped engine causes -10868)
+        NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: engine)
+        engine = AVAudioEngine()
+        registerEngineObserver()
         request = nil
         task = nil
     }
@@ -871,12 +1085,13 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var agentVoice: String
     let window: NSWindow
     var onClose: (() -> Void)?
-    var configPopover: NSPopover?
-    var langPopover:   NSPopover?
+    var configPopover:  NSPopover?
+    var langPopover:    NSPopover?
+    var speakerPopover: NSPopover?
     var nameLbl: OutlinedLabel!
     var dotsBtn: WidgetButton!
     var micBtn: MicButton!
-    var speakerBtn: WidgetButton!
+    var speakerBtn: MicButton!
     var clearBtn: WidgetButton!
     var infoBtn: WidgetButton!
     var terminalBtn: TerminalButton!
@@ -957,14 +1172,20 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         micBtn.onLongPress   = { [weak self] in self?.showLangPicker() }
         content.addSubview(micBtn)
 
-        // Speaker/mute button
-        speakerBtn = WidgetButton(frame: NSRect(x: W - 130, y: 16, width: 32, height: 32))
+        // Speaker/mute button (short press = toggle mute, long press = voice picker + volume)
+        speakerBtn = MicButton(frame: NSRect(x: W - 130, y: 16, width: 32, height: 32))
         speakerBtn.imageScaling  = .scaleProportionallyUpOrDown
         speakerBtn.bezelStyle    = .inline
         speakerBtn.isBordered    = false
         speakerBtn.focusRingType = .none
-        speakerBtn.target        = self
-        speakerBtn.action        = #selector(toggleMute(_:))
+        speakerBtn.onShortPress  = { [weak self] in
+            guard let self = self else { return }
+            self.isMuted.toggle()
+            Prefs.save(muted: self.isMuted, for: self.agentName)
+            self.updateSpeakerIcon()
+            self.setBackendMute(self.isMuted)
+        }
+        speakerBtn.onLongPress   = { [weak self] in self?.showSpeakerOptions() }
         content.addSubview(speakerBtn)
 
         // Clear button — bottom-left, next to info
@@ -1007,7 +1228,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         focusBtn.action        = #selector(focusAgentTerminal(_:))
         content.addSubview(focusBtn)
 
-        // Sync STT locale to match TTS voice unless user explicitly set it via the language picker
+        // Sync STT locale to match TTS voice unless user explicitly set it via the mic language picker
         if !Prefs.voiceLocaleIsManual(for: agentName) && !agentVoice.isEmpty {
             Prefs.save(voiceLocale: inferLocaleFromVoice(agentVoice), for: agentName)
         }
@@ -1330,8 +1551,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         let branch     = agentPath.isEmpty ? "—" : currentGitBranch(for: agentPath)
 
         let rows: [(key: String, value: String)] = [
-            ("Voice",  agentVoice.isEmpty ? "—" : agentVoice),
-            ("Speech", localeName(for: Prefs.voiceLocale(for: agentName))),
+            ("Agent Voice",  agentVoice.isEmpty ? "—" : agentVoice),
+            ("Human Voice",  localeName(for: Prefs.voiceLocale(for: agentName))),
             ("Ports",  ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
             ("Folder", folderName),
             ("Branch", branch),
@@ -1366,7 +1587,11 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     }
 
     private func localeName(for localeId: String) -> String {
-        supportedLocales.first(where: { $0.id == localeId })
+        if let entry = allVoices.first(where: { $0.lang == localeId }) {
+            let langName = Locale(identifier: "en").localizedString(forLanguageCode: String(localeId.prefix(2))) ?? localeId
+            return "\(entry.flag) \(langName)"
+        }
+        return supportedLocales.first(where: { $0.id == localeId })
             .map { "\($0.flag) \($0.name)" } ?? localeId
     }
 
@@ -1388,10 +1613,22 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }.resume()
     }
 
+    func showSpeakerOptions() {
+        if let p = speakerPopover, p.isShown { p.close(); speakerPopover = nil; return }
+        let p = NSPopover()
+        let vc = SpeakerOptionsVC(agentName: agentName, widget: self, popover: p) { [weak self] in
+            self?.updateSpeakerIcon()
+        }
+        p.contentViewController = vc
+        p.behavior = .transient
+        p.show(relativeTo: speakerBtn.bounds, of: speakerBtn, preferredEdge: .maxY)
+        speakerPopover = p
+    }
+
     func showLangPicker() {
         if let p = langPopover, p.isShown { p.close(); return }
         fetchActiveTTYs { [weak self] ttys in
-            guard let self = self else { return }
+            guard let self = self, !ttys.isEmpty else { return }
             let p = NSPopover()
             p.contentViewController = MicOptionsVC(agentName: self.agentName, widget: self, popover: p, ttys: ttys)
             p.behavior = .transient

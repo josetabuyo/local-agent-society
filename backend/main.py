@@ -43,6 +43,7 @@ NICE_VOICES = [
     {"name": "Shelley (English (US))", "lang": "en-US", "flag": "🇺🇸"},
     {"name": "Reed (English (US))",    "lang": "en-US", "flag": "🇺🇸"},
     {"name": "Eddy (English (US))",    "lang": "en-US", "flag": "🇺🇸"},
+    {"name": "Jorge",                  "lang": "es-ES", "flag": "🇪🇸"},
 ]
 NICE_VOICE_NAMES = [v["name"] for v in NICE_VOICES]
 
