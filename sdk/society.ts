@@ -19,8 +19,8 @@ export interface AgentRegistration {
   name: string;
   voice: string;
   path: string;
-  backend_url: string;
-  frontend_url: string;
+  backend_url?: string;
+  frontend_url?: string;
 }
 
 export interface Port {
