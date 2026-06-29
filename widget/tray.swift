@@ -48,9 +48,12 @@ func measuredWidth(_ text: String, size: CGFloat) -> CGFloat {
     ]).width
 }
 
-func fitFontSizeAndSplit(text: String, maxWidth: CGFloat, start: CGFloat = 62, min: CGFloat = 14) -> (CGFloat, String) {
+func fitFontSizeAndSplit(text: String, maxWidth: CGFloat, maxHeight: CGFloat? = nil, start: CGFloat = 62, min: CGFloat = 14) -> (CGFloat, String) {
+    // Cap by height: a single line needs ~1× size to render, so allow 90% of available height
+    let effectiveStart = maxHeight.map { Swift.min(start, floor($0 * 0.90)) } ?? start
+
     // Try single-line
-    var size = start
+    var size = effectiveStart
     while size > 30 {
         if measuredWidth(text, size: size) <= maxWidth { return (size, text) }
         size -= 1
@@ -60,8 +63,8 @@ func fitFontSizeAndSplit(text: String, maxWidth: CGFloat, start: CGFloat = 62, m
     let splitText = smartSplit(text)
     if splitText != text {
         let lines = splitText.components(separatedBy: "\n")
-        let labelH: CGFloat = 96
-        var splitSize = Swift.min(start, floor(labelH / 2.6))  // ~36pt max for two lines
+        let availH = maxHeight ?? 96
+        var splitSize = Swift.min(effectiveStart, floor(availH / 2.2))
         while splitSize > min {
             let maxW = lines.map { measuredWidth($0, size: splitSize) }.max() ?? 0
             if maxW <= maxWidth { return (splitSize, splitText) }
@@ -1841,7 +1844,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             let labelH = H * 0.30
             let labelW = W - 80
             nameLbl.frame = NSRect(x: 40, y: H * 0.58, width: labelW, height: labelH)
-            let (fontSize, displayText) = fitFontSizeAndSplit(text: agentName, maxWidth: labelW, start: 300)
+            let (fontSize, displayText) = fitFontSizeAndSplit(text: agentName, maxWidth: labelW, maxHeight: labelH, start: 300)
             nameLbl.text     = displayText
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
