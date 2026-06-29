@@ -1112,6 +1112,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var isOccluded  = false
     var shrinkTimer: Timer?
     var savedFrame:  NSRect?
+    weak var appDelegate: AppDelegate?
 
     static let infoH: CGFloat = 130
 
@@ -1795,7 +1796,11 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             setOccludedExpanded(false)
         } else if !onCurrentSpace && !isOccluded {
             isOccluded = true
-            setOccludedExpanded(true)
+            // Capture screen now — window.screen may be nil once the space transition completes
+            let screen = window.screen ?? NSScreen.screens.first(where: { $0.frame.intersects(window.frame) }) ?? NSScreen.main
+            if let screen = screen {
+                appDelegate?.scheduleMosaicLayout(widget: self, screen: screen)
+            }
         }
     }
 
@@ -1815,13 +1820,13 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         updateInfoIcon()
     }
 
-    func setOccludedExpanded(_ expanded: Bool) {
+    func setOccludedExpanded(_ expanded: Bool, tileFrame: NSRect? = nil) {
         if expanded {
             collapseInfoPanelIfNeeded()
             savedFrame = window.frame
 
-            let screen = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-            window.setFrame(screen, display: true, animate: false)
+            let frame = tileFrame ?? (window.screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900))
+            window.setFrame(frame, display: true, animate: false)
             window.backgroundColor = Prefs.color(for: agentName).withAlphaComponent(Prefs.opacity(for: agentName))
             window.level = .floating
 
@@ -1832,7 +1837,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             infoBtn.isHidden     = true
             terminalBtn.isHidden = true
 
-            let W = screen.width, H = screen.height
+            let W = frame.width, H = frame.height
             let labelH = H * 0.30
             let labelW = W - 80
             nameLbl.frame = NSRect(x: 40, y: H * 0.58, width: labelW, height: labelH)
@@ -1971,6 +1976,101 @@ func makeAppIcon() -> NSImage {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var widgets: [String: WidgetWindow] = [:]
     var closedByUser: Set<String> = []
+    private var mosaicTimer: Timer?
+    private var mosaicCandidates: [(WidgetWindow, NSScreen)] = []
+
+    func scheduleMosaicLayout(widget: WidgetWindow, screen: NSScreen) {
+        mosaicCandidates.append((widget, screen))
+        mosaicTimer?.invalidate()
+        mosaicTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+            self?.applyMosaicLayout()
+        }
+    }
+
+    private func applyMosaicLayout() {
+        var byScreen: [ObjectIdentifier: (NSScreen, [WidgetWindow])] = [:]
+        for (w, screen) in mosaicCandidates {
+            let key = ObjectIdentifier(screen)
+            if byScreen[key] == nil { byScreen[key] = (screen, []) }
+            byScreen[key]!.1.append(w)
+        }
+        mosaicCandidates.removeAll()
+        for (_, pair) in byScreen {
+            let (screen, group) = pair
+            let sorted = group.sorted { $0.agentName < $1.agentName }
+            let tiles = mosaicTiles(count: sorted.count, in: screen.frame)
+            for (i, w) in sorted.enumerated() {
+                w.setOccludedExpanded(true, tileFrame: tiles[i])
+            }
+        }
+    }
+
+    private func mosaicTiles(count: Int, in screen: NSRect) -> [NSRect] {
+        let W = screen.width, H = screen.height
+        let x0 = screen.minX, y0 = screen.minY
+        switch count {
+        case 0: return []
+        case 1: return [screen]
+        case 2:
+            if Bool.random() {
+                return [
+                    NSRect(x: x0,        y: y0, width: W / 2, height: H),
+                    NSRect(x: x0 + W/2,  y: y0, width: W / 2, height: H)
+                ]
+            } else {
+                return [
+                    NSRect(x: x0, y: y0 + H/2, width: W, height: H / 2),
+                    NSRect(x: x0, y: y0,        width: W, height: H / 2)
+                ]
+            }
+        case 3:
+            let layouts: [[NSRect]] = [
+                [   // top full, bottom 2
+                    NSRect(x: x0,       y: y0 + H/2, width: W,   height: H/2),
+                    NSRect(x: x0,       y: y0,        width: W/2, height: H/2),
+                    NSRect(x: x0 + W/2, y: y0,        width: W/2, height: H/2)
+                ],
+                [   // top 2, bottom full
+                    NSRect(x: x0,       y: y0 + H/2, width: W/2, height: H/2),
+                    NSRect(x: x0 + W/2, y: y0 + H/2, width: W/2, height: H/2),
+                    NSRect(x: x0,       y: y0,        width: W,   height: H/2)
+                ],
+                [   // left full, right 2
+                    NSRect(x: x0,       y: y0,        width: W/2, height: H),
+                    NSRect(x: x0 + W/2, y: y0 + H/2, width: W/2, height: H/2),
+                    NSRect(x: x0 + W/2, y: y0,        width: W/2, height: H/2)
+                ],
+                [   // right full, left 2
+                    NSRect(x: x0 + W/2, y: y0,        width: W/2, height: H),
+                    NSRect(x: x0,       y: y0 + H/2,  width: W/2, height: H/2),
+                    NSRect(x: x0,       y: y0,         width: W/2, height: H/2)
+                ],
+                [   // 3 columns
+                    NSRect(x: x0,         y: y0, width: W/3, height: H),
+                    NSRect(x: x0 + W/3,   y: y0, width: W/3, height: H),
+                    NSRect(x: x0 + 2*W/3, y: y0, width: W/3, height: H)
+                ]
+            ]
+            return layouts[Int.random(in: 0..<layouts.count)]
+        default:
+            let cols = 2
+            let rows = (count + 1) / 2
+            let tW = W / CGFloat(cols)
+            let tH = H / CGFloat(rows)
+            var tiles: [NSRect] = []
+            for i in 0..<count {
+                let col = i % cols
+                let row = i / cols
+                tiles.append(NSRect(
+                    x: x0 + CGFloat(col) * tW,
+                    y: y0 + H - CGFloat(row + 1) * tH,
+                    width: tW,
+                    height: tH
+                ))
+            }
+            return tiles
+        }
+    }
 
     func applicationDidFinishLaunching(_: Notification) {
         NSApp.applicationIconImage = makeAppIcon()
@@ -2063,6 +2163,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func spawnWidget(agentName: String, index: Int, path: String, voice: String = "") {
         guard widgets[agentName] == nil else { return }
         let widget = WidgetWindow(agentName: agentName, index: index, path: path, voice: voice)
+        widget.appDelegate = self
         widget.onClose = { [weak self] in
             self?.closedByUser.insert(agentName)
             self?.widgets.removeValue(forKey: agentName)

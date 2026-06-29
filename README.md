@@ -151,7 +151,7 @@ Click the `⋯` button on any widget to open the settings popover:
 - **Color** — widget background color
 - **Opacity** — transparency level
 - **Always on top** — keep widget above other windows
-- **Expand on space change** — auto-expand when switching Spaces
+- **Expand on space change** — auto-expand when switching Spaces; when multiple widgets share the same Space they tile the screen as a mosaic (halves for 2, random split for 3, 2×2 grid for 4+) instead of overlapping
 - **Voice** — shows current voice name and language; **Test voice** button speaks in the correct language; **Change voice…** opens a picker
 
 Long-press the mic button to change the speech recognition language (independent from TTS voice).
