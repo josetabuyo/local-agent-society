@@ -1,6 +1,8 @@
 import datetime
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 import click
 from cli import api
@@ -315,3 +317,60 @@ def widget(name):
         raise SystemExit(1)
     subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
     click.echo(f"Widget reopened for {name}.")
+
+
+@click.command("link")
+@click.option("--agent", "agent_name", default=None,
+              help="Agent name to link. Defaults to agent in current directory.")
+@click.option("--tty", "tty_override", default=None,
+              help="TTY device to link (e.g. /dev/ttys004). Auto-detected if omitted.")
+def link(agent_name, tty_override):
+    """Link a terminal session to a widget (drag the scope button or run manually)."""
+    if not agent_name:
+        agent_name = _agent_name_from_cwd()
+    if not agent_name:
+        click.echo("Error: no agent name given and no .agent.json in current directory.", err=True)
+        raise SystemExit(1)
+
+    tty = tty_override
+    if not tty:
+        # Try stdin/stdout/stderr first (works in regular shells)
+        for fd in (0, 1, 2):
+            try:
+                tty = os.ttyname(fd)
+                break
+            except OSError:
+                pass
+    if not tty:
+        # Walk up the process tree until we find a process with a real TTY.
+        # This works for Claude Code terminals where stdin is redirected but
+        # an ancestor process (Claude Code itself) owns the controlling terminal.
+        pid = os.getpid()
+        for _ in range(10):
+            try:
+                out = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "tty=,ppid="],
+                    capture_output=True, text=True, timeout=2,
+                ).stdout.split()
+                t = out[0] if out else "??"
+                if t and t != "??":
+                    tty = f"/dev/{t}" if not t.startswith("/") else t
+                    break
+                pid = int(out[1]) if len(out) > 1 else 0
+                if pid <= 1:
+                    break
+            except Exception:
+                break
+    if not tty:
+        click.echo("Error: could not determine TTY.", err=True)
+        raise SystemExit(1)
+
+    try:
+        result = api.post(f"/agents/{agent_name}/pin-tty", {"tty": tty})
+        if result.get("ok"):
+            click.echo(f"✓ Terminal {tty} linked to {agent_name}")
+        else:
+            click.echo(f"Backend error: {result}", err=True)
+    except Exception as e:
+        click.echo(f"Error contacting backend: {e}", err=True)
+        raise SystemExit(1)

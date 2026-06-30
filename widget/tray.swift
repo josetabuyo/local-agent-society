@@ -537,6 +537,60 @@ class ModelPickerVC: NSViewController {
     }
 }
 
+// MARK: - Route picker popover (link a TTY to this agent)
+
+class RoutePickerVC: NSViewController {
+    let ttys: [String]
+    let sessions: [ClaudeSession]
+    let currentTTY: String?
+    let onSelect: (String) -> Void
+
+    init(ttys: [String], sessions: [ClaudeSession], currentTTY: String?, onSelect: @escaping (String) -> Void) {
+        self.ttys = ttys; self.sessions = sessions; self.currentTTY = currentTTY; self.onSelect = onSelect
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        let W: CGFloat = 220, rowH: CGFloat = 30, pad: CGFloat = 8
+        let H: CGFloat = ttys.isEmpty
+            ? rowH + pad * 2
+            : CGFloat(ttys.count) * rowH + pad * 2
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+
+        if ttys.isEmpty {
+            let lbl = NSTextField(labelWithString: "No active sessions")
+            lbl.frame = NSRect(x: pad, y: H / 2 - 8, width: W - pad * 2, height: 16)
+            lbl.font = NSFont.systemFont(ofSize: 11)
+            lbl.textColor = .secondaryLabelColor
+            lbl.alignment = .center
+            v.addSubview(lbl)
+        } else {
+            for (i, tty) in ttys.enumerated() {
+                let y = H - pad - CGFloat(i + 1) * rowH
+                let label = sessions.first(where: { $0.tty == tty })?.model ?? "Terminal \(i + 1)"
+                let isSel = tty == currentTTY
+                let btn = NSButton(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: rowH - 2))
+                btn.title = "🖥  \(label)  · \(tty)"
+                btn.tag = i
+                btn.alignment = .left
+                btn.bezelStyle = .rounded
+                btn.isBordered = isSel
+                btn.font = isSel ? NSFont.boldSystemFont(ofSize: 11) : NSFont.systemFont(ofSize: 11)
+                btn.target = self
+                btn.action = #selector(pick(_:))
+                v.addSubview(btn)
+            }
+        }
+        self.view = v
+    }
+
+    @objc func pick(_ sender: NSButton) {
+        guard sender.tag < ttys.count else { return }
+        onSelect(ttys[sender.tag])
+    }
+}
+
 // MARK: - Mic options popover (language + session routing)
 
 class MicOptionsVC: NSViewController {
@@ -680,6 +734,57 @@ class MicButton: NSButton {
 // MARK: - Terminal button (short press = launch default, long press = model picker)
 
 class TerminalButton: MicButton {}
+
+// MARK: - Scope drag button (tap = focus, drag = link terminal)
+
+// MARK: - Scope drag button (tap = focus, drag = paste link command into terminal)
+
+class ScopeDragButton: WidgetButton, NSDraggingSource {
+    var onTap: (() -> Void)?
+    var agentName: String = ""
+    var onDragCompleted: ((Bool) -> Void)?
+
+    private var isDragging = false
+    private var dragOrigin: NSPoint = .zero
+
+    override func mouseDown(with event: NSEvent) {
+        isDragging = false
+        dragOrigin = NSEvent.mouseLocation
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let loc = NSEvent.mouseLocation
+        let dx = loc.x - dragOrigin.x
+        let dy = loc.y - dragOrigin.y
+        guard !isDragging && (abs(dx) > 5 || abs(dy) > 5) else { return }
+        isDragging = true
+
+        let pb = NSPasteboardItem()
+        pb.setString("las link --agent \(agentName)", forType: .string)
+        let item = NSDraggingItem(pasteboardWriter: pb)
+        let cfg = NSImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+        let img = NSImage(systemSymbolName: "scope", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg) ?? NSImage()
+        item.setDraggingFrame(NSRect(x: 0, y: 0, width: 36, height: 36), contents: img)
+        beginDraggingSession(with: [item], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !isDragging { onTap?() }
+        isDragging = false
+    }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        return .copy
+    }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        isDragging = false
+        onDragCompleted?(operation != [])
+    }
+}
 
 // MARK: - Voice input manager
 
@@ -924,6 +1029,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var gearPanelOpacitySlider: NSSlider?
     var gearPanelOpacityValLbl: NSTextField?
     var gearPanelVoicePickerPopover: NSPopover?
+    var gearPanelActiveTTYs: [String] = []
+    var gearPanelRouteBtn: NSButton?
+    var gearPanelRoutePopover: NSPopover?
     var langPopover:    NSPopover?
     var speakerPopover: NSPopover?
     var nameLbl: OutlinedLabel!
@@ -932,7 +1040,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var speakerBtn: MicButton!
     var clearBtn: WidgetButton!
     var terminalBtn: TerminalButton!
-    var focusBtn: WidgetButton!
+    var focusBtn: ScopeDragButton!
     var voice: VoiceInputManager!
     var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
     var isMuted: Bool = false
@@ -946,7 +1054,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var savedFrame:  NSRect?
     weak var appDelegate: AppDelegate?
 
-    static let gearPanelH: CGFloat = 280
+    static let gearPanelH: CGFloat = 300
 
     init(agentName: String, index: Int, path: String, voice agentVoiceArg: String = "") {
         let W: CGFloat = 300, H: CGFloat = 160
@@ -1040,14 +1148,24 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         gearBtn.action        = #selector(toggleGear(_:))
         content.addSubview(gearBtn)
 
-        // Focus button — top-right
-        focusBtn = WidgetButton(frame: NSRect(x: W - 38, y: H - 56, width: 28, height: 28))
+        // Focus button — bottom-right (tap = focus current TTY, drag = link a terminal)
+        focusBtn = ScopeDragButton(frame: NSRect(x: W - 50, y: 16, width: 32, height: 32))
         focusBtn.imageScaling  = .scaleProportionallyUpOrDown
         focusBtn.bezelStyle    = .inline
         focusBtn.isBordered    = false
         focusBtn.focusRingType = .none
-        focusBtn.target        = self
-        focusBtn.action        = #selector(focusAgentTerminal(_:))
+        focusBtn.agentName = agentName
+        focusBtn.onTap     = { [weak self] in
+            guard let self = self else { return }
+            self.focusAgentTerminal(self.focusBtn)
+        }
+        focusBtn.onDragCompleted = { [weak self] accepted in
+            guard let self = self, accepted else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                self.sendEnterToFrontmostITerm()
+                self.pollForLink()
+            }
+        }
         content.addSubview(focusBtn)
 
         // Sync STT locale to match TTS voice unless user explicitly set it via the mic language picker
@@ -1207,9 +1325,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
                 } catch { return "—" }
             }()
             self.fetchAgentPorts { ports in
-                DispatchQueue.main.async { [weak self] in
+                self.fetchActiveTTYs { [weak self] ttys in
                     guard let self = self, self.isGearExpanded else { return }
-                    let panel = self.makeGearPanel(ports: ports, branch: branch)
+                    self.gearPanelActiveTTYs = ttys
+                    let panel = self.makeGearPanel(ports: ports, branch: branch, ttys: ttys)
                     content.addSubview(panel)
                     self.gearPanelView = panel
                     self.window.display()
@@ -1229,6 +1348,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         gearPanelColorWell = nil
         gearPanelOpacitySlider = nil
         gearPanelOpacityValLbl = nil
+        gearPanelRouteBtn = nil
+        gearPanelRoutePopover = nil
         for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
         let curFrame = window.frame
         window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
@@ -1238,7 +1359,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         if NSColorPanel.shared.isVisible { NSColorPanel.shared.orderOut(nil) }
     }
 
-    private func makeGearPanel(ports: [Int], branch: String) -> NSView {
+    private func makeGearPanel(ports: [Int], branch: String, ttys: [String]) -> NSView {
         let W: CGFloat = 300, H = WidgetWindow.gearPanelH
         let pad: CGFloat = 16
         let (panelBg, textColor) = gearPanelColors()
@@ -1305,6 +1426,28 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             panel.addSubview(kl); panel.addSubview(vl)
             curY += 20
         }
+
+        // ── Route to row ──────────────────────────────────────────────────
+        let rkl = rowLabel("Route")
+        rkl.frame = NSRect(x: pad, y: curY + 2, width: keyW, height: 15)
+        let routePopup = NSPopUpButton(frame: NSRect(x: pad + valX - 4, y: curY - 2, width: W - pad * 2 - valX + 4, height: 20), pullsDown: false)
+        routePopup.font = NSFont.systemFont(ofSize: 10)
+        routePopup.addItem(withTitle: "Auto")
+        for tty in ttys {
+            let label = sessions.first(where: { $0.tty == tty })?.model
+                ?? (tty.split(separator: "/").last.map(String.init) ?? tty)
+            routePopup.addItem(withTitle: label)
+            routePopup.lastItem?.representedObject = tty
+        }
+        if let sel = selectedTTY,
+           let idx = routePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == sel }) {
+            routePopup.selectItem(at: idx)
+        }
+        routePopup.target = self
+        routePopup.action = #selector(gearRouteSelected(_:))
+        panel.addSubview(rkl); panel.addSubview(routePopup)
+        gearPanelRouteBtn = routePopup
+        curY += 22
         addSep(y: curY); curY += 9
 
         // ── Voice buttons ─────────────────────────────────────────────────
@@ -1419,6 +1562,52 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
     @objc func gearExpandChanged(_ sender: NSButton) {
         Prefs.save(expandOnSpaceChange: sender.state == .on, for: agentName)
+    }
+
+    @objc func gearRouteSelected(_ sender: NSPopUpButton) {
+        selectedTTY = sender.selectedItem?.representedObject as? String
+    }
+
+    private func sendEnterToFrontmostITerm() {
+        let src = """
+            tell application "iTerm2"
+                if (count of windows) > 0 then
+                    tell current session of current window
+                        write text (ASCII character 13) newline NO
+                    end tell
+                end if
+            end tell
+        """
+        var err: NSDictionary?
+        NSAppleScript(source: src)?.executeAndReturnError(&err)
+        if let e = err { wlog("[link] AppleScript Enter error: \(e)") }
+    }
+
+    private func pollForLink(attempts: Int = 8) {
+        guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/pending-link") else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self = self else { return }
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let tty = json["tty"] as? String {
+                DispatchQueue.main.async {
+                    self.selectedTTY = tty
+                    self.flashFocusIcon(color: .systemGreen)
+                }
+            } else if attempts > 1 {
+                DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.pollForLink(attempts: attempts - 1)
+                }
+            }
+        }.resume()
+    }
+
+    private func flashFocusIcon(color: NSColor) {
+        let orig = focusBtn?.contentTintColor ?? .white
+        focusBtn?.contentTintColor = color
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            self?.focusBtn?.contentTintColor = orig
+        }
     }
 
     @objc func gearTestVoice(_ sender: NSButton) {
@@ -1758,6 +1947,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             speakerBtn.isHidden  = true
             clearBtn.isHidden    = true
             terminalBtn.isHidden = true
+            focusBtn.isHidden    = true
 
             let W = frame.width, H = frame.height
             let labelH = H * 0.30
@@ -1773,6 +1963,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             speakerBtn.isHidden  = false
             clearBtn.isHidden    = false
             terminalBtn.isHidden = false
+            focusBtn.isHidden    = false
 
             let W: CGFloat = 300, H: CGFloat = 160
             let target: NSRect
@@ -1799,6 +1990,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             speakerBtn.frame  = NSRect(x: W - 130, y: 16, width: 32, height: 32)
             clearBtn.frame    = NSRect(x: 58,      y: 16, width: 32, height: 32)
             terminalBtn.frame = NSRect(x: 114,     y: 16, width: 32, height: 32)
+            focusBtn.frame    = NSRect(x: W - 50,  y: 16, width: 32, height: 32)
         }
     }
 

@@ -226,6 +226,9 @@ def rename_agent(name: str, body: RenameRequest):
     return {"ok": True, "old_name": name, "new_name": new_name}
 
 
+# Pending TTY links registered via `las link` CLI command
+_pending_links: dict[str, str] = {}
+
 _ports_lock = threading.Lock()
 
 
@@ -748,6 +751,27 @@ def unmute_agent(name: str):
 def get_muted(name: str):
     muted = load_json(MUTED_FILE, [])
     return {"muted": name in muted, "name": name}
+
+
+# ── terminal link (drag-to-link via `las link`) ───────────────────────────────
+
+@app.post("/agents/{name}/pin-tty")
+def pin_tty(name: str, body: dict):
+    """Store a TTY linked via `las link` for the widget to pick up."""
+    tty = body.get("tty", "")
+    if tty:
+        _pending_links[name] = tty
+    return {"ok": bool(tty), "tty": tty}
+
+
+@app.get("/agents/{name}/pending-link")
+def get_pending_link(name: str):
+    """Return and clear the pending linked TTY for an agent (consumed once)."""
+    from fastapi.responses import Response as FastResponse
+    tty = _pending_links.pop(name, None)
+    if tty:
+        return {"tty": tty}
+    return FastResponse(status_code=204)
 
 
 # ── attribution ───────────────────────────────────────────────────────────────
