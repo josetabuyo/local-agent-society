@@ -133,6 +133,64 @@ enum Prefs {
     static func save(muted v: Bool, for f: String) {
         UserDefaults.standard.set(v, forKey: "muted.\(f)")
     }
+
+    static func widgetCommands(for agent: String) -> [WidgetCommand] {
+        guard let data = UserDefaults.standard.data(forKey: "widgetCmds.\(agent)"),
+              let cmds = try? JSONDecoder().decode([WidgetCommand].self, from: data),
+              !cmds.isEmpty
+        else { return WidgetCommand.defaults }
+        return cmds
+    }
+    static func saveWidgetCommands(_ cmds: [WidgetCommand], for agent: String) {
+        if let data = try? JSONEncoder().encode(cmds) {
+            UserDefaults.standard.set(data, forKey: "widgetCmds.\(agent)")
+        }
+    }
+}
+
+// MARK: - Widget Command
+
+struct WidgetCommand: Codable {
+    enum Kind: String, Codable {
+        case openTerminal     // opens iTerm2 running claude (with optional --model)
+        case openBareTerminal // opens iTerm2 plain shell, no claude
+        case injectCommand    // injects text into the linked session
+    }
+    var id: String
+    var label: String
+    var kind: Kind
+    var payload: String  // model id for openTerminal, command string for injectCommand
+
+    init(label: String, kind: Kind, payload: String) {
+        id = UUID().uuidString; self.label = label; self.kind = kind; self.payload = payload
+    }
+
+    static func defaultAlias(for payload: String, kind: Kind) -> String {
+        switch kind {
+        case .openBareTerminal: return "terminal"
+        default:
+            var s = payload
+            s = s.trimmingCharacters(in: CharacterSet.alphanumerics.union(.init(charactersIn: "-_ ")).inverted)
+            s = s.replacingOccurrences(of: " ", with: "-")
+            s = String(s.unicodeScalars.filter { CharacterSet.alphanumerics.union(.init(charactersIn: "-")).contains($0) })
+            s = String(s.prefix(14))
+            return s.isEmpty ? "cmd" : s
+        }
+    }
+
+    var displayLabel: String {
+        let raw = label.trimmingCharacters(in: .whitespaces)
+        return raw.isEmpty || raw == payload
+            ? WidgetCommand.defaultAlias(for: payload, kind: kind)
+            : raw
+    }
+
+    static let defaults: [WidgetCommand] = [
+        WidgetCommand(label: "Haiku",  kind: .openTerminal,  payload: "claude-haiku-4-5-20251001"),
+        WidgetCommand(label: "Sonnet", kind: .openTerminal,  payload: "claude-sonnet-4-6"),
+        WidgetCommand(label: "Opus",   kind: .openTerminal,  payload: "claude-opus-4-8"),
+        WidgetCommand(label: "/clear", kind: .injectCommand, payload: "/clear"),
+    ]
 }
 
 // MARK: - Language picker popover
@@ -534,6 +592,337 @@ class ModelPickerVC: NSViewController {
         let m = claudeModels[sender.tag]
         widget?.launchTerminal(name: m.name, modelId: m.modelId)
         popover?.close()
+    }
+}
+
+// MARK: - Drag handle (reorder grip)
+
+class DragHandleView: NSView {
+    var onMoveUp:   (() -> Void)?
+    var onMoveDown: (() -> Void)?
+    private var dragStartY: CGFloat = 0
+    private var didTrigger = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartY = convert(event.locationInWindow, from: nil).y
+        didTrigger = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !didTrigger else { return }
+        let dy = convert(event.locationInWindow, from: nil).y - dragStartY
+        if dy > 14 { didTrigger = true; onMoveUp?() }
+        else if dy < -14 { didTrigger = true; onMoveDown?() }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Background rounded rect
+        let bg = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 3, yRadius: 3)
+        NSColor.white.withAlphaComponent(0.08).setFill()
+        bg.fill()
+
+        // Six dots in 2×3 grid
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let dotR: CGFloat = 1.5
+        let cols: CGFloat = 2, rows: CGFloat = 3
+        let gapX: CGFloat = 4, gapY: CGFloat = 3.5
+        let gridW = cols * dotR * 2 + (cols - 1) * gapX
+        let gridH = rows * dotR * 2 + (rows - 1) * gapY
+        let ox = (bounds.width  - gridW) / 2
+        let oy = (bounds.height - gridH) / 2
+        ctx.setFillColor(NSColor.white.withAlphaComponent(0.55).cgColor)
+        for row in 0..<Int(rows) {
+            for col in 0..<Int(cols) {
+                let cx = ox + CGFloat(col) * (dotR * 2 + gapX) + dotR
+                let cy = oy + CGFloat(row) * (dotR * 2 + gapY) + dotR
+                ctx.fillEllipse(in: CGRect(x: cx - dotR, y: cy - dotR, width: dotR * 2, height: dotR * 2))
+            }
+        }
+    }
+}
+
+// MARK: - Marquee (scrolling text)
+
+class MarqueeView: NSView {
+    private var label: NSTextField!
+    private var textW: CGFloat = 0
+    private var offset: CGFloat = 0
+    private var timer: Timer?
+    private static let pauseFrames = 45  // frames to pause at start/end
+    private var pauseCount = 0
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        label = NSTextField(labelWithString: "")
+        addSubview(label)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setup(text: String, font: NSFont, color: NSColor) {
+        label.stringValue = text
+        label.font = font
+        label.textColor = color
+        label.sizeToFit()
+        textW = label.frame.width
+        label.frame = NSRect(x: 0, y: (bounds.height - label.frame.height) / 2,
+                             width: textW, height: label.frame.height)
+        offset = 0
+        pauseCount = 0
+        timer?.invalidate()
+        timer = nil
+        if textW > bounds.width + 1 {
+            timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+                self?.tick()
+            }
+        }
+    }
+
+    private func tick() {
+        if pauseCount > 0 { pauseCount -= 1; return }
+        offset += 0.8
+        let maxScroll = textW - bounds.width + 10
+        if offset >= maxScroll {
+            offset = maxScroll
+            pauseCount = MarqueeView.pauseFrames
+            // After pause, reset
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(MarqueeView.pauseFrames) / 30.0) { [weak self] in
+                self?.offset = 0
+                self?.pauseCount = MarqueeView.pauseFrames
+            }
+        }
+        label.frame.origin.x = -offset
+    }
+
+    deinit { timer?.invalidate() }
+}
+
+// MARK: - Command palette (terminal button)
+
+class CommandPaletteVC: NSViewController {
+    weak var widget: WidgetWindow?
+    weak var popover: NSPopover?
+    let agentName: String
+    private let W: CGFloat = 210
+    private let rowH: CGFloat = 28
+    private let pad: CGFloat = 10
+
+    init(widget: WidgetWindow, popover: NSPopover, agentName: String) {
+        self.widget = widget; self.popover = popover; self.agentName = agentName
+        super.init(nibName: nil, bundle: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: W, height: 60))
+        showList()
+    }
+
+    // MARK: List
+
+    func showList() {
+        let cmds    = Prefs.widgetCommands(for: agentName)
+        let opens   = cmds.filter { $0.kind == .openTerminal }
+        let injects = cmds.filter { $0.kind == .injectCommand }
+        let hasSep  = !opens.isEmpty && !injects.isEmpty
+        let rH: CGFloat = 30
+        let totalH  = CGFloat(cmds.count) * rH + (hasSep ? 10 : 0) + 34
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: W, height: totalH))
+        var curY    = totalH
+
+        func iconBtn(_ sym: String, x: CGFloat, y: CGFloat, tag: Int, action: Selector) -> NSButton {
+            let b = NSButton(frame: NSRect(x: x, y: y, width: 18, height: 18))
+            b.isBordered = false; b.bezelStyle = .inline
+            b.image = NSImage(systemSymbolName: sym, accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .regular))
+            b.imageScaling = .scaleProportionallyUpOrDown
+            b.contentTintColor = .tertiaryLabelColor
+            b.tag = tag; b.target = self; b.action = action
+            return b
+        }
+
+        func addRow(_ cmd: WidgetCommand) {
+            curY -= rH
+            let idx = cmds.firstIndex(where: { $0.id == cmd.id }) ?? 0
+            let row = NSView(frame: NSRect(x: 0, y: curY, width: W, height: rH))
+
+            // Hit area (left portion, not overlapping action buttons)
+            let hitW: CGFloat = W - 64
+            let hit = NSButton(frame: NSRect(x: 0, y: 0, width: hitW, height: rH))
+            hit.title = ""; hit.isBordered = false; hit.bezelStyle = .inline
+            hit.tag = idx; hit.target = self; hit.action = #selector(runCmd(_:))
+            row.addSubview(hit)
+
+            // Terminal icon for openTerminal commands
+            var textX: CGFloat = pad
+            if cmd.kind == .openTerminal,
+               let img = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
+                   .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)) {
+                let iv = NSImageView(frame: NSRect(x: pad, y: (rH - 12) / 2, width: 12, height: 12))
+                iv.image = img; iv.contentTintColor = .secondaryLabelColor
+                row.addSubview(iv)
+                textX = pad + 16
+            }
+
+            // Label - payload in monospace
+            let text = cmd.payload.isEmpty || cmd.payload == cmd.label
+                ? cmd.label
+                : "\(cmd.label) - \(cmd.payload)"
+            let lbl = NSTextField(labelWithString: text)
+            lbl.frame = NSRect(x: textX, y: (rH - 13) / 2, width: hitW - textX - 4, height: 14)
+            lbl.font = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            lbl.textColor = .labelColor
+            lbl.lineBreakMode = .byTruncatingTail
+            row.addSubview(lbl)
+
+            // ▲ ▼ ✏ inline action buttons
+            let bY: CGFloat = (rH - 18) / 2
+            row.addSubview(iconBtn("chevron.up",   x: W - 62, y: bY, tag: idx, action: #selector(menuUp(_:))))
+            row.addSubview(iconBtn("chevron.down", x: W - 42, y: bY, tag: idx, action: #selector(menuDown(_:))))
+            row.addSubview(iconBtn("pencil",       x: W - 22, y: bY, tag: idx, action: #selector(menuEdit(_:))))
+
+            content.addSubview(row)
+        }
+
+        opens.forEach   { addRow($0) }
+        if hasSep {
+            curY -= 5
+            let sep = NSView(frame: NSRect(x: pad, y: curY - 1, width: W - pad * 2, height: 1))
+            sep.wantsLayer = true; sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+            content.addSubview(sep)
+            curY -= 4
+        }
+        injects.forEach { addRow($0) }
+
+        let addBtn = NSButton(frame: NSRect(x: pad, y: 4, width: W - pad * 2, height: 22))
+        addBtn.title = "+ Add command"; addBtn.bezelStyle = .inline; addBtn.isBordered = false
+        addBtn.font = NSFont.systemFont(ofSize: 10); addBtn.alignment = .left
+        addBtn.contentTintColor = .secondaryLabelColor
+        addBtn.target = self; addBtn.action = #selector(menuAdd(_:))
+        content.addSubview(addBtn)
+        swap(to: content)
+    }
+
+    // MARK: Edit form
+
+    func showEdit(cmd: WidgetCommand?, index: Int?) {
+        let H: CGFloat = 168
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+
+        let backBtn = NSButton(frame: NSRect(x: pad, y: H - 26, width: 60, height: 18))
+        backBtn.title = "← Back"; backBtn.isBordered = false
+        backBtn.font = NSFont.systemFont(ofSize: 10); backBtn.contentTintColor = .secondaryLabelColor
+        backBtn.target = self; backBtn.action = #selector(goBack(_:))
+        content.addSubview(backBtn)
+
+        var y: CGFloat = H - 36
+        let seg = NSSegmentedControl(labels: ["Open terminal", "Inject command"],
+                                     trackingMode: .selectOne, target: nil, action: nil)
+        seg.frame = NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22)
+        seg.font = NSFont.systemFont(ofSize: 10)
+        seg.selectedSegment = cmd?.kind == .injectCommand ? 1 : 0
+        seg.tag = 1003; content.addSubview(seg); y -= 30
+
+        let labelF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
+        labelF.placeholderString = "Label"; labelF.stringValue = cmd?.label ?? ""
+        labelF.font = NSFont.systemFont(ofSize: 11); labelF.bezelStyle = .roundedBezel
+        labelF.tag = 1001; content.addSubview(labelF); y -= 30
+
+        let payF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
+        payF.placeholderString = "Model ID or command (e.g. /clear)"
+        payF.stringValue = cmd?.payload ?? ""
+        payF.font = NSFont.systemFont(ofSize: 11); payF.bezelStyle = .roundedBezel
+        payF.tag = 1002; content.addSubview(payF); y -= 30
+
+        let saveBtn = NSButton(frame: NSRect(x: W - pad - 60, y: y - 22, width: 60, height: 22))
+        saveBtn.title = index == nil ? "Add" : "Save"; saveBtn.bezelStyle = .rounded
+        saveBtn.font = NSFont.systemFont(ofSize: 11); saveBtn.keyEquivalent = "\r"
+        saveBtn.tag = (index ?? -1) + 10000
+        saveBtn.target = self; saveBtn.action = #selector(saveEdit(_:))
+        content.addSubview(saveBtn)
+
+        if let idx = index {
+            let delBtn = NSButton(frame: NSRect(x: pad, y: y - 22, width: 60, height: 22))
+            delBtn.title = "Delete"; delBtn.bezelStyle = .rounded
+            delBtn.font = NSFont.systemFont(ofSize: 11)
+            delBtn.contentTintColor = .systemRed
+            delBtn.tag = idx; delBtn.target = self; delBtn.action = #selector(menuDelete(_:))
+            content.addSubview(delBtn)
+        }
+
+        swap(to: content)
+    }
+
+    private func swap(to content: NSView) {
+        view.subviews.forEach { $0.removeFromSuperview() }
+        view.frame = content.bounds
+        content.autoresizingMask = [.width, .height]
+        view.addSubview(content)
+        popover?.contentSize = content.frame.size
+    }
+
+    // MARK: Actions
+
+    @objc func runCmd(_ sender: NSButton) {
+        let cmds = Prefs.widgetCommands(for: agentName)
+        guard sender.tag < cmds.count else { return }
+        popover?.close()
+        widget?.runWidgetCommand(cmds[sender.tag])
+    }
+
+    @objc func menuEdit(_ sender: NSMenuItem) {
+        let cmds = Prefs.widgetCommands(for: agentName)
+        guard sender.tag < cmds.count else { return }
+        showEdit(cmd: cmds[sender.tag], index: sender.tag)
+    }
+
+    @objc func menuUp(_ sender: NSMenuItem) {
+        var cmds = Prefs.widgetCommands(for: agentName)
+        let i = sender.tag
+        guard i > 0 && i < cmds.count else { return }
+        cmds.swapAt(i, i - 1)
+        Prefs.saveWidgetCommands(cmds, for: agentName); showList()
+    }
+
+    @objc func menuDown(_ sender: NSMenuItem) {
+        var cmds = Prefs.widgetCommands(for: agentName)
+        let i = sender.tag
+        guard i < cmds.count - 1 else { return }
+        cmds.swapAt(i, i + 1)
+        Prefs.saveWidgetCommands(cmds, for: agentName); showList()
+    }
+
+    @objc func menuDelete(_ sender: NSMenuItem) {
+        var cmds = Prefs.widgetCommands(for: agentName)
+        guard sender.tag < cmds.count else { return }
+        cmds.remove(at: sender.tag)
+        Prefs.saveWidgetCommands(cmds, for: agentName); showList()
+    }
+
+    @objc func menuAdd(_ sender: Any) { showEdit(cmd: nil, index: nil) }
+    @objc func goBack(_ sender: Any)  { showList() }
+
+    @objc func saveEdit(_ sender: NSButton) {
+        guard let content = view.subviews.first,
+              let lf = content.viewWithTag(1001) as? NSTextField,
+              let pf = content.viewWithTag(1002) as? NSTextField,
+              let sg = content.viewWithTag(1003) as? NSSegmentedControl
+        else { return }
+        let label = lf.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !label.isEmpty else { return }
+        let kind: WidgetCommand.Kind = sg.selectedSegment == 0 ? .openTerminal : .injectCommand
+        let payload = pf.stringValue.trimmingCharacters(in: .whitespaces)
+        var cmds = Prefs.widgetCommands(for: agentName)
+        let editIndex = sender.tag - 10000
+        if editIndex < 0 {
+            cmds.append(WidgetCommand(label: label, kind: kind, payload: payload))
+        } else if editIndex < cmds.count {
+            cmds[editIndex].label = label; cmds[editIndex].kind = kind; cmds[editIndex].payload = payload
+        }
+        Prefs.saveWidgetCommands(cmds, for: agentName); showList()
     }
 }
 
@@ -1045,6 +1434,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var idleFill: NSColor = NSColor.black.withAlphaComponent(0.85)
     var isMuted: Bool = false
     var modelPopover: NSPopover?
+    var isCommandPanelExpanded = false
+    var commandPanelView: NSView?
+    var commandPanelH: CGFloat = 0
     var sessions: [ClaudeSession] = []
     var activeSessionId: UUID?
     var selectedTTY: String?
@@ -1134,8 +1526,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         terminalBtn.isBordered    = false
         terminalBtn.focusRingType = .none
         terminalBtn.imageScaling  = .scaleProportionallyUpOrDown
-        terminalBtn.onShortPress  = { [weak self] in self?.launchTerminal(name: "Default", modelId: nil) }
-        terminalBtn.onLongPress   = { [weak self] in self?.showModelPicker() }
+        terminalBtn.onShortPress  = { [weak self] in self?.showCommandPalette() }
+        terminalBtn.onLongPress   = { [weak self] in self?.showCommandPalette() }
         content.addSubview(terminalBtn)
 
         // Gear button — bottom-left (settings + info)
@@ -1296,6 +1688,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             collapseGearPanelIfNeeded()
             return
         }
+        if isCommandPanelExpanded { collapseCommandPanel() }
         isGearExpanded = true
         let content = window.contentView!
         let curFrame = window.frame
@@ -1797,23 +2190,362 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }.resume()
     }
 
-    func showModelPicker() {
-        if let p = modelPopover, p.isShown { p.close(); return }
-        let p = NSPopover()
-        p.contentViewController = ModelPickerVC(widget: self, popover: p)
-        p.behavior = .transient
-        p.show(relativeTo: terminalBtn.bounds, of: terminalBtn, preferredEdge: .maxY)
-        modelPopover = p
-        p.contentViewController?.view.window?.windowController?.window?.makeKeyAndOrderFront(nil)
+    func runWidgetCommand(_ cmd: WidgetCommand) {
+        switch cmd.kind {
+        case .openTerminal:
+            launchTerminal(name: cmd.label, modelId: cmd.payload.isEmpty ? nil : cmd.payload, bare: false)
+        case .openBareTerminal:
+            launchTerminal(name: cmd.label, modelId: nil, bare: true)
+        case .injectCommand:
+            injectToSession(cmd.payload, source: "raw")
+        }
     }
 
-    func launchTerminal(name: String, modelId: String?) {
+    func showCommandPalette() {
+        if isCommandPanelExpanded {
+            collapseCommandPanel()
+        } else {
+            if isGearExpanded { collapseGearPanelIfNeeded() }
+            let (panelView, panelH) = makeCommandListPanel()
+            let content = window.contentView!
+            let curFrame = window.frame
+            isCommandPanelExpanded = true
+            commandPanelH = panelH
+            window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY - panelH,
+                                   width: curFrame.width, height: curFrame.height + panelH), display: false)
+            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: panelH) }
+            panelView.frame = NSRect(x: 0, y: 0, width: curFrame.width, height: panelH)
+            content.addSubview(panelView)
+            commandPanelView = panelView
+            window.display()
+        }
+    }
+
+    func collapseCommandPanel() {
+        guard isCommandPanelExpanded else { return }
+        let content = window.contentView!
+        let panelH = commandPanelH
+        commandPanelView?.removeFromSuperview()
+        commandPanelView = nil
+        commandPanelH = 0
+        isCommandPanelExpanded = false
+        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -panelH) }
+        let curFrame = window.frame
+        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + panelH,
+                               width: curFrame.width, height: curFrame.height - panelH), display: true)
+    }
+
+    func swapCommandPanelTo(view newView: NSView, newH: CGFloat) {
+        let content = window.contentView!
+        let delta = newH - commandPanelH
+        commandPanelView?.removeFromSuperview()
+        commandPanelView = nil
+        if delta != 0 {
+            let curFrame = window.frame
+            window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY - delta,
+                                   width: curFrame.width, height: curFrame.height + delta), display: false)
+            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: delta) }
+            commandPanelH = newH
+        }
+        newView.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: newH)
+        content.addSubview(newView)
+        commandPanelView = newView
+        window.display()
+    }
+
+    private func makeCommandListPanel() -> (NSView, CGFloat) {
+        let W = window.frame.width
+        let rH: CGFloat = 32
+        let pad: CGFloat = 10
+        let cmds = Prefs.widgetCommands(for: agentName)
+        let opens   = cmds.filter { $0.kind == .openTerminal }
+        let injects = cmds.filter { $0.kind == .injectCommand }
+        let hasSep  = !opens.isEmpty && !injects.isEmpty
+        let totalH  = CGFloat(cmds.count) * rH + (hasSep ? 10 : 0) + 34 + 8
+
+        let (panelBg, _) = gearPanelColors()
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: totalH))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = panelBg.cgColor
+
+        let topSep = NSView(frame: NSRect(x: 0, y: totalH - 1, width: W, height: 1))
+        topSep.wantsLayer = true
+        topSep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        panel.addSubview(topSep)
+
+        var curY = totalH - 8
+
+        func addRow(_ cmd: WidgetCommand) {
+            let idx = cmds.firstIndex(where: { $0.id == cmd.id }) ?? 0
+            curY -= rH
+            let row = NSView(frame: NSRect(x: 0, y: curY, width: W, height: rH))
+
+            // Grip handle — left side, drag to reorder
+            let gripSz: CGFloat = 20
+            let grip = DragHandleView(frame: NSRect(x: pad, y: (rH - gripSz) / 2, width: gripSz, height: gripSz))
+            grip.onMoveUp = { [weak self] in
+                guard let self = self else { return }
+                var c = Prefs.widgetCommands(for: self.agentName)
+                guard idx > 0 && idx < c.count else { return }
+                c.swapAt(idx, idx - 1)
+                Prefs.saveWidgetCommands(c, for: self.agentName)
+                let (v, h) = self.makeCommandListPanel()
+                self.swapCommandPanelTo(view: v, newH: h)
+            }
+            grip.onMoveDown = { [weak self] in
+                guard let self = self else { return }
+                var c = Prefs.widgetCommands(for: self.agentName)
+                guard idx < c.count - 1 else { return }
+                c.swapAt(idx, idx + 1)
+                Prefs.saveWidgetCommands(c, for: self.agentName)
+                let (v, h) = self.makeCommandListPanel()
+                self.swapCommandPanelTo(view: v, newH: h)
+            }
+            row.addSubview(grip)
+
+            // Hit area (excludes grip and edit button)
+            let hitX = pad + gripSz + 4
+            let editBtnX = W - pad - 18
+            let hitW = editBtnX - hitX
+            let hit = NSButton(frame: NSRect(x: hitX, y: 0, width: hitW, height: rH))
+            hit.title = ""; hit.isBordered = false; hit.bezelStyle = .inline
+            hit.tag = idx; hit.target = self; hit.action = #selector(cmdPanelRun(_:))
+            row.addSubview(hit)
+
+            // Terminal icon for openTerminal
+            var textX = hitX
+            if cmd.kind == .openTerminal || cmd.kind == .openBareTerminal,
+               let img = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
+                   .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)) {
+                let iv = NSImageView(frame: NSRect(x: textX, y: (rH - 14) / 2, width: 14, height: 14))
+                iv.image = img; iv.contentTintColor = .secondaryLabelColor
+                row.addSubview(iv)
+                textX += 18
+            }
+
+            // Label — use displayLabel so label==payload triggers a clean derived alias
+            let labelW: CGFloat = 72
+            let lbl = NSTextField(labelWithString: cmd.displayLabel)
+            lbl.frame = NSRect(x: textX, y: (rH - 14) / 2, width: labelW, height: 14)
+            lbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            lbl.textColor = .labelColor
+            lbl.lineBreakMode = .byTruncatingTail
+            row.addSubview(lbl)
+
+            // Marquee — shows actual command that will run
+            let marqueeX = textX + labelW + 4
+            let marqueeW = editBtnX - marqueeX - 4
+            let marqueeText: String = {
+                switch cmd.kind {
+                case .openTerminal:
+                    return cmd.payload.isEmpty ? "claude" : "claude --model \(cmd.payload)"
+                case .openBareTerminal:
+                    return "open terminal"
+                case .injectCommand:
+                    return cmd.payload == cmd.displayLabel ? "" : cmd.payload
+                }
+            }()
+            if marqueeW > 16 && !marqueeText.isEmpty {
+                let mq = MarqueeView(frame: NSRect(x: marqueeX, y: (rH - 12) / 2, width: marqueeW, height: 12))
+                mq.setup(text: marqueeText,
+                         font: NSFont.monospacedSystemFont(ofSize: 9, weight: .light),
+                         color: NSColor.tertiaryLabelColor)
+                row.addSubview(mq)
+            }
+
+            // Edit button — right side
+            let eb = NSButton(frame: NSRect(x: editBtnX, y: (rH - 18) / 2, width: 18, height: 18))
+            eb.isBordered = false; eb.bezelStyle = .inline
+            eb.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .regular))
+            eb.imageScaling = .scaleProportionallyUpOrDown
+            eb.contentTintColor = .tertiaryLabelColor
+            eb.tag = idx; eb.target = self; eb.action = #selector(cmdPanelEdit(_:))
+            row.addSubview(eb)
+
+            panel.addSubview(row)
+        }
+
+        opens.forEach { addRow($0) }
+        if hasSep {
+            curY -= 5
+            let sep = NSView(frame: NSRect(x: pad, y: curY - 1, width: W - pad * 2, height: 1))
+            sep.wantsLayer = true; sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+            panel.addSubview(sep)
+            curY -= 4
+        }
+        injects.forEach { addRow($0) }
+
+        let addBtn = NSButton(frame: NSRect(x: pad, y: 6, width: W - pad * 2, height: 22))
+        addBtn.title = "+ Add command"; addBtn.bezelStyle = .inline; addBtn.isBordered = false
+        addBtn.font = NSFont.systemFont(ofSize: 10); addBtn.alignment = .left
+        addBtn.contentTintColor = .secondaryLabelColor
+        addBtn.target = self; addBtn.action = #selector(cmdPanelAdd(_:))
+        panel.addSubview(addBtn)
+
+        return (panel, totalH)
+    }
+
+    private func makeCommandEditPanel(cmd: WidgetCommand?, index: Int?) -> (NSView, CGFloat) {
+        let W = window.frame.width
+        let H: CGFloat = 168
+        let pad: CGFloat = 10
+        let (panelBg, _) = gearPanelColors()
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = panelBg.cgColor
+
+        let topSep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
+        topSep.wantsLayer = true
+        topSep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        panel.addSubview(topSep)
+
+        let backBtn = NSButton(frame: NSRect(x: pad, y: H - 26, width: 60, height: 18))
+        backBtn.title = "← Back"; backBtn.isBordered = false
+        backBtn.font = NSFont.systemFont(ofSize: 10); backBtn.contentTintColor = .secondaryLabelColor
+        backBtn.target = self; backBtn.action = #selector(cmdPanelBack(_:))
+        panel.addSubview(backBtn)
+
+        var y: CGFloat = H - 36
+        let seg = NSSegmentedControl(labels: ["claude", "Terminal", "Inject"],
+                                     trackingMode: .selectOne, target: nil, action: nil)
+        seg.frame = NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22)
+        seg.font = NSFont.systemFont(ofSize: 10)
+        seg.selectedSegment = cmd.map {
+            switch $0.kind {
+            case .openTerminal:     return 0
+            case .openBareTerminal: return 1
+            case .injectCommand:    return 2
+            }
+        } ?? 0
+        seg.tag = 1003; panel.addSubview(seg); y -= 30
+
+        let labelF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
+        labelF.placeholderString = "Alias (optional)"; labelF.stringValue = cmd?.label ?? ""
+        labelF.font = NSFont.systemFont(ofSize: 11); labelF.bezelStyle = .roundedBezel
+        labelF.tag = 1001; panel.addSubview(labelF); y -= 30
+
+        let payF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
+        payF.placeholderString = "Model ID or command (e.g. /clear)"
+        payF.stringValue = cmd?.payload ?? ""
+        payF.font = NSFont.systemFont(ofSize: 11); payF.bezelStyle = .roundedBezel
+        payF.tag = 1002; panel.addSubview(payF); y -= 30
+
+        let saveBtn = NSButton(frame: NSRect(x: W - pad - 60, y: y - 22, width: 60, height: 22))
+        saveBtn.title = index == nil ? "Add" : "Save"; saveBtn.bezelStyle = .rounded
+        saveBtn.font = NSFont.systemFont(ofSize: 11); saveBtn.keyEquivalent = "\r"
+        saveBtn.tag = (index ?? -1) + 10000
+        saveBtn.target = self; saveBtn.action = #selector(cmdPanelSave(_:))
+        panel.addSubview(saveBtn)
+
+        if let idx = index {
+            let delBtn = NSButton(frame: NSRect(x: pad, y: y - 22, width: 60, height: 22))
+            delBtn.title = "Delete"; delBtn.bezelStyle = .rounded
+            delBtn.font = NSFont.systemFont(ofSize: 11)
+            delBtn.contentTintColor = .systemRed
+            delBtn.tag = idx; delBtn.target = self; delBtn.action = #selector(cmdPanelDelete(_:))
+            panel.addSubview(delBtn)
+        }
+
+        return (panel, H)
+    }
+
+    // MARK: - Command panel actions
+
+    @objc func cmdPanelRun(_ sender: NSButton) {
+        let cmds = Prefs.widgetCommands(for: agentName)
+        guard sender.tag < cmds.count else { return }
+        collapseCommandPanel()
+        runWidgetCommand(cmds[sender.tag])
+    }
+
+    @objc func cmdPanelEdit(_ sender: NSButton) {
+        let cmds = Prefs.widgetCommands(for: agentName)
+        guard sender.tag < cmds.count else { return }
+        let (editView, editH) = makeCommandEditPanel(cmd: cmds[sender.tag], index: sender.tag)
+        swapCommandPanelTo(view: editView, newH: editH)
+    }
+
+    @objc func cmdPanelUp(_ sender: NSButton) {
+        var cmds = Prefs.widgetCommands(for: agentName)
+        let i = sender.tag
+        guard i > 0 && i < cmds.count else { return }
+        cmds.swapAt(i, i - 1)
+        Prefs.saveWidgetCommands(cmds, for: agentName)
+        let (listView, listH) = makeCommandListPanel()
+        swapCommandPanelTo(view: listView, newH: listH)
+    }
+
+    @objc func cmdPanelDown(_ sender: NSButton) {
+        var cmds = Prefs.widgetCommands(for: agentName)
+        let i = sender.tag
+        guard i < cmds.count - 1 else { return }
+        cmds.swapAt(i, i + 1)
+        Prefs.saveWidgetCommands(cmds, for: agentName)
+        let (listView, listH) = makeCommandListPanel()
+        swapCommandPanelTo(view: listView, newH: listH)
+    }
+
+    @objc func cmdPanelDelete(_ sender: NSButton) {
+        var cmds = Prefs.widgetCommands(for: agentName)
+        guard sender.tag < cmds.count else { return }
+        cmds.remove(at: sender.tag)
+        Prefs.saveWidgetCommands(cmds, for: agentName)
+        let (listView, listH) = makeCommandListPanel()
+        swapCommandPanelTo(view: listView, newH: listH)
+    }
+
+    @objc func cmdPanelAdd(_ sender: Any) {
+        let (editView, editH) = makeCommandEditPanel(cmd: nil, index: nil)
+        swapCommandPanelTo(view: editView, newH: editH)
+    }
+
+    @objc func cmdPanelBack(_ sender: Any) {
+        let (listView, listH) = makeCommandListPanel()
+        swapCommandPanelTo(view: listView, newH: listH)
+    }
+
+    @objc func cmdPanelSave(_ sender: NSButton) {
+        guard let panelView = commandPanelView,
+              let lf = panelView.viewWithTag(1001) as? NSTextField,
+              let pf = panelView.viewWithTag(1002) as? NSTextField,
+              let sg = panelView.viewWithTag(1003) as? NSSegmentedControl
+        else { return }
+        let labelRaw = lf.stringValue.trimmingCharacters(in: .whitespaces)
+        let payload  = pf.stringValue.trimmingCharacters(in: .whitespaces)
+        let kind: WidgetCommand.Kind
+        switch sg.selectedSegment {
+        case 1:  kind = .openBareTerminal
+        case 2:  kind = .injectCommand
+        default: kind = .openTerminal
+        }
+        let label = labelRaw.isEmpty ? WidgetCommand.defaultAlias(for: payload, kind: kind) : labelRaw
+        guard !label.isEmpty else { return }
+        var cmds = Prefs.widgetCommands(for: agentName)
+        let editIndex = sender.tag - 10000
+        if editIndex < 0 {
+            cmds.append(WidgetCommand(label: label, kind: kind, payload: payload))
+        } else if editIndex < cmds.count {
+            cmds[editIndex].label = label; cmds[editIndex].kind = kind; cmds[editIndex].payload = payload
+        }
+        Prefs.saveWidgetCommands(cmds, for: agentName)
+        let (listView, listH) = makeCommandListPanel()
+        swapCommandPanelTo(view: listView, newH: listH)
+    }
+
+    func showModelPicker() {
+        showCommandPalette()
+    }
+
+    func launchTerminal(name: String, modelId: String?, bare: Bool = false) {
         guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/terminal") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var payload: [String: Any] = ["model": name]
         if let mid = modelId { payload["model_id"] = mid }
+        if bare { payload["bare"] = true }
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         req.timeoutInterval = 12
 

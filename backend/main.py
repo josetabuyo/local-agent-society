@@ -143,6 +143,7 @@ class InjectRequest(BaseModel):
 class TerminalRequest(BaseModel):
     model:    str            = "Default"
     model_id: Optional[str] = None        # claude --model flag value
+    bare:     bool           = False       # open plain shell, no claude
 
 
 # ── routes ────────────────────────────────────────────────────────────────────
@@ -610,9 +611,11 @@ def open_terminal(name: str, body: TerminalRequest):
     if name not in registry:
         raise HTTPException(status_code=404, detail="Agent not found")
     path = registry[name].get("path", "")
-    claude_cmd = f"claude --model {body.model_id}" if body.model_id else "claude"
-    # shlex.quote wraps path in single quotes — safe to embed inside AppleScript double-quoted string
-    shell_cmd = f"cd {shlex.quote(path)} && {claude_cmd}"
+    if body.bare:
+        shell_cmd = f"cd {shlex.quote(path)}"
+    else:
+        claude_cmd = f"claude --model {body.model_id}" if body.model_id else "claude"
+        shell_cmd = f"cd {shlex.quote(path)} && {claude_cmd}"
     user_shell = os.environ.get("SHELL", "/bin/zsh")
     script = (
         'tell application "iTerm2"\n'
