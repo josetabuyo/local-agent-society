@@ -1,7 +1,7 @@
 import click
 from cli.commands.system import status, start_cmd, stop_cmd, logs, install, uninstall, update
 from cli.commands.speak import speak
-from cli.commands.agents import agent, agents_list, link, widget
+from cli.commands.agents import agent, agents_list, link, widget, widgets_all
 from cli.commands.ports import ports
 from cli.commands.voices import voices
 from cli.commands.queue import queue
@@ -25,6 +25,7 @@ cli.add_command(speak)
 cli.add_command(agents_list, name="agents")
 cli.add_command(agent)
 cli.add_command(widget)
+cli.add_command(widgets_all, name="widgets")
 cli.add_command(link)
 cli.add_command(ports)
 cli.add_command(voices)

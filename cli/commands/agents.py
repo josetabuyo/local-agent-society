@@ -319,6 +319,18 @@ def widget(name):
     click.echo(f"Widget reopened for {name}.")
 
 
+@click.command("widgets")
+def widgets_all():
+    """Reopen all agent widgets on the current Space."""
+    data = api.get("/agents")
+    if not data:
+        click.echo("No agents registered.")
+        return
+    for name in data:
+        subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
+        click.echo(f"  ↺ {name}")
+
+
 @click.command("link")
 @click.option("--agent", "agent_name", default=None,
               help="Agent name to link. Defaults to agent in current directory.")
