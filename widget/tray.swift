@@ -135,180 +135,8 @@ enum Prefs {
     }
 }
 
-// MARK: - Config popover
-
-class ConfigVC: NSViewController {
-    let agentName: String
-    weak var widget: WidgetWindow?
-    var colorWell: NSColorWell!
-    var opacitySlider: NSSlider!
-    var ontopCheck: NSButton!
-    var expandCheck: NSButton!
-    var voiceNameVal: NSTextField!
-    var voiceLangVal: NSTextField!
-    var voicePickerPopover: NSPopover?
-
-    init(agentName: String, widget: WidgetWindow) {
-        self.agentName = agentName
-        self.widget = widget
-        super.init(nibName: nil, bundle: nil)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func loadView() {
-        let W: CGFloat = 220, pad: CGFloat = 14
-        let H: CGFloat = 264
-
-        // ── Color ─────────────────────────────────────────────────────────────
-        let colorLbl = rowLabel("Color")
-        colorLbl.frame = NSRect(x: pad, y: 228, width: 60, height: 15)
-
-        colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: 224, width: 36, height: 24))
-        colorWell.color = Prefs.color(for: agentName)
-        colorWell.target = self
-        colorWell.action = #selector(colorChanged(_:))
-
-        // ── Opacity ───────────────────────────────────────────────────────────
-        let opacLbl = rowLabel("Opacity")
-        opacLbl.frame = NSRect(x: pad, y: 194, width: 60, height: 15)
-
-        opacitySlider = NSSlider(value: Prefs.opacity(for: agentName),
-                                  minValue: 0.1, maxValue: 1.0,
-                                  target: self, action: #selector(opacityChanged(_:)))
-        opacitySlider.frame = NSRect(x: pad, y: 172, width: W - pad * 2, height: 18)
-
-        // ── Checkboxes ────────────────────────────────────────────────────────
-        ontopCheck = NSButton(checkboxWithTitle: "Always on top",
-                               target: self, action: #selector(ontopChanged(_:)))
-        ontopCheck.state = Prefs.ontop(for: agentName) ? .on : .off
-        ontopCheck.frame = NSRect(x: pad, y: 136, width: W - pad * 2, height: 20)
-        ontopCheck.font = NSFont.systemFont(ofSize: 11)
-
-        expandCheck = NSButton(checkboxWithTitle: "Expand on space change",
-                                target: self, action: #selector(expandChanged(_:)))
-        expandCheck.state = Prefs.expandOnSpaceChange(for: agentName) ? .on : .off
-        expandCheck.frame = NSRect(x: pad, y: 112, width: W - pad * 2, height: 20)
-        expandCheck.font = NSFont.systemFont(ofSize: 11)
-
-        // ── Separator ─────────────────────────────────────────────────────────
-        let sep = NSView(frame: NSRect(x: pad, y: 98, width: W - pad * 2, height: 1))
-        sep.wantsLayer = true
-        sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
-
-        // ── Voice section ─────────────────────────────────────────────────────
-        let curVoice = widget?.agentVoice ?? ""
-        let voiceInfo = allVoices.first(where: { $0.name == curVoice })
-
-        let voiceSectionLbl = rowLabel("Agent Voice")
-        voiceSectionLbl.frame = NSRect(x: pad, y: 76, width: 76, height: 15)
-
-        voiceNameVal = NSTextField(labelWithString: curVoice.isEmpty ? "—" : curVoice)
-        voiceNameVal.frame = NSRect(x: pad + 80, y: 76, width: W - pad * 2 - 80, height: 15)
-        voiceNameVal.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        voiceNameVal.textColor = .labelColor
-        voiceNameVal.alignment = .right
-
-        let langSectionLbl = rowLabel("Human Voice")
-        langSectionLbl.frame = NSRect(x: pad, y: 56, width: 82, height: 15)
-
-        let langStr = voiceInfo.map { "\($0.flag) \($0.lang)" } ?? "—"
-        voiceLangVal = NSTextField(labelWithString: langStr)
-        voiceLangVal.frame = NSRect(x: pad + 86, y: 56, width: W - pad * 2 - 86, height: 15)
-        voiceLangVal.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        voiceLangVal.textColor = .secondaryLabelColor
-        voiceLangVal.alignment = .right
-
-        let btnW: CGFloat = (W - pad * 2 - 6) / 2
-        let testBtn = NSButton(frame: NSRect(x: pad, y: 20, width: btnW, height: 22))
-        testBtn.title = "Test voice"
-        testBtn.bezelStyle = .rounded
-        testBtn.font = NSFont.systemFont(ofSize: 10)
-        testBtn.target = self
-        testBtn.action = #selector(testVoiceTapped(_:))
-
-        let changeBtn = NSButton(frame: NSRect(x: pad + btnW + 6, y: 20, width: btnW, height: 22))
-        changeBtn.title = "Change voice…"
-        changeBtn.bezelStyle = .rounded
-        changeBtn.font = NSFont.systemFont(ofSize: 10)
-        changeBtn.target = self
-        changeBtn.action = #selector(changeVoiceTapped(_:))
-
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
-        [colorLbl, colorWell, opacLbl, opacitySlider, ontopCheck, expandCheck,
-         sep, voiceSectionLbl, voiceNameVal, langSectionLbl, voiceLangVal, testBtn, changeBtn
-        ].forEach { v.addSubview($0) }
-        self.view = v
-    }
-
-    private func rowLabel(_ s: String) -> NSTextField {
-        let f = NSTextField(labelWithString: s)
-        f.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        f.textColor = .secondaryLabelColor
-        return f
-    }
-
-    func refreshVoiceDisplay() {
-        guard let w = widget else { return }
-        let info = allVoices.first(where: { $0.name == w.agentVoice })
-        voiceNameVal.stringValue = w.agentVoice.isEmpty ? "—" : w.agentVoice
-        voiceLangVal.stringValue = info.map { "\($0.flag) \($0.lang)" } ?? "—"
-    }
-
-    @objc func colorChanged(_ sender: NSColorWell) {
-        Prefs.save(color: sender.color, for: agentName)
-        widget?.applyPrefs()
-    }
-    @objc func opacityChanged(_ sender: NSSlider) {
-        Prefs.save(opacity: sender.doubleValue, for: agentName)
-        widget?.applyPrefs()
-    }
-    @objc func ontopChanged(_ sender: NSButton) {
-        Prefs.save(ontop: sender.state == .on, for: agentName)
-        widget?.applyPrefs()
-    }
-    @objc func expandChanged(_ sender: NSButton) {
-        Prefs.save(expandOnSpaceChange: sender.state == .on, for: agentName)
-    }
-
-    @objc func testVoiceTapped(_ sender: NSButton) {
-        guard let w = widget, !w.agentVoice.isEmpty else { return }
-        let lang = allVoices.first(where: { $0.name == w.agentVoice })?.lang ?? "en-US"
-        let text = lang.hasPrefix("es") ? "Hola, soy \(w.agentName)" : "Hello, I'm \(w.agentName)"
-        guard let url = URL(string: "http://localhost:8700/queue/speak") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "text": text, "voice": w.agentVoice, "name": w.agentName,
-        ])
-        req.timeoutInterval = 3
-        URLSession.shared.dataTask(with: req).resume()
-    }
-
-    @objc func changeVoiceTapped(_ sender: NSButton) {
-        if let p = voicePickerPopover, p.isShown { p.close(); voicePickerPopover = nil; return }
-        guard let w = widget else { return }
-        let p = NSPopover()
-        let vc = VoicePickerVC(agentName: agentName, widget: w, popover: p) { [weak self] in
-            self?.refreshVoiceDisplay()
-        }
-        p.contentViewController = vc
-        p.behavior = .transient
-        p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
-        voicePickerPopover = p
-    }
-}
-
-extension ConfigVC: NSPopoverDelegate {
-    func popoverWillClose(_ notification: Notification) {
-        colorWell.deactivate()
-        if NSColorPanel.shared.isVisible {
-            NSColorPanel.shared.orderOut(nil)
-        }
-    }
-}
-
 // MARK: - Language picker popover
+
 
 let supportedLocales: [(name: String, flag: String, id: String)] = [
     ("Español",    "🇲🇽", "es-MX"),
@@ -1088,15 +916,21 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var agentVoice: String
     let window: NSWindow
     var onClose: (() -> Void)?
-    var configPopover:  NSPopover?
+    var isGearExpanded = false
+    var gearPanelView: NSView?
+    var gearPanelKeyLabels: [NSTextField] = []
+    var gearPanelValLabels: [NSTextField] = []
+    var gearPanelColorWell: NSColorWell?
+    var gearPanelOpacitySlider: NSSlider?
+    var gearPanelOpacityValLbl: NSTextField?
+    var gearPanelVoicePickerPopover: NSPopover?
     var langPopover:    NSPopover?
     var speakerPopover: NSPopover?
     var nameLbl: OutlinedLabel!
-    var dotsBtn: WidgetButton!
+    var gearBtn: WidgetButton!
     var micBtn: MicButton!
     var speakerBtn: MicButton!
     var clearBtn: WidgetButton!
-    var infoBtn: WidgetButton!
     var terminalBtn: TerminalButton!
     var focusBtn: WidgetButton!
     var voice: VoiceInputManager!
@@ -1107,17 +941,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var activeSessionId: UUID?
     var selectedTTY: String?
 
-    var isInfoExpanded = false
-    var infoPanelView: NSView?
-    var infoKeyLabels: [NSTextField] = []
-    var infoValLabels: [NSTextField] = []
-
     var isOccluded  = false
     var shrinkTimer: Timer?
     var savedFrame:  NSRect?
     weak var appDelegate: AppDelegate?
 
-    static let infoH: CGFloat = 130
+    static let gearPanelH: CGFloat = 280
 
     init(agentName: String, index: Int, path: String, voice agentVoiceArg: String = "") {
         let W: CGFloat = 300, H: CGFloat = 160
@@ -1154,18 +983,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         nameLbl.textFont   = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
         content.addSubview(nameLbl)
 
-        // All bottom buttons: 32×32, y=12, right margin=10, gap=8
-        // Right to left: dots(258), mic(218), speaker(178) | left: info(10)
-
-        // Settings button (bottom-right)
-        dotsBtn = WidgetButton(frame: NSRect(x: W - 50, y: 16, width: 32, height: 32))
-        dotsBtn.imageScaling = .scaleProportionallyUpOrDown
-        dotsBtn.bezelStyle   = .inline
-        dotsBtn.isBordered   = false
-        dotsBtn.focusRingType = .none
-        dotsBtn.target       = self
-        dotsBtn.action       = #selector(showConfig(_:))
-        content.addSubview(dotsBtn)
+        // All bottom buttons: 32×32, y=16, left: gear(18) | right: terminal, speaker, mic
 
         // Mic button
         micBtn = MicButton(frame: NSRect(x: W - 90, y: 16, width: 32, height: 32))
@@ -1212,15 +1030,15 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         terminalBtn.onLongPress   = { [weak self] in self?.showModelPicker() }
         content.addSubview(terminalBtn)
 
-        // Info button — bottom-left
-        infoBtn = WidgetButton(frame: NSRect(x: 18, y: 16, width: 32, height: 32))
-        infoBtn.imageScaling  = .scaleProportionallyUpOrDown
-        infoBtn.bezelStyle    = .inline
-        infoBtn.isBordered    = false
-        infoBtn.focusRingType = .none
-        infoBtn.target        = self
-        infoBtn.action        = #selector(toggleInfo(_:))
-        content.addSubview(infoBtn)
+        // Gear button — bottom-left (settings + info)
+        gearBtn = WidgetButton(frame: NSRect(x: 18, y: 16, width: 32, height: 32))
+        gearBtn.imageScaling  = .scaleProportionallyUpOrDown
+        gearBtn.bezelStyle    = .inline
+        gearBtn.isBordered    = false
+        gearBtn.focusRingType = .none
+        gearBtn.target        = self
+        gearBtn.action        = #selector(toggleGear(_:))
+        content.addSubview(gearBtn)
 
         // Focus button — top-right
         focusBtn = WidgetButton(frame: NSRect(x: W - 38, y: H - 56, width: 28, height: 28))
@@ -1296,26 +1114,25 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         nameLbl?.strokeOpacity = opacity
         nameLbl?.needsDisplay  = true
 
-        dotsBtn?.alphaValue       = opacity
+        gearBtn?.alphaValue       = opacity
         micBtn?.alphaValue        = opacity
         speakerBtn?.alphaValue    = opacity
         clearBtn?.alphaValue      = opacity
-        infoBtn?.alphaValue       = opacity
         terminalBtn?.alphaValue   = opacity
         focusBtn?.alphaValue      = opacity
         let strokeA = min(opacity * 1.1 + 0.1, 1.0)
         let iconColor = NSColor.white.withAlphaComponent(strokeA)
-        dotsBtn?.image = phImage(phGearPNG)
-        dotsBtn?.imageScaling = .scaleProportionallyUpOrDown
-        dotsBtn?.contentTintColor = iconColor
+        let gearCfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        gearBtn?.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)?
+            .withSymbolConfiguration(gearCfg)
+        gearBtn?.imageScaling = .scaleProportionallyUpOrDown
+        gearBtn?.contentTintColor = iconColor
         clearBtn?.image = phImage(phBroomPNG)
         clearBtn?.imageScaling = .scaleProportionallyUpOrDown
         clearBtn?.contentTintColor = iconColor
         micBtn?.image = phImage(phMicPNG)
         micBtn?.imageScaling = .scaleProportionallyUpOrDown
         updateMicIcon(color: idleFill)
-        infoBtn?.image = phImage(phInfoPNG)
-        infoBtn?.imageScaling = .scaleProportionallyUpOrDown
         let termCfg = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
         terminalBtn?.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
             .withSymbolConfiguration(termCfg)
@@ -1327,25 +1144,306 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         focusBtn?.imageScaling = .scaleProportionallyUpOrDown
         focusBtn?.contentTintColor = iconColor
         updateSpeakerIcon()
-        updateInfoIcon()
-
-        if isInfoExpanded {
-            let (panelBg, textColor) = infoPanelColors()
-            infoPanelView?.layer?.backgroundColor = panelBg.cgColor
-            for lbl in infoKeyLabels { lbl.textColor = textColor.withAlphaComponent(0.60) }
-            for lbl in infoValLabels { lbl.textColor = textColor }
+        updateGearIcon()
+        if isGearExpanded {
+            let (panelBg, textColor) = gearPanelColors()
+            gearPanelView?.layer?.backgroundColor = panelBg.cgColor
+            for lbl in gearPanelKeyLabels { lbl.textColor = textColor.withAlphaComponent(0.60) }
+            for lbl in gearPanelValLabels { lbl.textColor = textColor }
+            gearPanelOpacityValLbl?.textColor = textColor
+            gearPanelOpacityValLbl?.stringValue = "\(Int(Prefs.opacity(for: agentName) * 100))%"
+            gearPanelColorWell?.color = Prefs.color(for: agentName)
         }
     }
 
-    @objc func showConfig(_ sender: NSButton) {
-        if let p = configPopover, p.isShown { p.close(); return }
+    // MARK: Gear panel (expand-down)
+
+    private func gearPanelColors() -> (bg: NSColor, text: NSColor) {
+        let bgColor = Prefs.color(for: agentName)
+        let panelBg = bgColor.blended(withFraction: 0.22, of: NSColor.black) ?? bgColor
+        let textColor = panelBg.blended(withFraction: 0.32, of: NSColor.white) ?? NSColor.white
+        return (panelBg, textColor)
+    }
+
+    func updateGearIcon() {
+        let opacity = Prefs.opacity(for: agentName)
+        let strokeA = min(opacity * 1.1 + 0.1, 1.0)
+        gearBtn?.contentTintColor = isGearExpanded
+            ? NSColor.white.withAlphaComponent(min(strokeA + 0.15, 1.0))
+            : NSColor.white.withAlphaComponent(strokeA)
+    }
+
+    @objc func toggleGear(_ sender: NSButton) {
+        if isGearExpanded {
+            collapseGearPanelIfNeeded()
+            return
+        }
+        isGearExpanded = true
+        let content = window.contentView!
+        let curFrame = window.frame
+        let addH = WidgetWindow.gearPanelH
+
+        let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY - addH,
+                                 width: curFrame.width, height: curFrame.height + addH)
+        window.setFrame(newWinFrame, display: false)
+        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
+        updateGearIcon()
+        NSColorPanel.shared.showsAlpha = false
+        let path = agentPath
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let branch: String = {
+                guard !path.isEmpty else { return "—" }
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                proc.arguments = ["-C", path, "branch", "--show-current"]
+                let pipe = Pipe()
+                proc.standardOutput = pipe; proc.standardError = Pipe()
+                do {
+                    try proc.run(); proc.waitUntilExit()
+                    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    return out.isEmpty ? "—" : out
+                } catch { return "—" }
+            }()
+            self.fetchAgentPorts { ports in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.isGearExpanded else { return }
+                    let panel = self.makeGearPanel(ports: ports, branch: branch)
+                    content.addSubview(panel)
+                    self.gearPanelView = panel
+                    self.window.display()
+                }
+            }
+        }
+    }
+
+    private func collapseGearPanelIfNeeded() {
+        guard isGearExpanded else { return }
+        let content = window.contentView!
+        let addH = WidgetWindow.gearPanelH
+        gearPanelView?.removeFromSuperview()
+        gearPanelView = nil
+        gearPanelKeyLabels = []
+        gearPanelValLabels = []
+        gearPanelColorWell = nil
+        gearPanelOpacitySlider = nil
+        gearPanelOpacityValLbl = nil
+        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
+        let curFrame = window.frame
+        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
+                               width: curFrame.width, height: curFrame.height - addH), display: true)
+        isGearExpanded = false
+        updateGearIcon()
+        if NSColorPanel.shared.isVisible { NSColorPanel.shared.orderOut(nil) }
+    }
+
+    private func makeGearPanel(ports: [Int], branch: String) -> NSView {
+        let W: CGFloat = 300, H = WidgetWindow.gearPanelH
+        let pad: CGFloat = 16
+        let (panelBg, textColor) = gearPanelColors()
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = panelBg.cgColor
+
+        let topSep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
+        topSep.wantsLayer = true
+        topSep.layer?.backgroundColor = textColor.withAlphaComponent(0.20).cgColor
+        panel.addSubview(topSep)
+
+        func rowLabel(_ s: String) -> NSTextField {
+            let f = NSTextField(labelWithString: s)
+            f.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+            f.textColor = textColor.withAlphaComponent(0.60)
+            f.backgroundColor = .clear; f.drawsBackground = false
+            gearPanelKeyLabels.append(f)
+            return f
+        }
+        func rowValue(_ s: String) -> NSTextField {
+            let f = NSTextField(labelWithString: s)
+            f.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            f.textColor = textColor
+            f.backgroundColor = .clear; f.drawsBackground = false
+            gearPanelValLabels.append(f)
+            return f
+        }
+        func addSep(y: CGFloat) {
+            let s = NSView(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: 1))
+            s.wantsLayer = true
+            s.layer?.backgroundColor = textColor.withAlphaComponent(0.18).cgColor
+            panel.addSubview(s)
+        }
+
+        let keyW: CGFloat = 80, valX: CGFloat = 96
+        var curY: CGFloat = 8
+
+        // ── INFO rows (bottom of panel, built upward) ──────────────────────
+        let folderName = agentPath.isEmpty ? "—" : URL(fileURLWithPath: agentPath).lastPathComponent
+
+        let agentVoiceLabel: String = {
+            guard !agentVoice.isEmpty else { return "—" }
+            if let v = allVoices.first(where: { $0.name == agentVoice }) {
+                let lng = Locale(identifier: "en").localizedString(forLanguageCode: String(v.lang.prefix(2))) ?? v.lang
+                return "\(agentVoice)  \(v.flag) \(lng)"
+            }
+            return agentVoice
+        }()
+
+        let infoRows: [(String, String)] = [
+            ("Branch",      branch),
+            ("Folder",      folderName),
+            ("Ports",       ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
+            ("Human Voice", localeName(for: Prefs.voiceLocale(for: agentName))),
+            ("Agent Voice", agentVoiceLabel),
+        ]
+        for (key, val) in infoRows {
+            let kl = rowLabel(key)
+            kl.frame = NSRect(x: pad, y: curY, width: keyW, height: 15)
+            let vl = rowValue(val)
+            vl.frame = NSRect(x: pad + valX, y: curY, width: W - pad - (pad + valX), height: 15)
+            panel.addSubview(kl); panel.addSubview(vl)
+            curY += 20
+        }
+        addSep(y: curY); curY += 9
+
+        // ── Voice buttons ─────────────────────────────────────────────────
+        let btnW = (W - pad * 2 - 6) / 2
+        let testBtn = NSButton(frame: NSRect(x: pad, y: curY, width: btnW, height: 22))
+        testBtn.title = "Test voice"; testBtn.bezelStyle = .rounded
+        testBtn.font = NSFont.systemFont(ofSize: 10)
+        testBtn.target = self; testBtn.action = #selector(gearTestVoice(_:))
+        panel.addSubview(testBtn)
+        let changeBtn = NSButton(frame: NSRect(x: pad + btnW + 6, y: curY, width: btnW, height: 22))
+        changeBtn.title = "Change voice…"; changeBtn.bezelStyle = .rounded
+        changeBtn.font = NSFont.systemFont(ofSize: 10)
+        changeBtn.target = self; changeBtn.action = #selector(gearChangeVoice(_:))
+        panel.addSubview(changeBtn)
+        curY += 30
+        addSep(y: curY); curY += 9
+
+        // ── Display checkboxes ────────────────────────────────────────────
+        let expandChk = NSButton(checkboxWithTitle: "Expand on space change",
+                                 target: self, action: #selector(gearExpandChanged(_:)))
+        expandChk.state = Prefs.expandOnSpaceChange(for: agentName) ? .on : .off
+        expandChk.frame = NSRect(x: pad, y: curY, width: W - pad * 2, height: 20)
+        expandChk.font = NSFont.systemFont(ofSize: 11)
+        expandChk.contentTintColor = textColor
+        panel.addSubview(expandChk); curY += 24
+
+        let ontopChk = NSButton(checkboxWithTitle: "Always on top",
+                                target: self, action: #selector(gearOntopChanged(_:)))
+        ontopChk.state = Prefs.ontop(for: agentName) ? .on : .off
+        ontopChk.frame = NSRect(x: pad, y: curY, width: W - pad * 2, height: 20)
+        ontopChk.font = NSFont.systemFont(ofSize: 11)
+        ontopChk.contentTintColor = textColor
+        panel.addSubview(ontopChk); curY += 28
+
+        // ── Opacity ───────────────────────────────────────────────────────
+        let opacVal = Prefs.opacity(for: agentName)
+        let opacPct = NSTextField(labelWithString: "\(Int(opacVal * 100))%")
+        opacPct.frame = NSRect(x: W - pad - 36, y: curY + 2, width: 36, height: 15)
+        opacPct.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        opacPct.textColor = textColor; opacPct.alignment = .right
+        opacPct.backgroundColor = .clear; opacPct.drawsBackground = false
+        panel.addSubview(opacPct)
+        gearPanelOpacityValLbl = opacPct
+
+        let opacSlider = NSSlider(value: opacVal, minValue: 0.1, maxValue: 1.0,
+                                   target: self, action: #selector(gearOpacityChanged(_:)))
+        opacSlider.frame = NSRect(x: pad, y: curY, width: W - pad * 2 - 42, height: 18)
+        opacSlider.isContinuous = true
+        panel.addSubview(opacSlider)
+        gearPanelOpacitySlider = opacSlider
+        curY += 24
+
+        let opacLbl = rowLabel("Opacity")
+        opacLbl.frame = NSRect(x: pad, y: curY, width: 60, height: 13)
+        panel.addSubview(opacLbl); curY += 17
+
+        // ── Color well ────────────────────────────────────────────────────
+        let colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: curY, width: 36, height: 24))
+        colorWell.color = Prefs.color(for: agentName)
+        colorWell.target = self; colorWell.action = #selector(gearColorChanged(_:))
+        panel.addSubview(colorWell)
+        gearPanelColorWell = colorWell
+
+        let colorLbl = rowLabel("Background")
+        colorLbl.frame = NSRect(x: pad, y: curY + 5, width: 80, height: 14)
+        panel.addSubview(colorLbl)
+
+        return panel
+    }
+
+    private func localeName(for localeId: String) -> String {
+        if let entry = allVoices.first(where: { $0.lang == localeId }) {
+            let langName = Locale(identifier: "en").localizedString(forLanguageCode: String(localeId.prefix(2))) ?? localeId
+            return "\(entry.flag) \(langName)"
+        }
+        return supportedLocales.first(where: { $0.id == localeId })
+            .map { "\($0.flag) \($0.name)" } ?? localeId
+    }
+
+    private func fetchAgentPorts(completion: @escaping ([Int]) -> Void) {
+        guard let url = URL(string: "http://localhost:8700/ports") else { completion([]); return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self = self,
+                  let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]]
+            else { completion([]); return }
+            let ports = json.compactMap { (_, val) -> Int? in
+                guard let n = val["local_agent"] as? String, n == self.agentName,
+                      let p = val["port"] as? Int else { return nil }
+                return p
+            }.sorted()
+            completion(ports)
+        }.resume()
+    }
+
+    @objc func gearColorChanged(_ sender: NSColorWell) {
+        NSColorPanel.shared.showsAlpha = false
+        Prefs.save(color: sender.color, for: agentName)
+        applyPrefs()
+    }
+
+    @objc func gearOpacityChanged(_ sender: NSSlider) {
+        gearPanelOpacityValLbl?.stringValue = "\(Int(sender.doubleValue * 100))%"
+        Prefs.save(opacity: sender.doubleValue, for: agentName)
+        applyPrefs()
+    }
+
+    @objc func gearOntopChanged(_ sender: NSButton) {
+        Prefs.save(ontop: sender.state == .on, for: agentName)
+        applyPrefs()
+    }
+
+    @objc func gearExpandChanged(_ sender: NSButton) {
+        Prefs.save(expandOnSpaceChange: sender.state == .on, for: agentName)
+    }
+
+    @objc func gearTestVoice(_ sender: NSButton) {
+        guard !agentVoice.isEmpty else { return }
+        let lang = allVoices.first(where: { $0.name == agentVoice })?.lang ?? "en-US"
+        let text = lang.hasPrefix("es") ? "Hola, soy \(agentName)" : "Hello, I'm \(agentName)"
+        guard let url = URL(string: "http://localhost:8700/queue/speak") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "text": text, "voice": agentVoice, "name": agentName,
+        ])
+        req.timeoutInterval = 3
+        URLSession.shared.dataTask(with: req).resume()
+    }
+
+    @objc func gearChangeVoice(_ sender: NSButton) {
+        if let p = gearPanelVoicePickerPopover, p.isShown { p.close(); gearPanelVoicePickerPopover = nil; return }
         let p = NSPopover()
-        let configVC = ConfigVC(agentName: agentName, widget: self)
-        p.contentViewController = configVC
-        p.delegate = configVC
+        let vc = VoicePickerVC(agentName: agentName, widget: self, popover: p) { }
+        p.contentViewController = vc
         p.behavior = .transient
         p.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
-        configPopover = p
+        gearPanelVoicePickerPopover = p
     }
 
     @objc func focusAgentTerminal(_ sender: NSButton) {
@@ -1420,14 +1518,6 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    func updateInfoIcon() {
-        let opacity = Prefs.opacity(for: agentName)
-        let strokeA = min(opacity * 1.1 + 0.1, 1.0)
-        infoBtn?.contentTintColor = isInfoExpanded
-            ? NSColor.white.withAlphaComponent(min(strokeA + 0.15, 1.0))
-            : NSColor.white.withAlphaComponent(strokeA)
-    }
-
     private func setBackendMute(_ muted: Bool) {
         let method = muted ? "POST" : "DELETE"
         guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/mute") else { return }
@@ -1473,160 +1563,6 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         ])
         req.timeoutInterval = 3
         URLSession.shared.dataTask(with: req).resume()
-    }
-
-    // MARK: Info panel
-
-    @objc func toggleInfo(_ sender: NSButton) {
-        isInfoExpanded.toggle()
-        let content = window.contentView!
-        let curFrame = window.frame
-        let addH = WidgetWindow.infoH
-
-        if isInfoExpanded {
-            let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY - addH,
-                                     width: curFrame.width, height: curFrame.height + addH)
-            window.setFrame(newWinFrame, display: false)
-            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
-            updateInfoIcon()
-            fetchAgentPorts { [weak self] ports in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    let panel = self.makeInfoPanel(ports: ports)
-                    content.addSubview(panel)
-                    self.infoPanelView = panel
-                    self.window.display()
-                }
-            }
-        } else {
-            infoPanelView?.removeFromSuperview()
-            infoPanelView = nil
-            infoKeyLabels = []
-            infoValLabels = []
-            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
-            let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY + addH,
-                                     width: curFrame.width, height: curFrame.height - addH)
-            window.setFrame(newWinFrame, display: true)
-            updateInfoIcon()
-        }
-    }
-
-    private func infoPanelColors() -> (bg: NSColor, text: NSColor) {
-        let bgColor = Prefs.color(for: agentName)
-        let panelBg  = bgColor.blended(withFraction: 0.22, of: NSColor.black) ?? bgColor
-        let textColor = panelBg.blended(withFraction: 0.32, of: NSColor.white) ?? NSColor.white
-        return (panelBg, textColor)
-    }
-
-    private func currentGitBranch(for path: String) -> String {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        proc.arguments = ["-C", path, "branch", "--show-current"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError  = Pipe()
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            let data   = pipe.fileHandleForReading.readDataToEndOfFile()
-            let branch = String(data: data, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return branch.isEmpty ? "—" : branch
-        } catch {
-            return "—"
-        }
-    }
-
-    private func makeInfoPanel(ports: [Int]) -> NSView {
-        let W: CGFloat = 300
-        let H = WidgetWindow.infoH
-        let (panelBg, textColor) = infoPanelColors()
-
-        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
-        panel.wantsLayer = true
-        panel.layer?.backgroundColor = panelBg.cgColor
-
-        let sep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
-        sep.wantsLayer = true
-        sep.layer?.backgroundColor = textColor.withAlphaComponent(0.20).cgColor
-        panel.addSubview(sep)
-
-        let folderName = agentPath.isEmpty ? "—" : URL(fileURLWithPath: agentPath).lastPathComponent
-        let branch     = agentPath.isEmpty ? "—" : currentGitBranch(for: agentPath)
-
-        let agentVoiceLabel: String = {
-            guard !agentVoice.isEmpty else { return "—" }
-            if let v = allVoices.first(where: { $0.name == agentVoice }) {
-                let langName = Locale(identifier: "en").localizedString(forLanguageCode: String(v.lang.prefix(2))) ?? v.lang
-                return "\(agentVoice)  \(v.flag) \(langName)"
-            }
-            return agentVoice
-        }()
-
-        let rows: [(key: String, value: String)] = [
-            ("Agent Voice", agentVoiceLabel),
-            ("Human Voice", localeName(for: Prefs.voiceLocale(for: agentName))),
-            ("Ports",       ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
-            ("Folder",      folderName),
-            ("Branch",      branch),
-        ]
-
-        infoKeyLabels = []
-        infoValLabels = []
-
-        let keyW: CGFloat = 76
-        let valX: CGFloat = keyW + 12
-
-        for (i, row) in rows.enumerated() {
-            let yPos: CGFloat = H - 22 - CGFloat(i) * 22
-
-            let keyLbl = NSTextField(labelWithString: row.key)
-            keyLbl.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-            keyLbl.textColor = textColor.withAlphaComponent(0.60)
-            keyLbl.backgroundColor = .clear
-            keyLbl.drawsBackground = false
-            keyLbl.frame = NSRect(x: 16, y: yPos, width: keyW, height: 15)
-            panel.addSubview(keyLbl)
-            infoKeyLabels.append(keyLbl)
-
-            let valLbl = NSTextField(labelWithString: row.value)
-            valLbl.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-            valLbl.textColor = textColor
-            valLbl.backgroundColor = .clear
-            valLbl.drawsBackground = false
-            valLbl.frame = NSRect(x: 16 + valX, y: yPos, width: W - 16 - valX - 8, height: 15)
-            panel.addSubview(valLbl)
-            infoValLabels.append(valLbl)
-        }
-
-        return panel
-    }
-
-    private func localeName(for localeId: String) -> String {
-        if let entry = allVoices.first(where: { $0.lang == localeId }) {
-            let langName = Locale(identifier: "en").localizedString(forLanguageCode: String(localeId.prefix(2))) ?? localeId
-            return "\(entry.flag) \(langName)"
-        }
-        return supportedLocales.first(where: { $0.id == localeId })
-            .map { "\($0.flag) \($0.name)" } ?? localeId
-    }
-
-    private func fetchAgentPorts(completion: @escaping ([Int]) -> Void) {
-        guard let url = URL(string: "http://localhost:8700/ports") else {
-            completion([]); return
-        }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self = self,
-                  let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]]
-            else { completion([]); return }
-            let ports = json.compactMap { (_, val) -> Int? in
-                guard let n = val["local_agent"] as? String, n == self.agentName,
-                      let p = val["port"] as? Int else { return nil }
-                return p
-            }.sorted()
-            completion(ports)
-        }.resume()
     }
 
     func showSpeakerOptions() {
@@ -1807,25 +1743,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    private func collapseInfoPanelIfNeeded() {
-        guard isInfoExpanded else { return }
-        let content = window.contentView!
-        let addH = WidgetWindow.infoH
-        infoPanelView?.removeFromSuperview()
-        infoPanelView = nil
-        infoKeyLabels = []
-        infoValLabels = []
-        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
-        let curFrame = window.frame
-        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
-                               width: curFrame.width, height: curFrame.height - addH), display: true)
-        isInfoExpanded = false
-        updateInfoIcon()
-    }
-
     func setOccludedExpanded(_ expanded: Bool, tileFrame: NSRect? = nil) {
         if expanded {
-            collapseInfoPanelIfNeeded()
+            collapseGearPanelIfNeeded()
             savedFrame = window.frame
 
             let frame = tileFrame ?? (window.screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900))
@@ -1833,11 +1753,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             window.backgroundColor = Prefs.color(for: agentName).withAlphaComponent(Prefs.opacity(for: agentName))
             window.level = .floating
 
-            dotsBtn.isHidden     = true
+            gearBtn.isHidden     = true
             micBtn.isHidden      = true
             speakerBtn.isHidden  = true
             clearBtn.isHidden    = true
-            infoBtn.isHidden     = true
             terminalBtn.isHidden = true
 
             let W = frame.width, H = frame.height
@@ -1849,11 +1768,10 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
         } else {
-            dotsBtn.isHidden     = false
+            gearBtn.isHidden     = false
             micBtn.isHidden      = false
             speakerBtn.isHidden  = false
             clearBtn.isHidden    = false
-            infoBtn.isHidden     = false
             terminalBtn.isHidden = false
 
             let W: CGFloat = 300, H: CGFloat = 160
@@ -1876,7 +1794,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             nameLbl.textFont = NSFont.systemFont(ofSize: fontSize, weight: .heavy)
             nameLbl.needsDisplay = true
 
-            dotsBtn.frame     = NSRect(x: W - 50,  y: 16, width: 32, height: 32)
+            gearBtn.frame     = NSRect(x: 18,      y: 16, width: 32, height: 32)
             micBtn.frame      = NSRect(x: W - 90,  y: 16, width: 32, height: 32)
             speakerBtn.frame  = NSRect(x: W - 130, y: 16, width: 32, height: 32)
             clearBtn.frame    = NSRect(x: 58,      y: 16, width: 32, height: 32)
