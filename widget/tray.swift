@@ -2666,6 +2666,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
     func setOccludedExpanded(_ expanded: Bool, tileFrame: NSRect? = nil) {
         if expanded {
+            collapseCommandPanel()
             collapseGearPanelIfNeeded()
             savedFrame = window.frame
 
