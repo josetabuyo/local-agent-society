@@ -144,9 +144,38 @@ A TypeScript SDK is available at `sdk/society.ts`.
 
 ---
 
+## Widget buttons
+
+Each widget has six buttons at the bottom:
+
+| Button | Short press | Long press |
+|---|---|---|
+| ⚙ Gear | Toggle config panel (slides down) | — |
+| 🧹 Clear | Inject `/clear` into linked terminal | — |
+| `>_` Terminal | Toggle command panel (slides down) | — |
+| 🔊 Speaker | Toggle mute | Volume + voice picker |
+| 🎙 Mic | Toggle speech input | Language picker |
+| ⊕ Scope | Focus linked terminal | Drag to link a new TTY |
+
+## Command panel
+
+Click the terminal button (`>_`) to slide open the **command panel** below the widget.
+
+Each row shows a **grip handle** (drag to reorder), a **label** (clickable — executes the command), and a scrolling **marquee** with the exact command that will run.
+
+Three command types:
+
+| Type | What it does |
+|---|---|
+| **claude** | Opens iTerm2 running `claude --model <id>` in the agent's directory |
+| **Terminal** | Opens iTerm2 as a plain shell in the agent's directory (no claude) |
+| **Inject** | Types a command into the currently linked terminal session |
+
+Click ✏ on any row to edit or delete it. Use `+ Add command` to create new ones. If you leave the alias blank, a clean alias is derived from the payload (e.g. `/clear` → `clear`).
+
 ## Widget config
 
-Click the `⋯` button on any widget to open the settings popover:
+Click the ⚙ gear button to slide open the **config panel** below the widget:
 
 - **Color** — widget background color
 - **Opacity** — transparency level

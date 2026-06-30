@@ -587,8 +587,8 @@
         <div class="cmd-desc">Tap to focus the agent's Claude terminal. <strong>Drag</strong> the scope icon onto any terminal window to link it: the widget pastes <code>las link --agent NAME</code> and sends Enter via AppleScript. The widget flashes green when the link is confirmed. Works with any shell — no <code>!</code> prefix needed.</div>
       </div>
       <div class="cmd-card">
-        <div class="cmd-name">⊞ Command palette</div>
-        <div class="cmd-desc">Click the terminal button to open the command palette. Commands are grouped: <strong>Open terminal</strong> (⊠ icon, launches a new iTerm2 window with a Claude model) and <strong>Inject command</strong> (inserts text into the linked session). Use ▲ ▼ to reorder and ✏ to edit inline. Commands are stored per-agent in UserDefaults.</div>
+        <div class="cmd-name">⊞ Command panel</div>
+        <div class="cmd-desc">Click the terminal button (<code>&gt;_</code>) to slide open the command panel below the widget — same expand mechanic as the gear panel. Each row shows a <strong>grip handle</strong> (drag up/down to reorder), a clickable <strong>alias</strong> that executes the command, and a scrolling <strong>marquee</strong> showing the exact command that will run (e.g. <code>claude --model claude-sonnet-4-6</code>). Click ✏ to edit or delete. Three command types: <strong>claude</strong> (opens iTerm2 running <code>claude --model &lt;id&gt;</code>), <strong>Terminal</strong> (opens a plain shell in the agent's directory, no claude), <strong>Inject</strong> (types into the linked session). If no alias is given, one is derived from the payload (e.g. <code>/clear</code> → <code>clear</code>). Commands are stored per-agent in UserDefaults.</div>
       </div>
       <div class="cmd-card">
         <div class="cmd-name">Backend: link flow</div>
