@@ -5,12 +5,14 @@ Port: 8700
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import json
 import os
+import re
 import shlex
 import subprocess
+import tempfile
 import threading
 import time
 import random
@@ -60,27 +62,57 @@ def load_json(path: Path, default):
 
 
 def save_json(path: Path, data):
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    """Write JSON atomically (tempfile + os.replace) so readers never see a partial file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2, ensure_ascii=False))
+        os.replace(tmp_path, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+# Per-file locks: hold across the full read-modify-write so concurrent requests
+# (threadpool workers + the background TTS drainer thread) never interleave and
+# lose or corrupt writes to these shared JSON files / in-memory structures.
+_registry_lock    = threading.Lock()
+_queue_lock       = threading.Lock()
+_muted_lock       = threading.Lock()
+_attribution_lock = threading.Lock()
+_pending_links_lock = threading.Lock()
 
 
 # ── TTS drainer (background thread) ──────────────────────────────────────────
 
 def tts_drainer():
     while True:
-        queue = load_json(QUEUE_FILE, [])
-        if queue:
-            msg = queue.pop(0)
-            save_json(QUEUE_FILE, queue)
-            name  = msg.get("name", "")
-            muted = load_json(MUTED_FILE, [])
-            if name in muted:
-                continue
-            voice = msg.get("voice", "Samantha")
-            text  = msg.get("text", "")
-            if text:
-                subprocess.run(["say", "-v", voice, text], check=False)
-        else:
+        with _queue_lock:
+            queue = load_json(QUEUE_FILE, [])
+            msg = queue.pop(0) if queue else None
+            if msg is not None:
+                save_json(QUEUE_FILE, queue)
+        if msg is None:
             time.sleep(0.4)
+            continue
+        name = msg.get("name", "")
+        with _muted_lock:
+            muted = load_json(MUTED_FILE, [])
+        if name in muted:
+            continue
+        voice = msg.get("voice", "Samantha")
+        text  = msg.get("text", "")
+        if voice not in NICE_VOICE_NAMES:
+            print(f"[tts] skipping unknown voice {voice!r} for {name!r}", flush=True)
+            continue
+        if text:
+            subprocess.run(["say", "-v", voice, text], check=False)
 
 
 threading.Thread(target=tts_drainer, daemon=True).start()
@@ -114,7 +146,7 @@ class PortClaimRequest(BaseModel):
 
 
 class SpeakRequest(BaseModel):
-    text:   str
+    text:   str = Field(max_length=10000)
     voice:  str
     name:   str
 
@@ -133,7 +165,7 @@ class RenameRequest(BaseModel):
 
 
 class InjectRequest(BaseModel):
-    message:     str
+    message:     str = Field(max_length=10000)
     source:      str           = "voice"   # "voice" | "agent" | "external"
     from_agent:  Optional[str] = None
     tty:         Optional[str] = None      # specific TTY to inject into (skips auto-discovery)
@@ -181,49 +213,53 @@ def get_voice(name: str):
 
 @app.get("/agents")
 def list_agents():
-    return load_json(REGISTRY_FILE, {})
+    with _registry_lock:
+        return load_json(REGISTRY_FILE, {})
 
 
 @app.post("/agents")
 def register_agent(agent: AgentRegistration):
-    registry = load_json(REGISTRY_FILE, {})
-    data = agent.model_dump()
-    data["backend_url"] = "http://localhost:8700"
-    data["frontend_url"] = f"http://localhost:8700/widget/{agent.name}"
-    registry[agent.name] = {**data, "registered_at": datetime.now().isoformat()}
-    save_json(REGISTRY_FILE, registry)
+    with _registry_lock:
+        registry = load_json(REGISTRY_FILE, {})
+        data = agent.model_dump()
+        data["backend_url"] = "http://localhost:8700"
+        data["frontend_url"] = f"http://localhost:8700/widget/{agent.name}"
+        registry[agent.name] = {**data, "registered_at": datetime.now().isoformat()}
+        save_json(REGISTRY_FILE, registry)
     return {"ok": True, "name": agent.name}
 
 
 @app.delete("/agents/{name}")
 def unregister_agent(name: str):
-    registry = load_json(REGISTRY_FILE, {})
-    if name not in registry:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    del registry[name]
-    save_json(REGISTRY_FILE, registry)
+    with _registry_lock:
+        registry = load_json(REGISTRY_FILE, {})
+        if name not in registry:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        del registry[name]
+        save_json(REGISTRY_FILE, registry)
     return {"ok": True}
 
 
 @app.patch("/agents/{name}")
 def rename_agent(name: str, body: RenameRequest):
-    registry = load_json(REGISTRY_FILE, {})
-    if name not in registry:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    new_name = body.new_name.strip()
-    if not new_name:
-        raise HTTPException(status_code=422, detail="new_name must not be empty")
-    if new_name in registry and new_name != name:
-        raise HTTPException(status_code=409, detail=f"Agent '{new_name}' already exists")
-    entry = registry.pop(name)
-    entry["name"] = new_name
-    entry["frontend_url"] = f"http://localhost:8700/widget/{new_name}"
-    if body.pronunciation is not None:
-        entry["pronunciation"] = body.pronunciation
-    elif entry.get("pronunciation") == name:
-        entry["pronunciation"] = new_name
-    registry[new_name] = entry
-    save_json(REGISTRY_FILE, registry)
+    with _registry_lock:
+        registry = load_json(REGISTRY_FILE, {})
+        if name not in registry:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        new_name = body.new_name.strip()
+        if not new_name:
+            raise HTTPException(status_code=422, detail="new_name must not be empty")
+        if new_name in registry and new_name != name:
+            raise HTTPException(status_code=409, detail=f"Agent '{new_name}' already exists")
+        entry = registry.pop(name)
+        entry["name"] = new_name
+        entry["frontend_url"] = f"http://localhost:8700/widget/{new_name}"
+        if body.pronunciation is not None:
+            entry["pronunciation"] = body.pronunciation
+        elif entry.get("pronunciation") == name:
+            entry["pronunciation"] = new_name
+        registry[new_name] = entry
+        save_json(REGISTRY_FILE, registry)
     return {"ok": True, "old_name": name, "new_name": new_name}
 
 
@@ -270,11 +306,12 @@ def unregister_port(port: int):
 
 @app.get("/ports/free")
 def get_free_port(start: int = 9000, end: int = 9999):
-    ports = load_json(PORTS_FILE, {})
-    registered = {int(k) for k in ports.keys()}
-    for port in range(start, end):
-        if _port_is_free(port, registered):
-            return {"port": port}
+    with _ports_lock:
+        ports = load_json(PORTS_FILE, {})
+        registered = {int(k) for k in ports.keys()}
+        for port in range(start, end + 1):
+            if _port_is_free(port, registered):
+                return {"port": port}
     raise HTTPException(status_code=503, detail="No free ports available")
 
 
@@ -312,20 +349,24 @@ def claim_port(req: PortClaimRequest):
 
 @app.post("/queue/speak")
 def enqueue_speak(req: SpeakRequest):
-    queue = load_json(QUEUE_FILE, [])
-    queue.append({"text": req.text, "voice": req.voice, "name": req.name})
-    save_json(QUEUE_FILE, queue)
-    return {"ok": True, "queue_length": len(queue)}
+    with _queue_lock:
+        queue = load_json(QUEUE_FILE, [])
+        queue.append({"text": req.text, "voice": req.voice, "name": req.name})
+        save_json(QUEUE_FILE, queue)
+        length = len(queue)
+    return {"ok": True, "queue_length": length}
 
 
 @app.get("/queue")
 def get_queue():
-    return load_json(QUEUE_FILE, [])
+    with _queue_lock:
+        return load_json(QUEUE_FILE, [])
 
 
 @app.delete("/queue")
 def clear_queue():
-    save_json(QUEUE_FILE, [])
+    with _queue_lock:
+        save_json(QUEUE_FILE, [])
     return {"ok": True}
 
 
@@ -439,46 +480,64 @@ def _find_all_claude_ttys(agent_path: str) -> list[str]:
     return seen
 
 
+# Strict TTY device path format — guards every AppleScript path that interpolates a tty.
+TTY_RE = re.compile(r"^/dev/ttys\d{3,4}$")
+
+
+def _run_osascript_with_argv(script: str, args: list[str], timeout: int = 4) -> subprocess.CompletedProcess:
+    """Run an AppleScript ("on run argv ...") from a short-lived temp file, passing
+    `args` as argv so untrusted text is never interpolated into the script source."""
+    fd, tmp_path = tempfile.mkstemp(suffix=".applescript")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(script)
+        return subprocess.run(
+            ["osascript", tmp_path, *args], capture_output=True, text=True, timeout=timeout
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _inject_via_iterm(tty: str, message: str) -> dict:
-    safe = (message
-            .replace("\\", "\\\\")
-            .replace('"', '\\"')
-            .replace("\r", " ")
-            .replace("\n", " "))
     tty_dev = tty if tty.startswith("/") else f"/dev/{tty}"
-    delay_s = round(min(0.05 + len(safe) * 0.002, 1.0), 3)
+    delay_s = round(min(0.05 + len(message) * 0.002, 1.0), 3)
+    # `message` is passed as argv item 1, never interpolated into the script source.
     script = f'''
-set foundIt to false
-set sessionCount to 0
-tell application "iTerm2"
-    repeat with w in windows
-        repeat with t in tabs of w
-            repeat with s in sessions of t
-                set sessionCount to sessionCount + 1
-                try
-                    if (tty of s) is equal to "{tty_dev}" then
-                        tell s
-                            write text "{safe}" newline NO
-                            delay {delay_s}
-                            write text (ASCII character 13) newline NO
-                        end tell
-                        set foundIt to true
-                    end if
-                end try
+on run argv
+    set msg to item 1 of argv
+    set foundIt to false
+    set sessionCount to 0
+    tell application "iTerm2"
+        repeat with w in windows
+            repeat with t in tabs of w
+                repeat with s in sessions of t
+                    set sessionCount to sessionCount + 1
+                    try
+                        if (tty of s) is equal to "{tty_dev}" then
+                            tell s
+                                write text msg newline NO
+                                delay {delay_s}
+                                write text (ASCII character 13) newline NO
+                            end tell
+                            set foundIt to true
+                        end if
+                    end try
+                end repeat
             end repeat
         end repeat
-    end repeat
-end tell
-if foundIt then
-    return "ok|sessions=" & sessionCount
-end if
-return "not_found|sessions=" & sessionCount
+    end tell
+    if foundIt then
+        return "ok|sessions=" & sessionCount
+    end if
+    return "not_found|sessions=" & sessionCount
+end run
 '''
     ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
     try:
-        result = subprocess.run(
-            ["osascript", "-e", script], capture_output=True, text=True, timeout=4
-        )
+        result = _run_osascript_with_argv(script, [message], timeout=4)
         success = result.returncode == 0 and "ok" in result.stdout
         return {
             "success": success,
@@ -487,7 +546,7 @@ return "not_found|sessions=" & sessionCount
             "stderr": result.stderr.strip(),
             "ts": ts,
             "delay_s": delay_s,
-            "text_len": len(safe),
+            "text_len": len(message),
             "tty": tty_dev,
         }
     except Exception as exc:
@@ -498,7 +557,7 @@ return "not_found|sessions=" & sessionCount
             "stderr": str(exc),
             "ts": ts,
             "delay_s": delay_s,
-            "text_len": len(safe),
+            "text_len": len(message),
             "tty": tty_dev,
         }
 
@@ -639,6 +698,9 @@ def get_agent_ttys(name: str):
 
 @app.post("/agents/{name}/inject")
 def inject_message(name: str, body: InjectRequest):
+    if body.tty is not None and not TTY_RE.match(body.tty):
+        raise HTTPException(status_code=404, detail="Invalid tty")
+
     registry = load_json(REGISTRY_FILE, {})
     if name not in registry:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -734,25 +796,28 @@ def clear_pending(name: str):
 
 @app.post("/agents/{name}/mute")
 def mute_agent(name: str):
-    muted = load_json(MUTED_FILE, [])
-    if name not in muted:
-        muted.append(name)
-        save_json(MUTED_FILE, muted)
+    with _muted_lock:
+        muted = load_json(MUTED_FILE, [])
+        if name not in muted:
+            muted.append(name)
+            save_json(MUTED_FILE, muted)
     return {"ok": True, "muted": True, "name": name}
 
 
 @app.delete("/agents/{name}/mute")
 def unmute_agent(name: str):
-    muted = load_json(MUTED_FILE, [])
-    if name in muted:
-        muted.remove(name)
-        save_json(MUTED_FILE, muted)
+    with _muted_lock:
+        muted = load_json(MUTED_FILE, [])
+        if name in muted:
+            muted.remove(name)
+            save_json(MUTED_FILE, muted)
     return {"ok": True, "muted": False, "name": name}
 
 
 @app.get("/agents/{name}/muted")
 def get_muted(name: str):
-    muted = load_json(MUTED_FILE, [])
+    with _muted_lock:
+        muted = load_json(MUTED_FILE, [])
     return {"muted": name in muted, "name": name}
 
 
@@ -763,7 +828,8 @@ def pin_tty(name: str, body: dict):
     """Store a TTY linked via `las link` for the widget to pick up."""
     tty = body.get("tty", "")
     if tty:
-        _pending_links[name] = tty
+        with _pending_links_lock:
+            _pending_links[name] = tty
     return {"ok": bool(tty), "tty": tty}
 
 
@@ -771,7 +837,8 @@ def pin_tty(name: str, body: dict):
 def get_pending_link(name: str):
     """Return and clear the pending linked TTY for an agent (consumed once)."""
     from fastapi.responses import Response as FastResponse
-    tty = _pending_links.pop(name, None)
+    with _pending_links_lock:
+        tty = _pending_links.pop(name, None)
     if tty:
         return {"tty": tty}
     return FastResponse(status_code=204)
@@ -781,15 +848,17 @@ def get_pending_link(name: str):
 
 @app.post("/attribution")
 def record_attribution(entry: AttributionEntry):
-    log = load_json(ATTRIBUTION_FILE, [])
-    log.append(entry.model_dump())
-    save_json(ATTRIBUTION_FILE, log)
+    with _attribution_lock:
+        log = load_json(ATTRIBUTION_FILE, [])
+        log.append(entry.model_dump())
+        save_json(ATTRIBUTION_FILE, log)
     return {"ok": True}
 
 
 @app.get("/attribution")
 def get_attribution(file: str = None, name: str = None):
-    log = load_json(ATTRIBUTION_FILE, [])
+    with _attribution_lock:
+        log = load_json(ATTRIBUTION_FILE, [])
     if file:
         log = [e for e in log if e["file"] == file]
     if name:

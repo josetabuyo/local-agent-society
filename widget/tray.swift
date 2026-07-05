@@ -1421,6 +1421,9 @@ class WidgetWindow: NSObject, NSWindowDelegate {
     var gearPanelActiveTTYs: [String] = []
     var gearPanelRouteBtn: NSButton?
     var gearPanelRoutePopover: NSPopover?
+    var gearPanelBranchValLbl: NSTextField?
+    var gearPanelPortsValLbl: NSTextField?
+    var gearPanelTTYRefreshTimer: Timer?
     var langPopover:    NSPopover?
     var speakerPopover: NSPopover?
     var nameLbl: OutlinedLabel!
@@ -1694,44 +1697,101 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         let curFrame = window.frame
         let addH = WidgetWindow.gearPanelH
 
+        // Build the panel with placeholder values FIRST (synchronously) and attach
+        // it before expanding the window, so there is never a blank expanded panel.
+        self.gearPanelActiveTTYs = []
+        let panel = makeGearPanel(ports: nil, branch: "…", ttys: [])
+        panel.frame = NSRect(x: 0, y: 0, width: curFrame.width, height: addH)
+        content.addSubview(panel)
+        gearPanelView = panel
+
         let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY - addH,
                                  width: curFrame.width, height: curFrame.height + addH)
         window.setFrame(newWinFrame, display: false)
-        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
+        for sub in content.subviews where sub !== panel { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
+        window.display()
         updateGearIcon()
         NSColorPanel.shared.showsAlpha = false
         let path = agentPath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let branch: String = {
-                guard !path.isEmpty else { return "—" }
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-                proc.arguments = ["-C", path, "branch", "--show-current"]
-                let pipe = Pipe()
-                proc.standardOutput = pipe; proc.standardError = Pipe()
-                do {
-                    try proc.run(); proc.waitUntilExit()
-                    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    return out.isEmpty ? "—" : out
-                } catch { return "—" }
-            }()
+            let branch: String = Self.currentGitBranch(atPath: path)
             self.fetchAgentPorts { ports in
                 self.fetchActiveTTYs { [weak self] ttys in
                     guard let self = self, self.isGearExpanded else { return }
+                    self.gearPanelBranchValLbl?.stringValue = branch
+                    self.gearPanelPortsValLbl?.stringValue = ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")
                     self.gearPanelActiveTTYs = ttys
-                    let panel = self.makeGearPanel(ports: ports, branch: branch, ttys: ttys)
-                    content.addSubview(panel)
-                    self.gearPanelView = panel
-                    self.window.display()
+                    self.updateRoutePopupItems(ttys: ttys)
+                    self.startGearTTYRefreshTimer()
                 }
             }
         }
     }
 
+    private static func currentGitBranch(atPath path: String) -> String {
+        guard !path.isEmpty else { return "—" }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.arguments = ["-C", path, "branch", "--show-current"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe; proc.standardError = Pipe()
+        do {
+            try proc.run(); proc.waitUntilExit()
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return out.isEmpty ? "—" : out
+        } catch { return "—" }
+    }
+
+    /// Starts (or restarts) the periodic TTY refresh while the gear panel is open,
+    /// so newly launched terminals appear in the Route popup without reopening the widget.
+    private func startGearTTYRefreshTimer() {
+        gearPanelTTYRefreshTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+            guard let self = self, self.isGearExpanded else { return }
+            self.fetchActiveTTYs { [weak self] ttys in
+                guard let self = self, self.isGearExpanded else { return }
+                self.updateRoutePopupItems(ttys: ttys)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        gearPanelTTYRefreshTimer = timer
+    }
+
+    /// Rebuilds the Route popup's items only if the TTY set actually changed,
+    /// preserving the current selection if it is still present.
+    private func updateRoutePopupItems(ttys: [String]) {
+        guard WidgetWindow.ttySetChanged(old: gearPanelActiveTTYs, new: ttys) else { return }
+        gearPanelActiveTTYs = ttys
+        guard let popup = gearPanelRouteBtn as? NSPopUpButton else { return }
+        let previousSelection = popup.selectedItem?.representedObject as? String
+        popup.removeAllItems()
+        popup.addItem(withTitle: "Auto")
+        for tty in ttys {
+            let label = sessions.first(where: { $0.tty == tty })?.model
+                ?? (tty.split(separator: "/").last.map(String.init) ?? tty)
+            popup.addItem(withTitle: label)
+            popup.lastItem?.representedObject = tty
+        }
+        let selectionToRestore = previousSelection ?? selectedTTY
+        if let sel = selectionToRestore,
+           let idx = popup.itemArray.firstIndex(where: { ($0.representedObject as? String) == sel }) {
+            popup.selectItem(at: idx)
+        } else {
+            popup.selectItem(at: 0)
+        }
+    }
+
+    /// Pure diff: true iff the (order-insensitive) set of TTYs changed.
+    static func ttySetChanged(old: [String], new: [String]) -> Bool {
+        Set(old) != Set(new)
+    }
+
     private func collapseGearPanelIfNeeded() {
         guard isGearExpanded else { return }
+        gearPanelTTYRefreshTimer?.invalidate()
+        gearPanelTTYRefreshTimer = nil
         let content = window.contentView!
         let addH = WidgetWindow.gearPanelH
         gearPanelView?.removeFromSuperview()
@@ -1743,6 +1803,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         gearPanelOpacityValLbl = nil
         gearPanelRouteBtn = nil
         gearPanelRoutePopover = nil
+        gearPanelBranchValLbl = nil
+        gearPanelPortsValLbl = nil
         for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
         let curFrame = window.frame
         window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
@@ -1752,7 +1814,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         if NSColorPanel.shared.isVisible { NSColorPanel.shared.orderOut(nil) }
     }
 
-    private func makeGearPanel(ports: [Int], branch: String, ttys: [String]) -> NSView {
+    private func makeGearPanel(ports: [Int]?, branch: String, ttys: [String]) -> NSView {
         let W: CGFloat = 300, H = WidgetWindow.gearPanelH
         let pad: CGFloat = 16
         let (panelBg, textColor) = gearPanelColors()
@@ -1804,10 +1866,14 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             return agentVoice
         }()
 
+        let portsLabel: String = {
+            guard let ports = ports else { return "…" }
+            return ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")
+        }()
         let infoRows: [(String, String)] = [
             ("Branch",      branch),
             ("Folder",      folderName),
-            ("Ports",       ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")),
+            ("Ports",       portsLabel),
             ("Human Voice", localeName(for: Prefs.voiceLocale(for: agentName))),
             ("Agent Voice", agentVoiceLabel),
         ]
@@ -1817,6 +1883,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             let vl = rowValue(val)
             vl.frame = NSRect(x: pad + valX, y: curY, width: W - pad - (pad + valX), height: 15)
             panel.addSubview(kl); panel.addSubview(vl)
+            if key == "Branch" { gearPanelBranchValLbl = vl }
+            if key == "Ports" { gearPanelPortsValLbl = vl }
             curY += 20
         }
 

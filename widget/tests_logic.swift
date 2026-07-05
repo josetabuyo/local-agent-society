@@ -91,6 +91,44 @@ closedByUser.insert("System")
 closedByUser.remove("System")
 test("insert-remove-check cycle", !closedByUser.contains("System"))
 
+// MARK: - Gear panel TTY set diffing (WidgetWindow.ttySetChanged)
+// Mirrored here as a pure function since tests_logic.swift runs standalone
+// (not linked against tray.swift's AppKit-dependent types).
+
+func ttySetChanged(old: [String], new: [String]) -> Bool {
+    Set(old) != Set(new)
+}
+
+test("tty diff: no change (same order)",       !ttySetChanged(old: ["/dev/ttys001", "/dev/ttys002"], new: ["/dev/ttys001", "/dev/ttys002"]))
+test("tty diff: no change (different order)",  !ttySetChanged(old: ["/dev/ttys001", "/dev/ttys002"], new: ["/dev/ttys002", "/dev/ttys001"]))
+test("tty diff: addition detected",             ttySetChanged(old: ["/dev/ttys001"], new: ["/dev/ttys001", "/dev/ttys002"]))
+test("tty diff: removal detected",              ttySetChanged(old: ["/dev/ttys001", "/dev/ttys002"], new: ["/dev/ttys001"]))
+test("tty diff: empty to empty is no change",  !ttySetChanged(old: [], new: []))
+test("tty diff: empty to non-empty",            ttySetChanged(old: [], new: ["/dev/ttys001"]))
+test("tty diff: non-empty to empty",            ttySetChanged(old: ["/dev/ttys001"], new: []))
+
+// MARK: - Route popup selection preservation
+
+func resolveRouteSelection(ttys: [String], previousSelection: String?, fallbackSelection: String?) -> String? {
+    guard let candidate = previousSelection ?? fallbackSelection, ttys.contains(candidate) else { return nil }
+    return candidate
+}
+
+test("selection preserved when tty still present",
+     resolveRouteSelection(ttys: ["/dev/ttys001", "/dev/ttys002"], previousSelection: "/dev/ttys002", fallbackSelection: nil) == "/dev/ttys002")
+
+test("selection falls back to Auto when tty removed",
+     resolveRouteSelection(ttys: ["/dev/ttys001"], previousSelection: "/dev/ttys002", fallbackSelection: nil) == nil)
+
+test("selection uses fallback (selectedTTY) when no previous popup selection",
+     resolveRouteSelection(ttys: ["/dev/ttys003"], previousSelection: nil, fallbackSelection: "/dev/ttys003") == "/dev/ttys003")
+
+test("selection nil when neither previous nor fallback present",
+     resolveRouteSelection(ttys: ["/dev/ttys001"], previousSelection: nil, fallbackSelection: nil) == nil)
+
+test("selection nil when new tty appears but none selected before",
+     resolveRouteSelection(ttys: ["/dev/ttys001", "/dev/ttys002"], previousSelection: nil, fallbackSelection: nil) == nil)
+
 // MARK: - Summary
 
 print("")

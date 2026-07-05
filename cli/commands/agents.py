@@ -77,10 +77,7 @@ def new(name, voice, target_dir):
         chosen_voice = data.get("voice") or data.get("name", "Samantha")
 
     # Resolve locale from voice
-    try:
-        locale = api.get(f"/voices/{chosen_voice}").get("lang", "en-US")
-    except SystemExit:
-        locale = "en-US"
+    locale = api.get(f"/voices/{chosen_voice}").get("lang", "en-US")
 
     # Write .agent.json
     agent_data = {
