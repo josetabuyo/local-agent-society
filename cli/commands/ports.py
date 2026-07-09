@@ -1,5 +1,13 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import click
 from cli import api
+
+DEFAULT_PORT_RANGE_START = 9000
+DEFAULT_PORT_RANGE_END = 9999
 
 
 @click.group()
@@ -21,23 +29,25 @@ def ports_ls():
 
 
 @ports.command("free")
-@click.option("--start", default=9000, help="Range start (default 9000)")
-@click.option("--end",   default=9999, help="Range end (default 9999)")
+@click.option("--start", default=DEFAULT_PORT_RANGE_START, help=f"Range start (default {DEFAULT_PORT_RANGE_START})")
+@click.option("--end",   default=DEFAULT_PORT_RANGE_END, help=f"Range end (default {DEFAULT_PORT_RANGE_END})")
 def ports_free(start, end):
     """Get a free port from the registry."""
     data = api.get(f"/ports/free?start={start}&end={end}")
-    click.echo(data.get("port"))
+    port = data.get("port") if isinstance(data, dict) else None
+    if port is None:
+        click.echo("Error: malformed response from backend (missing 'port').")
+        raise SystemExit(1)
+    click.echo(port)
 
 
 @ports.command("claim")
 @click.argument("app")
 @click.option("--port", default=None, type=int, help="Desired port (omit for auto-assign)")
-@click.option("--start", default=9000, help="Range start for auto-assign (default 9000)")
-@click.option("--end",   default=9999, help="Range end for auto-assign (default 9999)")
+@click.option("--start", default=DEFAULT_PORT_RANGE_START, help=f"Range start for auto-assign (default {DEFAULT_PORT_RANGE_START})")
+@click.option("--end",   default=DEFAULT_PORT_RANGE_END, help=f"Range end for auto-assign (default {DEFAULT_PORT_RANGE_END})")
 def ports_claim(app, port, start, end):
     """Atomically claim a port (checks + registers in one step). Prints the port."""
-    import json, sys
-    from pathlib import Path
     agent_json = Path.cwd() / ".agent.json"
     agent_name = "CLI"
     if agent_json.exists():
@@ -69,8 +79,6 @@ def ports_release(port):
 @ports.command("audit")
 def ports_audit():
     """Cross-check port registry against running processes. Finds violations and ghosts."""
-    import subprocess, sys
-
     registry = api.get("/ports")
 
     try:

@@ -32,9 +32,9 @@ def _generate_script(shell):
 
 
 def _shell_config(shell):
+    # Only called for shell in {"bash", "fish"} — the zsh branch of
+    # `completion --install` never reaches this function.
     home = Path.home()
-    if shell == "zsh":
-        return home / ".zshrc"
     if shell == "bash":
         if (home / ".bash_profile").exists():
             return home / ".bash_profile"

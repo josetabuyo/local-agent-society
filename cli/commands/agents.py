@@ -7,28 +7,7 @@ from pathlib import Path
 import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
-
-
-def _infer_locale(voice: str) -> str:
-    """Return a sensible locale code for a TTS voice name."""
-    from cli import api
-    try:
-        return api.get(f"/voices/{voice}").get("lang", "en-US")
-    except Exception:
-        return "en-US"
-
-
-from cli.path_utils import find_nearest_agent_dir as _find_nearest_agent_dir
-
-
-def _agent_name_from_cwd():
-    agent_dir = _find_nearest_agent_dir(Path.cwd())
-    if agent_dir:
-        try:
-            return json.loads((Path(agent_dir) / ".agent.json").read_text()).get("name")
-        except Exception:
-            pass
-    return None
+from cli.commands._agent_common import infer_locale, resolve_agent_name
 
 
 @click.group()
@@ -77,7 +56,7 @@ def new(name, voice, target_dir):
         chosen_voice = data.get("voice") or data.get("name", "Samantha")
 
     # Resolve locale from voice
-    locale = api.get(f"/voices/{chosen_voice}").get("lang", "en-US")
+    locale = infer_locale(chosen_voice)
 
     # Write .agent.json
     agent_data = {
@@ -87,7 +66,11 @@ def new(name, voice, target_dir):
         "pronunciation": name,
         "created": str(datetime.date.today()),
     }
-    agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
+    try:
+        agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
+    except OSError as exc:
+        click.echo(f"Error: could not write {agent_file}: {exc}")
+        raise SystemExit(1)
     click.echo(f"Created {agent_file}")
 
     # Register with backend
@@ -143,11 +126,15 @@ def restore(name):
     data = {
         "name": name,
         "voice": voice,
-        "locale": info.get("locale") or _infer_locale(voice),
+        "locale": info.get("locale") or infer_locale(voice),
         "pronunciation": info.get("pronunciation") or name,
         "created": info.get("registered_at", "")[:10],
     }
-    target.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    try:
+        target.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    except OSError as exc:
+        click.echo(f"Error: could not write {target}: {exc}")
+        raise SystemExit(1)
     click.echo(f"Restored .agent.json for '{name}' (voice: {data['voice']}).")
 
 
@@ -174,11 +161,7 @@ def sync():
 @click.option("--yes", is_flag=True, help="Skip confirmation prompt.")
 def delete(name, yes):
     """Unregister an agent from the backend (does not delete files)."""
-    if not name:
-        name = _agent_name_from_cwd()
-    if not name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    name = resolve_agent_name(name)
     if not yes:
         click.confirm(f"Unregister '{name}' from the backend?", abort=True)
     api.delete(f"/agents/{name}")
@@ -189,11 +172,7 @@ def delete(name, yes):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def focus(name):
     """Bring the agent's iTerm2 window to the front."""
-    if not name:
-        name = _agent_name_from_cwd()
-    if not name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    name = resolve_agent_name(name)
     result = api.post(f"/agents/{name}/focus", {})
     focused = result.get("focused", False)
     click.echo(f"{name}: {'focused' if focused else 'session not found'}")
@@ -233,11 +212,7 @@ def rename(old_name, new_name, pronunciation):
     """Rename an agent in the backend registry and update .agent.json."""
     cwd_agent_file = Path.cwd() / ".agent.json"
 
-    if not old_name:
-        old_name = _agent_name_from_cwd()
-    if not old_name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    old_name = resolve_agent_name(old_name)
 
     result = api.patch(f"/agents/{old_name}", {
         "new_name": new_name,
@@ -266,11 +241,7 @@ def rename(old_name, new_name, pronunciation):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def clean(name):
     """Inject /clear into the agent terminal (same as the broom button)."""
-    if not name:
-        name = _agent_name_from_cwd()
-    if not name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    name = resolve_agent_name(name)
     result = api.post(f"/agents/{name}/inject", {"message": "/clear", "source": "raw"})
     injected = result.get("injected", False)
     status = "cleared" if injected else "agent not live (not injected)"
@@ -281,11 +252,7 @@ def clean(name):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def mute(name):
     """Mute an agent's TTS voice."""
-    if not name:
-        name = _agent_name_from_cwd()
-    if not name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    name = resolve_agent_name(name)
     api.post(f"/agents/{name}/mute", {})
     click.echo(f"{name}: muted.")
 
@@ -294,11 +261,7 @@ def mute(name):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def unmute(name):
     """Unmute an agent's TTS voice."""
-    if not name:
-        name = _agent_name_from_cwd()
-    if not name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    name = resolve_agent_name(name)
     api.delete(f"/agents/{name}/mute")
     click.echo(f"{name}: unmuted.")
 
@@ -307,11 +270,7 @@ def unmute(name):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def widget(name):
     """Reopen the agent widget on the current Space."""
-    if not name:
-        name = _agent_name_from_cwd()
-    if not name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.")
-        raise SystemExit(1)
+    name = resolve_agent_name(name)
     subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
     click.echo(f"Widget reopened for {name}.")
 
@@ -335,11 +294,7 @@ def widgets_all():
               help="TTY device to link (e.g. /dev/ttys004). Auto-detected if omitted.")
 def link(agent_name, tty_override):
     """Link a terminal session to a widget (drag the scope button or run manually)."""
-    if not agent_name:
-        agent_name = _agent_name_from_cwd()
-    if not agent_name:
-        click.echo("Error: no agent name given and no .agent.json in current directory.", err=True)
-        raise SystemExit(1)
+    agent_name = resolve_agent_name(agent_name, err=True)
 
     tty = tty_override
     if not tty:

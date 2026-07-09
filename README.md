@@ -57,21 +57,31 @@ The skill registers the agent with the backend, assigns a unique voice (with its
 las status                              # backend status, agents, ports
 las start / stop                        # start or stop the backend
 las logs                                # tail backend log
+las install                             # run install.sh (compile widget, launchd, CLI)
+las uninstall                           # run uninstall.sh (remove the system)
+las update                              # run update.sh (git pull + reinstall)
+las completion [--shell zsh|bash|fish] [--install]  # set up shell tab completion
 ```
 
 ### Agents
 ```
 las agents                              # list all registered agents
+las agent new NAME [--voice V] [--dir D]  # write .agent.json, register, launch widget
 las agent sync                          # sync .agent.json → backend
 las agent restore [NAME]                # recover .agent.json from backend
+las agent rename [OLD] NEW [--pronunciation P]  # rename in backend + update .agent.json
+las agent focus [NAME]                  # bring the agent's iTerm2 window to the front
 las agent inject NAME "msg"             # send message to another agent's terminal
 las agent inject NAME "msg" --from Me   # with sender label
 las agent clean [NAME]                  # inject /clear into agent terminal
 las agent mute [NAME]                   # silence an agent's TTS
 las agent unmute [NAME]                 # re-enable TTS
-las agent delete [NAME]                 # unregister from backend
-las widget [NAME]                       # reopen the floating widget
+las agent delete [NAME] [--yes]         # unregister from backend
+las widget [NAME]                       # reopen one agent's floating widget
+las widgets                             # reopen every registered agent's widget
+las link [--agent NAME] [--tty PATH]    # link the current (or given) terminal to a widget
 ```
+`NAME` is optional on most `agent` subcommands — it defaults to the agent registered for the current directory (via `.agent.json` or a path match in the backend registry).
 
 ### Voices
 ```
@@ -83,9 +93,10 @@ las voices random                       # pick a random unused voice
 ### Ports
 ```
 las ports ls                            # view port registry
-las ports free                          # get a free port number
+las ports free [--start N] [--end N]    # get a free port number (default range 9000-9999)
 las ports claim APP [--port N]          # atomically claim and register a port
 las ports release PORT                  # release a registered port
+las ports audit                         # cross-check registry against `lsof` — finds ghosts + unregistered listeners
 ```
 
 ### TTS Queue
@@ -111,7 +122,7 @@ Agents share resources and follow a civility contract:
 2. **Voice language** — each TTS voice has a fixed language; English voices speak English text, Spanish voices speak Spanish text — never mix them
 3. **Ports** — always reserved via `las ports claim` or `POST /ports/claim` before starting any server
 4. **Voices** — unique per agent; declared in `.agent.json` with a `locale` field (e.g. `en-US`, `es-MX`)
-5. **Messages** — sent via `las agent inject`, or written to `session/extern-inbox.md` for the next conversation
+5. **Messages** — sent live via `las agent inject NAME "msg"` or `POST /agents/{name}/inject`; delivered straight into the target agent's TTY. There are no inbox files and no polling — if the agent has no live terminal the message isn't delivered (or is queued for delivery when it comes back live, depending on the backend response); retry or wait for them to start a session.
 6. **Response language** — agents respond in the language of their TTS voice (`locale` field in `.agent.json`)
 
 ---
@@ -120,25 +131,43 @@ Agents share resources and follow a civility contract:
 
 Runs at `http://localhost:8700` · Docs at `http://localhost:8700/docs`
 
+Endpoints below are cross-checked against `app.openapi()['paths']` in `backend/main.py` — this table lists exactly what's live, nothing aspirational.
+
 | Endpoint | Description |
 |---|---|
+| `GET /health` | Backend liveness check |
 | `GET /agents` | All registered agents |
 | `POST /agents` | Register / update an agent |
 | `DELETE /agents/{name}` | Unregister an agent |
-| `POST /agents/{name}/inject` | Inject into a live terminal |
+| `PATCH /agents/{name}` | Rename an agent (`{new_name, pronunciation?}`) |
+| `POST /agents/{name}/focus` | Bring the agent's iTerm2 window to the front |
+| `POST /agents/{name}/terminal` | Open a new iTerm2 window running `claude` in the agent's directory |
+| `GET /agents/{name}/ttys` | List TTYs known to be associated with the agent |
+| `POST /agents/{name}/inject` | Inject a message into a live terminal (queues it if the agent isn't live and `queue` is set) |
+| `GET /agents/{name}/pending` | List messages queued for delivery when the agent comes back live |
+| `DELETE /agents/{name}/pending` | Clear the pending-message queue for an agent |
 | `POST /agents/{name}/mute` | Mute agent TTS |
 | `DELETE /agents/{name}/mute` | Unmute agent TTS |
+| `GET /agents/{name}/muted` | Check whether an agent is muted |
+| `POST /agents/{name}/pin-tty` | Store a TTY linked via `las link` for the widget to pick up |
+| `GET /agents/{name}/pending-link` | Return and clear the pending linked TTY (consumed once) |
+| `GET /widget/{name}` | HTML page rendering the floating widget for an agent |
+| `GET /debug/iterm_ttys` | List all TTYs currently known to iTerm2 via AppleScript |
 | `GET /voices` | All voices with `{name, lang, flag}` |
 | `GET /voices/{name}` | Language info for one voice |
 | `GET /voices/random` | Random unused voice name |
 | `GET /ports` | Port registry |
-| `GET /ports/free` | Get a free port number |
-| `POST /ports/claim` | Atomically claim + register a port |
+| `POST /ports` | Register a port directly (no availability check) |
 | `DELETE /ports/{port}` | Release a port |
+| `GET /ports/free` | Get a free port number (`?start=&end=`, default 9000-9999) |
+| `POST /ports/claim` | Atomically claim + register a port |
 | `POST /queue/speak` | Enqueue TTS `{text, voice, name}` |
 | `GET /queue` | Current queue |
 | `DELETE /queue` | Clear queue |
-| `GET /attribution` | File attribution log |
+| `POST /attribution` | Record a file attribution entry |
+| `GET /attribution` | File attribution log (`?file=` or `?name=`) |
+
+Interactive docs (Swagger UI) are always available live at `http://localhost:8700/docs`.
 
 A TypeScript SDK is available at `sdk/society.ts`.
 

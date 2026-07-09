@@ -1402,6 +1402,443 @@ func wlog(_ msg: String) {
     }
 }
 
+// MARK: - Gear panel builder
+
+/// Plain data needed to render the gear (settings) panel body. Carries no
+/// references back into WidgetWindow — everything the panel displays is
+/// passed in explicitly, which is what makes GearPanelBuilder testable in
+/// isolation from window/networking/timer state.
+struct GearPanelModel {
+    let ports: [Int]?
+    let branch: String
+    let ttys: [String]
+    let agentName: String
+    let agentPath: String
+    let agentVoice: String
+    let selectedTTY: String?
+    let sessions: [ClaudeSession]
+    let humanVoiceLocaleLabel: String
+    let opacity: Double
+    let backgroundColor: NSColor
+    let expandOnSpaceChange: Bool
+    let ontop: Bool
+}
+
+/// Live control references the caller (WidgetWindow) needs to keep around
+/// after building the panel, so it can push later updates (async branch/port
+/// fetch, TTY refresh, applyPrefs recoloring) into the already-built views.
+struct GearPanelHandles {
+    let panel: NSView
+    let keyLabels: [NSTextField]
+    let valLabels: [NSTextField]
+    let branchValLbl: NSTextField
+    let portsValLbl: NSTextField
+    let routeBtn: NSPopUpButton
+    let opacitySlider: NSSlider
+    let opacityValLbl: NSTextField
+    let colorWell: NSColorWell
+}
+
+enum GearPanelBuilder {
+    /// Builds the gear panel's NSView tree from `model`. Action targets are
+    /// wired to `target` (always the owning WidgetWindow) via #selector —
+    /// building the view does not require the target to exist yet beyond
+    /// that reference, so this stays a pure function of its inputs.
+    static func build(model: GearPanelModel, colors: (bg: NSColor, text: NSColor), target: WidgetWindow) -> GearPanelHandles {
+        let W: CGFloat = 300, H = WidgetWindow.gearPanelH
+        let pad: CGFloat = 16
+        let (panelBg, textColor) = colors
+
+        var keyLabels: [NSTextField] = []
+        var valLabels: [NSTextField] = []
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = panelBg.cgColor
+
+        let topSep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
+        topSep.wantsLayer = true
+        topSep.layer?.backgroundColor = textColor.withAlphaComponent(0.20).cgColor
+        panel.addSubview(topSep)
+
+        func rowLabel(_ s: String) -> NSTextField {
+            let f = NSTextField(labelWithString: s)
+            f.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+            f.textColor = textColor.withAlphaComponent(0.60)
+            f.backgroundColor = .clear; f.drawsBackground = false
+            keyLabels.append(f)
+            return f
+        }
+        func rowValue(_ s: String) -> NSTextField {
+            let f = NSTextField(labelWithString: s)
+            f.font = NSFont.systemFont(ofSize: 10, weight: .regular)
+            f.textColor = textColor
+            f.backgroundColor = .clear; f.drawsBackground = false
+            valLabels.append(f)
+            return f
+        }
+        func addSep(y: CGFloat) {
+            let s = NSView(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: 1))
+            s.wantsLayer = true
+            s.layer?.backgroundColor = textColor.withAlphaComponent(0.18).cgColor
+            panel.addSubview(s)
+        }
+
+        let keyW: CGFloat = 80, valX: CGFloat = 96
+        var curY: CGFloat = 8
+
+        // ── INFO rows (bottom of panel, built upward) ──────────────────────
+        let folderName = model.agentPath.isEmpty ? "—" : URL(fileURLWithPath: model.agentPath).lastPathComponent
+
+        let agentVoiceLabel: String = {
+            guard !model.agentVoice.isEmpty else { return "—" }
+            if let v = allVoices.first(where: { $0.name == model.agentVoice }) {
+                let lng = Locale(identifier: "en").localizedString(forLanguageCode: String(v.lang.prefix(2))) ?? v.lang
+                return "\(model.agentVoice)  \(v.flag) \(lng)"
+            }
+            return model.agentVoice
+        }()
+
+        let portsLabel: String = {
+            guard let ports = model.ports else { return "…" }
+            return ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")
+        }()
+        let infoRows: [(String, String)] = [
+            ("Branch",      model.branch),
+            ("Folder",      folderName),
+            ("Ports",       portsLabel),
+            ("Human Voice", model.humanVoiceLocaleLabel),
+            ("Agent Voice", agentVoiceLabel),
+        ]
+        var branchValLbl: NSTextField!
+        var portsValLbl: NSTextField!
+        for (key, val) in infoRows {
+            let kl = rowLabel(key)
+            kl.frame = NSRect(x: pad, y: curY, width: keyW, height: 15)
+            let vl = rowValue(val)
+            vl.frame = NSRect(x: pad + valX, y: curY, width: W - pad - (pad + valX), height: 15)
+            panel.addSubview(kl); panel.addSubview(vl)
+            if key == "Branch" { branchValLbl = vl }
+            if key == "Ports" { portsValLbl = vl }
+            curY += 20
+        }
+
+        // ── Route to row ──────────────────────────────────────────────────
+        let rkl = rowLabel("Route")
+        rkl.frame = NSRect(x: pad, y: curY + 2, width: keyW, height: 15)
+        let routePopup = NSPopUpButton(frame: NSRect(x: pad + valX - 4, y: curY - 2, width: W - pad * 2 - valX + 4, height: 20), pullsDown: false)
+        routePopup.font = NSFont.systemFont(ofSize: 10)
+        routePopup.addItem(withTitle: "Auto")
+        for tty in model.ttys {
+            let label = model.sessions.first(where: { $0.tty == tty })?.model
+                ?? (tty.split(separator: "/").last.map(String.init) ?? tty)
+            routePopup.addItem(withTitle: label)
+            routePopup.lastItem?.representedObject = tty
+        }
+        if let sel = model.selectedTTY,
+           let idx = routePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == sel }) {
+            routePopup.selectItem(at: idx)
+        }
+        routePopup.target = target
+        routePopup.action = #selector(WidgetWindow.gearRouteSelected(_:))
+        panel.addSubview(rkl); panel.addSubview(routePopup)
+        curY += 22
+        addSep(y: curY); curY += 9
+
+        // ── Voice buttons ─────────────────────────────────────────────────
+        let btnW = (W - pad * 2 - 6) / 2
+        let testBtn = NSButton(frame: NSRect(x: pad, y: curY, width: btnW, height: 22))
+        testBtn.title = "Test voice"; testBtn.bezelStyle = .rounded
+        testBtn.font = NSFont.systemFont(ofSize: 10)
+        testBtn.target = target; testBtn.action = #selector(WidgetWindow.gearTestVoice(_:))
+        panel.addSubview(testBtn)
+        let changeBtn = NSButton(frame: NSRect(x: pad + btnW + 6, y: curY, width: btnW, height: 22))
+        changeBtn.title = "Change voice…"; changeBtn.bezelStyle = .rounded
+        changeBtn.font = NSFont.systemFont(ofSize: 10)
+        changeBtn.target = target; changeBtn.action = #selector(WidgetWindow.gearChangeVoice(_:))
+        panel.addSubview(changeBtn)
+        curY += 30
+        addSep(y: curY); curY += 9
+
+        // ── Display checkboxes ────────────────────────────────────────────
+        let expandChk = NSButton(checkboxWithTitle: "Expand on space change",
+                                 target: target, action: #selector(WidgetWindow.gearExpandChanged(_:)))
+        expandChk.state = model.expandOnSpaceChange ? .on : .off
+        expandChk.frame = NSRect(x: pad, y: curY, width: W - pad * 2, height: 20)
+        expandChk.font = NSFont.systemFont(ofSize: 11)
+        expandChk.contentTintColor = textColor
+        panel.addSubview(expandChk); curY += 24
+
+        let ontopChk = NSButton(checkboxWithTitle: "Always on top",
+                                target: target, action: #selector(WidgetWindow.gearOntopChanged(_:)))
+        ontopChk.state = model.ontop ? .on : .off
+        ontopChk.frame = NSRect(x: pad, y: curY, width: W - pad * 2, height: 20)
+        ontopChk.font = NSFont.systemFont(ofSize: 11)
+        ontopChk.contentTintColor = textColor
+        panel.addSubview(ontopChk); curY += 28
+
+        // ── Opacity ───────────────────────────────────────────────────────
+        let opacVal = model.opacity
+        let opacPct = NSTextField(labelWithString: "\(Int(opacVal * 100))%")
+        opacPct.frame = NSRect(x: W - pad - 36, y: curY + 2, width: 36, height: 15)
+        opacPct.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        opacPct.textColor = textColor; opacPct.alignment = .right
+        opacPct.backgroundColor = .clear; opacPct.drawsBackground = false
+        panel.addSubview(opacPct)
+
+        let opacSlider = NSSlider(value: opacVal, minValue: 0.1, maxValue: 1.0,
+                                   target: target, action: #selector(WidgetWindow.gearOpacityChanged(_:)))
+        opacSlider.frame = NSRect(x: pad, y: curY, width: W - pad * 2 - 42, height: 18)
+        opacSlider.isContinuous = true
+        panel.addSubview(opacSlider)
+        curY += 24
+
+        let opacLbl = rowLabel("Opacity")
+        opacLbl.frame = NSRect(x: pad, y: curY, width: 60, height: 13)
+        panel.addSubview(opacLbl); curY += 17
+
+        // ── Color well ────────────────────────────────────────────────────
+        let colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: curY, width: 36, height: 24))
+        colorWell.color = model.backgroundColor
+        colorWell.target = target; colorWell.action = #selector(WidgetWindow.gearColorChanged(_:))
+        panel.addSubview(colorWell)
+
+        let colorLbl = rowLabel("Background")
+        colorLbl.frame = NSRect(x: pad, y: curY + 5, width: 80, height: 14)
+        panel.addSubview(colorLbl)
+
+        return GearPanelHandles(
+            panel: panel, keyLabels: keyLabels, valLabels: valLabels,
+            branchValLbl: branchValLbl, portsValLbl: portsValLbl,
+            routeBtn: routePopup, opacitySlider: opacSlider, opacityValLbl: opacPct,
+            colorWell: colorWell
+        )
+    }
+}
+
+// MARK: - Command panel builder
+
+/// Plain data needed to render the command-list panel body.
+struct CommandListPanelModel {
+    let windowWidth: CGFloat
+    let agentName: String
+    let commands: [WidgetCommand]
+    let panelBg: NSColor
+}
+
+/// Plain data needed to render the command add/edit panel body.
+struct CommandEditPanelModel {
+    let windowWidth: CGFloat
+    let command: WidgetCommand?
+    let index: Int?
+    let panelBg: NSColor
+}
+
+enum CommandPanelBuilder {
+    /// Builds the scrollable list of configured widget commands. Row actions
+    /// (run/edit) are wired to `target`; the grip drag-reorder callbacks call
+    /// back into `target` too since reordering needs to persist to Prefs and
+    /// rebuild the panel — that orchestration stays owned by WidgetWindow.
+    static func buildList(model: CommandListPanelModel, target: WidgetWindow) -> (NSView, CGFloat) {
+        let W = model.windowWidth
+        let rH: CGFloat = 32
+        let pad: CGFloat = 10
+        let cmds = model.commands
+        let opens   = cmds.filter { $0.kind == .openTerminal }
+        let injects = cmds.filter { $0.kind == .injectCommand }
+        let hasSep  = !opens.isEmpty && !injects.isEmpty
+        let totalH  = CGFloat(cmds.count) * rH + (hasSep ? 10 : 0) + 34 + 8
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: totalH))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = model.panelBg.cgColor
+
+        let topSep = NSView(frame: NSRect(x: 0, y: totalH - 1, width: W, height: 1))
+        topSep.wantsLayer = true
+        topSep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        panel.addSubview(topSep)
+
+        var curY = totalH - 8
+
+        func addRow(_ cmd: WidgetCommand) {
+            let idx = cmds.firstIndex(where: { $0.id == cmd.id }) ?? 0
+            curY -= rH
+            let row = NSView(frame: NSRect(x: 0, y: curY, width: W, height: rH))
+
+            // Grip handle — left side, drag to reorder
+            let gripSz: CGFloat = 20
+            let grip = DragHandleView(frame: NSRect(x: pad, y: (rH - gripSz) / 2, width: gripSz, height: gripSz))
+            grip.onMoveUp = { [weak target] in
+                guard let target = target else { return }
+                var c = Prefs.widgetCommands(for: target.agentName)
+                guard idx > 0 && idx < c.count else { return }
+                c.swapAt(idx, idx - 1)
+                Prefs.saveWidgetCommands(c, for: target.agentName)
+                let (v, h) = target.makeCommandListPanel()
+                target.swapCommandPanelTo(view: v, newH: h)
+            }
+            grip.onMoveDown = { [weak target] in
+                guard let target = target else { return }
+                var c = Prefs.widgetCommands(for: target.agentName)
+                guard idx < c.count - 1 else { return }
+                c.swapAt(idx, idx + 1)
+                Prefs.saveWidgetCommands(c, for: target.agentName)
+                let (v, h) = target.makeCommandListPanel()
+                target.swapCommandPanelTo(view: v, newH: h)
+            }
+            row.addSubview(grip)
+
+            // Hit area (excludes grip and edit button)
+            let hitX = pad + gripSz + 4
+            let editBtnX = W - pad - 18
+            let hitW = editBtnX - hitX
+            let hit = NSButton(frame: NSRect(x: hitX, y: 0, width: hitW, height: rH))
+            hit.title = ""; hit.isBordered = false; hit.bezelStyle = .inline
+            hit.tag = idx; hit.target = target; hit.action = #selector(WidgetWindow.cmdPanelRun(_:))
+            row.addSubview(hit)
+
+            // Terminal icon for openTerminal
+            var textX = hitX
+            if cmd.kind == .openTerminal || cmd.kind == .openBareTerminal,
+               let img = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
+                   .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)) {
+                let iv = NSImageView(frame: NSRect(x: textX, y: (rH - 14) / 2, width: 14, height: 14))
+                iv.image = img; iv.contentTintColor = .secondaryLabelColor
+                row.addSubview(iv)
+                textX += 18
+            }
+
+            // Label — use displayLabel so label==payload triggers a clean derived alias
+            let labelW: CGFloat = 72
+            let lbl = NSTextField(labelWithString: cmd.displayLabel)
+            lbl.frame = NSRect(x: textX, y: (rH - 14) / 2, width: labelW, height: 14)
+            lbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            lbl.textColor = .labelColor
+            lbl.lineBreakMode = .byTruncatingTail
+            row.addSubview(lbl)
+
+            // Marquee — shows actual command that will run
+            let marqueeX = textX + labelW + 4
+            let marqueeW = editBtnX - marqueeX - 4
+            let marqueeText: String = {
+                switch cmd.kind {
+                case .openTerminal:
+                    return cmd.payload.isEmpty ? "claude" : "claude --model \(cmd.payload)"
+                case .openBareTerminal:
+                    return "open terminal"
+                case .injectCommand:
+                    return cmd.payload == cmd.displayLabel ? "" : cmd.payload
+                }
+            }()
+            if marqueeW > 16 && !marqueeText.isEmpty {
+                let mq = MarqueeView(frame: NSRect(x: marqueeX, y: (rH - 12) / 2, width: marqueeW, height: 12))
+                mq.setup(text: marqueeText,
+                         font: NSFont.monospacedSystemFont(ofSize: 9, weight: .light),
+                         color: NSColor.tertiaryLabelColor)
+                row.addSubview(mq)
+            }
+
+            // Edit button — right side
+            let eb = NSButton(frame: NSRect(x: editBtnX, y: (rH - 18) / 2, width: 18, height: 18))
+            eb.isBordered = false; eb.bezelStyle = .inline
+            eb.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .regular))
+            eb.imageScaling = .scaleProportionallyUpOrDown
+            eb.contentTintColor = .tertiaryLabelColor
+            eb.tag = idx; eb.target = target; eb.action = #selector(WidgetWindow.cmdPanelEdit(_:))
+            row.addSubview(eb)
+
+            panel.addSubview(row)
+        }
+
+        opens.forEach { addRow($0) }
+        if hasSep {
+            curY -= 5
+            let sep = NSView(frame: NSRect(x: pad, y: curY - 1, width: W - pad * 2, height: 1))
+            sep.wantsLayer = true; sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+            panel.addSubview(sep)
+            curY -= 4
+        }
+        injects.forEach { addRow($0) }
+
+        let addBtn = NSButton(frame: NSRect(x: pad, y: 6, width: W - pad * 2, height: 22))
+        addBtn.title = "+ Add command"; addBtn.bezelStyle = .inline; addBtn.isBordered = false
+        addBtn.font = NSFont.systemFont(ofSize: 10); addBtn.alignment = .left
+        addBtn.contentTintColor = .secondaryLabelColor
+        addBtn.target = target; addBtn.action = #selector(WidgetWindow.cmdPanelAdd(_:))
+        panel.addSubview(addBtn)
+
+        return (panel, totalH)
+    }
+
+    /// Builds the add/edit form for a single widget command.
+    static func buildEdit(model: CommandEditPanelModel, target: WidgetWindow) -> (NSView, CGFloat) {
+        let W = model.windowWidth
+        let H: CGFloat = 168
+        let pad: CGFloat = 10
+        let cmd = model.command
+        let index = model.index
+
+        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = model.panelBg.cgColor
+
+        let topSep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
+        topSep.wantsLayer = true
+        topSep.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        panel.addSubview(topSep)
+
+        let backBtn = NSButton(frame: NSRect(x: pad, y: H - 26, width: 60, height: 18))
+        backBtn.title = "← Back"; backBtn.isBordered = false
+        backBtn.font = NSFont.systemFont(ofSize: 10); backBtn.contentTintColor = .secondaryLabelColor
+        backBtn.target = target; backBtn.action = #selector(WidgetWindow.cmdPanelBack(_:))
+        panel.addSubview(backBtn)
+
+        var y: CGFloat = H - 36
+        let seg = NSSegmentedControl(labels: ["claude", "Terminal", "Inject"],
+                                     trackingMode: .selectOne, target: nil, action: nil)
+        seg.frame = NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22)
+        seg.font = NSFont.systemFont(ofSize: 10)
+        seg.selectedSegment = cmd.map {
+            switch $0.kind {
+            case .openTerminal:     return 0
+            case .openBareTerminal: return 1
+            case .injectCommand:    return 2
+            }
+        } ?? 0
+        seg.tag = 1003; panel.addSubview(seg); y -= 30
+
+        let labelF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
+        labelF.placeholderString = "Alias (optional)"; labelF.stringValue = cmd?.label ?? ""
+        labelF.font = NSFont.systemFont(ofSize: 11); labelF.bezelStyle = .roundedBezel
+        labelF.tag = 1001; panel.addSubview(labelF); y -= 30
+
+        let payF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
+        payF.placeholderString = "Model ID or command (e.g. /clear)"
+        payF.stringValue = cmd?.payload ?? ""
+        payF.font = NSFont.systemFont(ofSize: 11); payF.bezelStyle = .roundedBezel
+        payF.tag = 1002; panel.addSubview(payF); y -= 30
+
+        let saveBtn = NSButton(frame: NSRect(x: W - pad - 60, y: y - 22, width: 60, height: 22))
+        saveBtn.title = index == nil ? "Add" : "Save"; saveBtn.bezelStyle = .rounded
+        saveBtn.font = NSFont.systemFont(ofSize: 11); saveBtn.keyEquivalent = "\r"
+        saveBtn.tag = (index ?? -1) + 10000
+        saveBtn.target = target; saveBtn.action = #selector(WidgetWindow.cmdPanelSave(_:))
+        panel.addSubview(saveBtn)
+
+        if let idx = index {
+            let delBtn = NSButton(frame: NSRect(x: pad, y: y - 22, width: 60, height: 22))
+            delBtn.title = "Delete"; delBtn.bezelStyle = .rounded
+            delBtn.font = NSFont.systemFont(ofSize: 11)
+            delBtn.contentTintColor = .systemRed
+            delBtn.tag = idx; delBtn.target = target; delBtn.action = #selector(WidgetWindow.cmdPanelDelete(_:))
+            panel.addSubview(delBtn)
+        }
+
+        return (panel, H)
+    }
+}
+
 // MARK: - Widget window
 
 class WidgetWindow: NSObject, NSWindowDelegate {
@@ -1694,21 +2131,17 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         if isCommandPanelExpanded { collapseCommandPanel() }
         isGearExpanded = true
         let content = window.contentView!
-        let curFrame = window.frame
         let addH = WidgetWindow.gearPanelH
 
         // Build the panel with placeholder values FIRST (synchronously) and attach
         // it before expanding the window, so there is never a blank expanded panel.
         self.gearPanelActiveTTYs = []
         let panel = makeGearPanel(ports: nil, branch: "…", ttys: [])
-        panel.frame = NSRect(x: 0, y: 0, width: curFrame.width, height: addH)
+        panel.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: addH)
         content.addSubview(panel)
         gearPanelView = panel
 
-        let newWinFrame = NSRect(x: curFrame.minX, y: curFrame.minY - addH,
-                                 width: curFrame.width, height: curFrame.height + addH)
-        window.setFrame(newWinFrame, display: false)
-        for sub in content.subviews where sub !== panel { sub.frame = sub.frame.offsetBy(dx: 0, dy: addH) }
+        expandWindow(by: addH, excluding: panel)
         window.display()
         updateGearIcon()
         NSColorPanel.shared.showsAlpha = false
@@ -1792,7 +2225,6 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         guard isGearExpanded else { return }
         gearPanelTTYRefreshTimer?.invalidate()
         gearPanelTTYRefreshTimer = nil
-        let content = window.contentView!
         let addH = WidgetWindow.gearPanelH
         gearPanelView?.removeFromSuperview()
         gearPanelView = nil
@@ -1805,178 +2237,36 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         gearPanelRoutePopover = nil
         gearPanelBranchValLbl = nil
         gearPanelPortsValLbl = nil
-        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -addH) }
-        let curFrame = window.frame
-        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + addH,
-                               width: curFrame.width, height: curFrame.height - addH), display: true)
+        expandWindow(by: -addH, display: true)
         isGearExpanded = false
         updateGearIcon()
         if NSColorPanel.shared.isVisible { NSColorPanel.shared.orderOut(nil) }
     }
 
+    /// Thin wrapper: assembles a GearPanelModel from current agent/window
+    /// state and delegates the actual view-tree construction to
+    /// GearPanelBuilder, keeping refs to the controls it needs to update later.
     private func makeGearPanel(ports: [Int]?, branch: String, ttys: [String]) -> NSView {
-        let W: CGFloat = 300, H = WidgetWindow.gearPanelH
-        let pad: CGFloat = 16
-        let (panelBg, textColor) = gearPanelColors()
-
-        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
-        panel.wantsLayer = true
-        panel.layer?.backgroundColor = panelBg.cgColor
-
-        let topSep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
-        topSep.wantsLayer = true
-        topSep.layer?.backgroundColor = textColor.withAlphaComponent(0.20).cgColor
-        panel.addSubview(topSep)
-
-        func rowLabel(_ s: String) -> NSTextField {
-            let f = NSTextField(labelWithString: s)
-            f.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-            f.textColor = textColor.withAlphaComponent(0.60)
-            f.backgroundColor = .clear; f.drawsBackground = false
-            gearPanelKeyLabels.append(f)
-            return f
-        }
-        func rowValue(_ s: String) -> NSTextField {
-            let f = NSTextField(labelWithString: s)
-            f.font = NSFont.systemFont(ofSize: 10, weight: .regular)
-            f.textColor = textColor
-            f.backgroundColor = .clear; f.drawsBackground = false
-            gearPanelValLabels.append(f)
-            return f
-        }
-        func addSep(y: CGFloat) {
-            let s = NSView(frame: NSRect(x: pad, y: y, width: W - pad * 2, height: 1))
-            s.wantsLayer = true
-            s.layer?.backgroundColor = textColor.withAlphaComponent(0.18).cgColor
-            panel.addSubview(s)
-        }
-
-        let keyW: CGFloat = 80, valX: CGFloat = 96
-        var curY: CGFloat = 8
-
-        // ── INFO rows (bottom of panel, built upward) ──────────────────────
-        let folderName = agentPath.isEmpty ? "—" : URL(fileURLWithPath: agentPath).lastPathComponent
-
-        let agentVoiceLabel: String = {
-            guard !agentVoice.isEmpty else { return "—" }
-            if let v = allVoices.first(where: { $0.name == agentVoice }) {
-                let lng = Locale(identifier: "en").localizedString(forLanguageCode: String(v.lang.prefix(2))) ?? v.lang
-                return "\(agentVoice)  \(v.flag) \(lng)"
-            }
-            return agentVoice
-        }()
-
-        let portsLabel: String = {
-            guard let ports = ports else { return "…" }
-            return ports.isEmpty ? "None" : ports.map { String($0) }.joined(separator: " · ")
-        }()
-        let infoRows: [(String, String)] = [
-            ("Branch",      branch),
-            ("Folder",      folderName),
-            ("Ports",       portsLabel),
-            ("Human Voice", localeName(for: Prefs.voiceLocale(for: agentName))),
-            ("Agent Voice", agentVoiceLabel),
-        ]
-        for (key, val) in infoRows {
-            let kl = rowLabel(key)
-            kl.frame = NSRect(x: pad, y: curY, width: keyW, height: 15)
-            let vl = rowValue(val)
-            vl.frame = NSRect(x: pad + valX, y: curY, width: W - pad - (pad + valX), height: 15)
-            panel.addSubview(kl); panel.addSubview(vl)
-            if key == "Branch" { gearPanelBranchValLbl = vl }
-            if key == "Ports" { gearPanelPortsValLbl = vl }
-            curY += 20
-        }
-
-        // ── Route to row ──────────────────────────────────────────────────
-        let rkl = rowLabel("Route")
-        rkl.frame = NSRect(x: pad, y: curY + 2, width: keyW, height: 15)
-        let routePopup = NSPopUpButton(frame: NSRect(x: pad + valX - 4, y: curY - 2, width: W - pad * 2 - valX + 4, height: 20), pullsDown: false)
-        routePopup.font = NSFont.systemFont(ofSize: 10)
-        routePopup.addItem(withTitle: "Auto")
-        for tty in ttys {
-            let label = sessions.first(where: { $0.tty == tty })?.model
-                ?? (tty.split(separator: "/").last.map(String.init) ?? tty)
-            routePopup.addItem(withTitle: label)
-            routePopup.lastItem?.representedObject = tty
-        }
-        if let sel = selectedTTY,
-           let idx = routePopup.itemArray.firstIndex(where: { ($0.representedObject as? String) == sel }) {
-            routePopup.selectItem(at: idx)
-        }
-        routePopup.target = self
-        routePopup.action = #selector(gearRouteSelected(_:))
-        panel.addSubview(rkl); panel.addSubview(routePopup)
-        gearPanelRouteBtn = routePopup
-        curY += 22
-        addSep(y: curY); curY += 9
-
-        // ── Voice buttons ─────────────────────────────────────────────────
-        let btnW = (W - pad * 2 - 6) / 2
-        let testBtn = NSButton(frame: NSRect(x: pad, y: curY, width: btnW, height: 22))
-        testBtn.title = "Test voice"; testBtn.bezelStyle = .rounded
-        testBtn.font = NSFont.systemFont(ofSize: 10)
-        testBtn.target = self; testBtn.action = #selector(gearTestVoice(_:))
-        panel.addSubview(testBtn)
-        let changeBtn = NSButton(frame: NSRect(x: pad + btnW + 6, y: curY, width: btnW, height: 22))
-        changeBtn.title = "Change voice…"; changeBtn.bezelStyle = .rounded
-        changeBtn.font = NSFont.systemFont(ofSize: 10)
-        changeBtn.target = self; changeBtn.action = #selector(gearChangeVoice(_:))
-        panel.addSubview(changeBtn)
-        curY += 30
-        addSep(y: curY); curY += 9
-
-        // ── Display checkboxes ────────────────────────────────────────────
-        let expandChk = NSButton(checkboxWithTitle: "Expand on space change",
-                                 target: self, action: #selector(gearExpandChanged(_:)))
-        expandChk.state = Prefs.expandOnSpaceChange(for: agentName) ? .on : .off
-        expandChk.frame = NSRect(x: pad, y: curY, width: W - pad * 2, height: 20)
-        expandChk.font = NSFont.systemFont(ofSize: 11)
-        expandChk.contentTintColor = textColor
-        panel.addSubview(expandChk); curY += 24
-
-        let ontopChk = NSButton(checkboxWithTitle: "Always on top",
-                                target: self, action: #selector(gearOntopChanged(_:)))
-        ontopChk.state = Prefs.ontop(for: agentName) ? .on : .off
-        ontopChk.frame = NSRect(x: pad, y: curY, width: W - pad * 2, height: 20)
-        ontopChk.font = NSFont.systemFont(ofSize: 11)
-        ontopChk.contentTintColor = textColor
-        panel.addSubview(ontopChk); curY += 28
-
-        // ── Opacity ───────────────────────────────────────────────────────
-        let opacVal = Prefs.opacity(for: agentName)
-        let opacPct = NSTextField(labelWithString: "\(Int(opacVal * 100))%")
-        opacPct.frame = NSRect(x: W - pad - 36, y: curY + 2, width: 36, height: 15)
-        opacPct.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        opacPct.textColor = textColor; opacPct.alignment = .right
-        opacPct.backgroundColor = .clear; opacPct.drawsBackground = false
-        panel.addSubview(opacPct)
-        gearPanelOpacityValLbl = opacPct
-
-        let opacSlider = NSSlider(value: opacVal, minValue: 0.1, maxValue: 1.0,
-                                   target: self, action: #selector(gearOpacityChanged(_:)))
-        opacSlider.frame = NSRect(x: pad, y: curY, width: W - pad * 2 - 42, height: 18)
-        opacSlider.isContinuous = true
-        panel.addSubview(opacSlider)
-        gearPanelOpacitySlider = opacSlider
-        curY += 24
-
-        let opacLbl = rowLabel("Opacity")
-        opacLbl.frame = NSRect(x: pad, y: curY, width: 60, height: 13)
-        panel.addSubview(opacLbl); curY += 17
-
-        // ── Color well ────────────────────────────────────────────────────
-        let colorWell = NSColorWell(frame: NSRect(x: W - pad - 36, y: curY, width: 36, height: 24))
-        colorWell.color = Prefs.color(for: agentName)
-        colorWell.target = self; colorWell.action = #selector(gearColorChanged(_:))
-        panel.addSubview(colorWell)
-        gearPanelColorWell = colorWell
-
-        let colorLbl = rowLabel("Background")
-        colorLbl.frame = NSRect(x: pad, y: curY + 5, width: 80, height: 14)
-        panel.addSubview(colorLbl)
-
-        return panel
+        let model = GearPanelModel(
+            ports: ports, branch: branch, ttys: ttys,
+            agentName: agentName, agentPath: agentPath, agentVoice: agentVoice,
+            selectedTTY: selectedTTY, sessions: sessions,
+            humanVoiceLocaleLabel: localeName(for: Prefs.voiceLocale(for: agentName)),
+            opacity: Prefs.opacity(for: agentName),
+            backgroundColor: Prefs.color(for: agentName),
+            expandOnSpaceChange: Prefs.expandOnSpaceChange(for: agentName),
+            ontop: Prefs.ontop(for: agentName)
+        )
+        let handles = GearPanelBuilder.build(model: model, colors: gearPanelColors(), target: self)
+        gearPanelKeyLabels = handles.keyLabels
+        gearPanelValLabels = handles.valLabels
+        gearPanelBranchValLbl = handles.branchValLbl
+        gearPanelPortsValLbl = handles.portsValLbl
+        gearPanelRouteBtn = handles.routeBtn
+        gearPanelOpacitySlider = handles.opacitySlider
+        gearPanelOpacityValLbl = handles.opacityValLbl
+        gearPanelColorWell = handles.colorWell
+        return handles.panel
     }
 
     private func localeName(for localeId: String) -> String {
@@ -2279,9 +2569,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             let curFrame = window.frame
             isCommandPanelExpanded = true
             commandPanelH = panelH
-            window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY - panelH,
-                                   width: curFrame.width, height: curFrame.height + panelH), display: false)
-            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: panelH) }
+            expandWindow(by: panelH)
             panelView.frame = NSRect(x: 0, y: 0, width: curFrame.width, height: panelH)
             content.addSubview(panelView)
             commandPanelView = panelView
@@ -2291,16 +2579,12 @@ class WidgetWindow: NSObject, NSWindowDelegate {
 
     func collapseCommandPanel() {
         guard isCommandPanelExpanded else { return }
-        let content = window.contentView!
         let panelH = commandPanelH
         commandPanelView?.removeFromSuperview()
         commandPanelView = nil
         commandPanelH = 0
         isCommandPanelExpanded = false
-        for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: -panelH) }
-        let curFrame = window.frame
-        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY + panelH,
-                               width: curFrame.width, height: curFrame.height - panelH), display: true)
+        expandWindow(by: -panelH, display: true)
     }
 
     func swapCommandPanelTo(view newView: NSView, newH: CGFloat) {
@@ -2309,10 +2593,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         commandPanelView?.removeFromSuperview()
         commandPanelView = nil
         if delta != 0 {
-            let curFrame = window.frame
-            window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY - delta,
-                                   width: curFrame.width, height: curFrame.height + delta), display: false)
-            for sub in content.subviews { sub.frame = sub.frame.offsetBy(dx: 0, dy: delta) }
+            expandWindow(by: delta)
             commandPanelH = newH
         }
         newView.frame = NSRect(x: 0, y: 0, width: window.frame.width, height: newH)
@@ -2321,202 +2602,43 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         window.display()
     }
 
-    private func makeCommandListPanel() -> (NSView, CGFloat) {
-        let W = window.frame.width
-        let rH: CGFloat = 32
-        let pad: CGFloat = 10
-        let cmds = Prefs.widgetCommands(for: agentName)
-        let opens   = cmds.filter { $0.kind == .openTerminal }
-        let injects = cmds.filter { $0.kind == .injectCommand }
-        let hasSep  = !opens.isEmpty && !injects.isEmpty
-        let totalH  = CGFloat(cmds.count) * rH + (hasSep ? 10 : 0) + 34 + 8
-
-        let (panelBg, _) = gearPanelColors()
-        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: totalH))
-        panel.wantsLayer = true
-        panel.layer?.backgroundColor = panelBg.cgColor
-
-        let topSep = NSView(frame: NSRect(x: 0, y: totalH - 1, width: W, height: 1))
-        topSep.wantsLayer = true
-        topSep.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        panel.addSubview(topSep)
-
-        var curY = totalH - 8
-
-        func addRow(_ cmd: WidgetCommand) {
-            let idx = cmds.firstIndex(where: { $0.id == cmd.id }) ?? 0
-            curY -= rH
-            let row = NSView(frame: NSRect(x: 0, y: curY, width: W, height: rH))
-
-            // Grip handle — left side, drag to reorder
-            let gripSz: CGFloat = 20
-            let grip = DragHandleView(frame: NSRect(x: pad, y: (rH - gripSz) / 2, width: gripSz, height: gripSz))
-            grip.onMoveUp = { [weak self] in
-                guard let self = self else { return }
-                var c = Prefs.widgetCommands(for: self.agentName)
-                guard idx > 0 && idx < c.count else { return }
-                c.swapAt(idx, idx - 1)
-                Prefs.saveWidgetCommands(c, for: self.agentName)
-                let (v, h) = self.makeCommandListPanel()
-                self.swapCommandPanelTo(view: v, newH: h)
-            }
-            grip.onMoveDown = { [weak self] in
-                guard let self = self else { return }
-                var c = Prefs.widgetCommands(for: self.agentName)
-                guard idx < c.count - 1 else { return }
-                c.swapAt(idx, idx + 1)
-                Prefs.saveWidgetCommands(c, for: self.agentName)
-                let (v, h) = self.makeCommandListPanel()
-                self.swapCommandPanelTo(view: v, newH: h)
-            }
-            row.addSubview(grip)
-
-            // Hit area (excludes grip and edit button)
-            let hitX = pad + gripSz + 4
-            let editBtnX = W - pad - 18
-            let hitW = editBtnX - hitX
-            let hit = NSButton(frame: NSRect(x: hitX, y: 0, width: hitW, height: rH))
-            hit.title = ""; hit.isBordered = false; hit.bezelStyle = .inline
-            hit.tag = idx; hit.target = self; hit.action = #selector(cmdPanelRun(_:))
-            row.addSubview(hit)
-
-            // Terminal icon for openTerminal
-            var textX = hitX
-            if cmd.kind == .openTerminal || cmd.kind == .openBareTerminal,
-               let img = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
-                   .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)) {
-                let iv = NSImageView(frame: NSRect(x: textX, y: (rH - 14) / 2, width: 14, height: 14))
-                iv.image = img; iv.contentTintColor = .secondaryLabelColor
-                row.addSubview(iv)
-                textX += 18
-            }
-
-            // Label — use displayLabel so label==payload triggers a clean derived alias
-            let labelW: CGFloat = 72
-            let lbl = NSTextField(labelWithString: cmd.displayLabel)
-            lbl.frame = NSRect(x: textX, y: (rH - 14) / 2, width: labelW, height: 14)
-            lbl.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-            lbl.textColor = .labelColor
-            lbl.lineBreakMode = .byTruncatingTail
-            row.addSubview(lbl)
-
-            // Marquee — shows actual command that will run
-            let marqueeX = textX + labelW + 4
-            let marqueeW = editBtnX - marqueeX - 4
-            let marqueeText: String = {
-                switch cmd.kind {
-                case .openTerminal:
-                    return cmd.payload.isEmpty ? "claude" : "claude --model \(cmd.payload)"
-                case .openBareTerminal:
-                    return "open terminal"
-                case .injectCommand:
-                    return cmd.payload == cmd.displayLabel ? "" : cmd.payload
-                }
-            }()
-            if marqueeW > 16 && !marqueeText.isEmpty {
-                let mq = MarqueeView(frame: NSRect(x: marqueeX, y: (rH - 12) / 2, width: marqueeW, height: 12))
-                mq.setup(text: marqueeText,
-                         font: NSFont.monospacedSystemFont(ofSize: 9, weight: .light),
-                         color: NSColor.tertiaryLabelColor)
-                row.addSubview(mq)
-            }
-
-            // Edit button — right side
-            let eb = NSButton(frame: NSRect(x: editBtnX, y: (rH - 18) / 2, width: 18, height: 18))
-            eb.isBordered = false; eb.bezelStyle = .inline
-            eb.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 9, weight: .regular))
-            eb.imageScaling = .scaleProportionallyUpOrDown
-            eb.contentTintColor = .tertiaryLabelColor
-            eb.tag = idx; eb.target = self; eb.action = #selector(cmdPanelEdit(_:))
-            row.addSubview(eb)
-
-            panel.addSubview(row)
-        }
-
-        opens.forEach { addRow($0) }
-        if hasSep {
-            curY -= 5
-            let sep = NSView(frame: NSRect(x: pad, y: curY - 1, width: W - pad * 2, height: 1))
-            sep.wantsLayer = true; sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
-            panel.addSubview(sep)
-            curY -= 4
-        }
-        injects.forEach { addRow($0) }
-
-        let addBtn = NSButton(frame: NSRect(x: pad, y: 6, width: W - pad * 2, height: 22))
-        addBtn.title = "+ Add command"; addBtn.bezelStyle = .inline; addBtn.isBordered = false
-        addBtn.font = NSFont.systemFont(ofSize: 10); addBtn.alignment = .left
-        addBtn.contentTintColor = .secondaryLabelColor
-        addBtn.target = self; addBtn.action = #selector(cmdPanelAdd(_:))
-        panel.addSubview(addBtn)
-
-        return (panel, totalH)
+    /// Grows (positive `delta`) or shrinks (negative `delta`) the window by
+    /// `delta` points, keeping the top edge fixed by moving the window's
+    /// origin down/up while adjusting height, and shifting all existing
+    /// content subviews by `delta` so a panel anchored at y=0 lines up.
+    /// Pass `excluding` for a panel that was already added at its final
+    /// (post-grow) position and must not be shifted again. Shared by the
+    /// gear panel and command panel expand/collapse/swap call sites.
+    private func expandWindow(by delta: CGFloat, excluding excludedView: NSView? = nil, display: Bool = false) {
+        let content = window.contentView!
+        let curFrame = window.frame
+        window.setFrame(NSRect(x: curFrame.minX, y: curFrame.minY - delta,
+                               width: curFrame.width, height: curFrame.height + delta), display: display)
+        for sub in content.subviews where sub !== excludedView { sub.frame = sub.frame.offsetBy(dx: 0, dy: delta) }
     }
 
-    private func makeCommandEditPanel(cmd: WidgetCommand?, index: Int?) -> (NSView, CGFloat) {
-        let W = window.frame.width
-        let H: CGFloat = 168
-        let pad: CGFloat = 10
-        let (panelBg, _) = gearPanelColors()
+    /// Thin wrapper: assembles a CommandListPanelModel from current agent
+    /// state and delegates view-tree construction to CommandPanelBuilder.
+    func makeCommandListPanel() -> (NSView, CGFloat) {
+        let model = CommandListPanelModel(
+            windowWidth: window.frame.width,
+            agentName: agentName,
+            commands: Prefs.widgetCommands(for: agentName),
+            panelBg: gearPanelColors().bg
+        )
+        return CommandPanelBuilder.buildList(model: model, target: self)
+    }
 
-        let panel = NSView(frame: NSRect(x: 0, y: 0, width: W, height: H))
-        panel.wantsLayer = true
-        panel.layer?.backgroundColor = panelBg.cgColor
-
-        let topSep = NSView(frame: NSRect(x: 0, y: H - 1, width: W, height: 1))
-        topSep.wantsLayer = true
-        topSep.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        panel.addSubview(topSep)
-
-        let backBtn = NSButton(frame: NSRect(x: pad, y: H - 26, width: 60, height: 18))
-        backBtn.title = "← Back"; backBtn.isBordered = false
-        backBtn.font = NSFont.systemFont(ofSize: 10); backBtn.contentTintColor = .secondaryLabelColor
-        backBtn.target = self; backBtn.action = #selector(cmdPanelBack(_:))
-        panel.addSubview(backBtn)
-
-        var y: CGFloat = H - 36
-        let seg = NSSegmentedControl(labels: ["claude", "Terminal", "Inject"],
-                                     trackingMode: .selectOne, target: nil, action: nil)
-        seg.frame = NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22)
-        seg.font = NSFont.systemFont(ofSize: 10)
-        seg.selectedSegment = cmd.map {
-            switch $0.kind {
-            case .openTerminal:     return 0
-            case .openBareTerminal: return 1
-            case .injectCommand:    return 2
-            }
-        } ?? 0
-        seg.tag = 1003; panel.addSubview(seg); y -= 30
-
-        let labelF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
-        labelF.placeholderString = "Alias (optional)"; labelF.stringValue = cmd?.label ?? ""
-        labelF.font = NSFont.systemFont(ofSize: 11); labelF.bezelStyle = .roundedBezel
-        labelF.tag = 1001; panel.addSubview(labelF); y -= 30
-
-        let payF = NSTextField(frame: NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22))
-        payF.placeholderString = "Model ID or command (e.g. /clear)"
-        payF.stringValue = cmd?.payload ?? ""
-        payF.font = NSFont.systemFont(ofSize: 11); payF.bezelStyle = .roundedBezel
-        payF.tag = 1002; panel.addSubview(payF); y -= 30
-
-        let saveBtn = NSButton(frame: NSRect(x: W - pad - 60, y: y - 22, width: 60, height: 22))
-        saveBtn.title = index == nil ? "Add" : "Save"; saveBtn.bezelStyle = .rounded
-        saveBtn.font = NSFont.systemFont(ofSize: 11); saveBtn.keyEquivalent = "\r"
-        saveBtn.tag = (index ?? -1) + 10000
-        saveBtn.target = self; saveBtn.action = #selector(cmdPanelSave(_:))
-        panel.addSubview(saveBtn)
-
-        if let idx = index {
-            let delBtn = NSButton(frame: NSRect(x: pad, y: y - 22, width: 60, height: 22))
-            delBtn.title = "Delete"; delBtn.bezelStyle = .rounded
-            delBtn.font = NSFont.systemFont(ofSize: 11)
-            delBtn.contentTintColor = .systemRed
-            delBtn.tag = idx; delBtn.target = self; delBtn.action = #selector(cmdPanelDelete(_:))
-            panel.addSubview(delBtn)
-        }
-
-        return (panel, H)
+    /// Thin wrapper: assembles a CommandEditPanelModel and delegates
+    /// view-tree construction to CommandPanelBuilder.
+    func makeCommandEditPanel(cmd: WidgetCommand?, index: Int?) -> (NSView, CGFloat) {
+        let model = CommandEditPanelModel(
+            windowWidth: window.frame.width,
+            command: cmd,
+            index: index,
+            panelBg: gearPanelColors().bg
+        )
+        return CommandPanelBuilder.buildEdit(model: model, target: self)
     }
 
     // MARK: - Command panel actions
