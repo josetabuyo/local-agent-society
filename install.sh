@@ -69,6 +69,12 @@ for skill in new-local-agent local-agent-voice local-agent-pronunciation local-a
     echo "         skill: $skill"
 done
 
+# las-agent lives under .claude/skills (project-tracked) instead of skills/,
+# since it doubles as this repo's own Claude Code skill.
+mkdir -p ~/.claude/skills/las-agent
+cp "$INSTALL_DIR/.claude/skills/las-agent/SKILL.md" ~/.claude/skills/las-agent/SKILL.md
+echo "         skill: las-agent"
+
 # ── 4. Install hook ───────────────────────────────────────────────────────────
 echo "[ 4/5 ] Installing stop hook..."
 mkdir -p ~/.claude/hooks
