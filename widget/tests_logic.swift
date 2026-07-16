@@ -251,15 +251,15 @@ test("gear info rows: populated values land in the right slots", populatedGearRo
 // separator insertion (only when both groups are non-empty), and total
 // panel height — without building any NSView.
 
-enum MiniCmdKind { case openTerminal, openBareTerminal, injectCommand }
+enum MiniCmdKind { case openTerminal, openBareTerminal, openResumeTerminal, injectCommand }
 struct MiniCmd { let kind: MiniCmdKind }
 
 func commandListLayout(commands: [MiniCmd]) -> (rowCount: Int, hasSeparator: Bool, totalHeight: Double) {
     let rH = 32.0
-    // Mirrors tray.swift exactly: only openTerminal/injectCommand define the
-    // separator groups — openBareTerminal counts toward totalHeight (it's
-    // still a row in `cmds`) but does not participate in `hasSep`.
-    let opens = commands.filter { $0.kind == .openTerminal }
+    // Mirrors tray.swift exactly: all non-inject kinds (openTerminal,
+    // openBareTerminal, openResumeTerminal) form the "opens" group; only
+    // injectCommand forms the other. Separator shows only when both are non-empty.
+    let opens = commands.filter { $0.kind != .injectCommand }
     let injects = commands.filter { $0.kind == .injectCommand }
     let hasSep = !opens.isEmpty && !injects.isEmpty
     let totalH = Double(commands.count) * rH + (hasSep ? 10.0 : 0.0) + 34.0 + 8.0
@@ -284,8 +284,11 @@ test("command list: mixed opens+injects height includes separator gap", mixedLay
 test("command list: row count matches total command count",    mixedLayout.rowCount == 3)
 
 let bareAndInjectLayout = commandListLayout(commands: [MiniCmd(kind: .openBareTerminal), MiniCmd(kind: .injectCommand)])
-test("command list: bareTerminal+inject has no separator (bareTerminal isn't in either group)", !bareAndInjectLayout.hasSeparator)
-test("command list: bareTerminal+inject still counts both rows in height", bareAndInjectLayout.totalHeight == 2 * 32 + 42)
+test("command list: bareTerminal+inject adds separator (bareTerminal groups with opens)", bareAndInjectLayout.hasSeparator)
+test("command list: bareTerminal+inject still counts both rows in height", bareAndInjectLayout.totalHeight == 2 * 32 + 10 + 42)
+
+let resumeAndInjectLayout = commandListLayout(commands: [MiniCmd(kind: .openResumeTerminal), MiniCmd(kind: .injectCommand)])
+test("command list: resumeTerminal+inject adds separator (resumeTerminal groups with opens)", resumeAndInjectLayout.hasSeparator)
 
 // MARK: - CommandEditPanelModel field defaults (new vs existing command)
 // Mirrors CommandPanelBuilder.buildEdit's pure derivation of initial field
@@ -295,10 +298,11 @@ struct MiniEditCommand { let label: String; let kind: MiniCmdKind; let payload: 
 
 func commandEditSegment(kind: MiniCmdKind?) -> Int {
     switch kind {
-    case .none:                    return 0
-    case .some(.openTerminal):     return 0
-    case .some(.openBareTerminal): return 1
-    case .some(.injectCommand):    return 2
+    case .none:                      return 0
+    case .some(.openTerminal):       return 0
+    case .some(.openBareTerminal):   return 1
+    case .some(.openResumeTerminal): return 2
+    case .some(.injectCommand):      return 3
     }
 }
 
@@ -322,12 +326,15 @@ test("command edit: new command has no delete button",    !newCmdFields.hasDelet
 let existingInjectFields = commandEditFields(command: MiniEditCommand(label: "clear", kind: .injectCommand, payload: "/clear"), index: 2)
 test("command edit: existing command preserves label",    existingInjectFields.label == "clear")
 test("command edit: existing command preserves payload",  existingInjectFields.payload == "/clear")
-test("command edit: inject kind maps to segment 2",        existingInjectFields.segment == 2)
+test("command edit: inject kind maps to segment 3",        existingInjectFields.segment == 3)
 test("command edit: existing command save button reads Save", existingInjectFields.saveTitle == "Save")
 test("command edit: existing command has delete button",   existingInjectFields.hasDelete)
 
 let existingBareTerminalFields = commandEditFields(command: MiniEditCommand(label: "", kind: .openBareTerminal, payload: ""), index: 0)
 test("command edit: bare terminal kind maps to segment 1", existingBareTerminalFields.segment == 1)
+
+let existingResumeTerminalFields = commandEditFields(command: MiniEditCommand(label: "Resume", kind: .openResumeTerminal, payload: ""), index: 0)
+test("command edit: resume terminal kind maps to segment 2", existingResumeTerminalFields.segment == 2)
 
 // MARK: - Summary
 

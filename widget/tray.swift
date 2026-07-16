@@ -152,9 +152,10 @@ enum Prefs {
 
 struct WidgetCommand: Codable {
     enum Kind: String, Codable {
-        case openTerminal     // opens iTerm2 running claude (with optional --model)
-        case openBareTerminal // opens iTerm2 plain shell, no claude
-        case injectCommand    // injects text into the linked session
+        case openTerminal       // opens iTerm2 running claude (with optional --model)
+        case openBareTerminal   // opens iTerm2 plain shell, no claude
+        case openResumeTerminal // opens iTerm2 running `claude --resume`
+        case injectCommand      // injects text into the linked session
     }
     var id: String
     var label: String
@@ -167,7 +168,8 @@ struct WidgetCommand: Codable {
 
     static func defaultAlias(for payload: String, kind: Kind) -> String {
         switch kind {
-        case .openBareTerminal: return "terminal"
+        case .openBareTerminal:   return "terminal"
+        case .openResumeTerminal: return "resume"
         default:
             var s = payload
             s = s.trimmingCharacters(in: CharacterSet.alphanumerics.union(.init(charactersIn: "-_ ")).inverted)
@@ -186,6 +188,7 @@ struct WidgetCommand: Codable {
     }
 
     static let defaults: [WidgetCommand] = [
+        WidgetCommand(label: "Resume", kind: .openResumeTerminal, payload: ""),
         WidgetCommand(label: "Haiku",  kind: .openTerminal,  payload: "claude-haiku-4-5-20251001"),
         WidgetCommand(label: "Sonnet", kind: .openTerminal,  payload: "claude-sonnet-4-6"),
         WidgetCommand(label: "Opus",   kind: .openTerminal,  payload: "claude-opus-4-8"),
@@ -1644,7 +1647,7 @@ enum CommandPanelBuilder {
         let rH: CGFloat = 32
         let pad: CGFloat = 10
         let cmds = model.commands
-        let opens   = cmds.filter { $0.kind == .openTerminal }
+        let opens   = cmds.filter { $0.kind != .injectCommand }
         let injects = cmds.filter { $0.kind == .injectCommand }
         let hasSep  = !opens.isEmpty && !injects.isEmpty
         let totalH  = CGFloat(cmds.count) * rH + (hasSep ? 10 : 0) + 34 + 8
@@ -1699,7 +1702,7 @@ enum CommandPanelBuilder {
 
             // Terminal icon for openTerminal
             var textX = hitX
-            if cmd.kind == .openTerminal || cmd.kind == .openBareTerminal,
+            if cmd.kind == .openTerminal || cmd.kind == .openBareTerminal || cmd.kind == .openResumeTerminal,
                let img = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)?
                    .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular)) {
                 let iv = NSImageView(frame: NSRect(x: textX, y: (rH - 14) / 2, width: 14, height: 14))
@@ -1726,6 +1729,8 @@ enum CommandPanelBuilder {
                     return cmd.payload.isEmpty ? "claude" : "claude --model \(cmd.payload)"
                 case .openBareTerminal:
                     return "open terminal"
+                case .openResumeTerminal:
+                    return "claude --resume"
                 case .injectCommand:
                     return cmd.payload == cmd.displayLabel ? "" : cmd.payload
                 }
@@ -1795,15 +1800,16 @@ enum CommandPanelBuilder {
         panel.addSubview(backBtn)
 
         var y: CGFloat = H - 36
-        let seg = NSSegmentedControl(labels: ["claude", "Terminal", "Inject"],
+        let seg = NSSegmentedControl(labels: ["claude", "Terminal", "Resume", "Inject"],
                                      trackingMode: .selectOne, target: nil, action: nil)
         seg.frame = NSRect(x: pad, y: y - 22, width: W - pad * 2, height: 22)
         seg.font = NSFont.systemFont(ofSize: 10)
         seg.selectedSegment = cmd.map {
             switch $0.kind {
-            case .openTerminal:     return 0
-            case .openBareTerminal: return 1
-            case .injectCommand:    return 2
+            case .openTerminal:       return 0
+            case .openBareTerminal:   return 1
+            case .openResumeTerminal: return 2
+            case .injectCommand:      return 3
             }
         } ?? 0
         seg.tag = 1003; panel.addSubview(seg); y -= 30
@@ -2554,6 +2560,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
             launchTerminal(name: cmd.label, modelId: cmd.payload.isEmpty ? nil : cmd.payload, bare: false)
         case .openBareTerminal:
             launchTerminal(name: cmd.label, modelId: nil, bare: true)
+        case .openResumeTerminal:
+            launchTerminal(name: cmd.label, modelId: nil, bare: false, resume: true)
         case .injectCommand:
             injectToSession(cmd.payload, source: "raw")
         }
@@ -2707,7 +2715,8 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         let kind: WidgetCommand.Kind
         switch sg.selectedSegment {
         case 1:  kind = .openBareTerminal
-        case 2:  kind = .injectCommand
+        case 2:  kind = .openResumeTerminal
+        case 3:  kind = .injectCommand
         default: kind = .openTerminal
         }
         let label = labelRaw.isEmpty ? WidgetCommand.defaultAlias(for: payload, kind: kind) : labelRaw
@@ -2728,7 +2737,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         showCommandPalette()
     }
 
-    func launchTerminal(name: String, modelId: String?, bare: Bool = false) {
+    func launchTerminal(name: String, modelId: String?, bare: Bool = false, resume: Bool = false) {
         guard let url = URL(string: "http://localhost:8700/agents/\(agentName)/terminal") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -2736,6 +2745,7 @@ class WidgetWindow: NSObject, NSWindowDelegate {
         var payload: [String: Any] = ["model": name]
         if let mid = modelId { payload["model_id"] = mid }
         if bare { payload["bare"] = true }
+        if resume { payload["resume"] = true }
         req.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         req.timeoutInterval = 12
 
