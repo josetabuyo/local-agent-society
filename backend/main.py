@@ -701,8 +701,10 @@ def get_agent_ttys(name: str):
 
 @app.post("/agents/{name}/inject")
 def inject_message(name: str, body: InjectRequest):
-    if body.tty is not None and not TTY_RE.match(body.tty):
-        raise HTTPException(status_code=404, detail="Invalid tty")
+    if body.tty is not None:
+        tty_dev = body.tty if body.tty.startswith("/") else f"/dev/{body.tty}"
+        if not TTY_RE.match(tty_dev):
+            raise HTTPException(status_code=404, detail="Invalid tty")
 
     registry = load_json(REGISTRY_FILE, {})
     if name not in registry:
