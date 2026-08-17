@@ -113,12 +113,6 @@ with open(path, "w") as f:
 print("         settings.json updated")
 PYEOF
 
-# ── Initialize session channels ───────────────────────────────────────────────
-SLUG=$(echo "$FAMILY" | tr '[:upper:]' '[:lower:]')
-touch "$INSTALL_DIR/session/${SLUG}-inbox.md"   # inter-agent messages
-touch "$INSTALL_DIR/session/extern-inbox.md"    # external injection channel
-touch "$INSTALL_DIR/session/bitacora.md"        # conversation log
-
 # ── Initialize backend data ───────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR/backend/data"
 for f in registry.json ports.json; do

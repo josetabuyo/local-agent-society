@@ -81,12 +81,6 @@ def new(name, voice, target_dir):
     })
     click.echo(f"Registered '{name}' with backend.")
 
-    # Create session dir
-    session_dir = cwd / "session"
-    session_dir.mkdir(exist_ok=True)
-    (session_dir / "bitacora.md").touch()
-    click.echo(f"Created {session_dir}/")
-
     # Launch widget
     subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
     click.echo(f"Widget launched.")

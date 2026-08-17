@@ -59,13 +59,7 @@ curl -s -X POST http://localhost:8700/agents \
   -d '{"name":"AGENT","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/AGENT"}'
 ```
 
-### 6. Create session directory
-```bash
-mkdir -p CWD/session
-touch CWD/session/bitacora.md
-```
-
-### 7. Register ports (MANDATORY)
+### 6. Register ports (MANDATORY)
 
 Before the agent can start any HTTP server, it must register its ports.
 
@@ -89,21 +83,21 @@ Port contract:
   las agent inject OtherAgent "Port PORT is needed — can you release it?" --from AGENT
   ```
 
-### 8. Launch widget
+### 7. Launch widget
 ```bash
 PATH="$HOME/.local/bin:$PATH" las widget AGENT
 ```
 
-### 9. Verify consistency
+### 8. Verify consistency
 ```bash
 python3 /Users/josetabuyo/Development/local-agent-society/tests/test_agent_consistency.py
 ```
 If this fails, report the errors to the user before continuing.
 
-### 10. Announce
+### 9. Announce
 ```bash
 PATH="$HOME/.local/bin:$PATH" las speak "Hello! I am AGENT, ready." --name AGENT
 ```
 
-### 11. Report
+### 10. Report
 Confirm: name, voice, locale, .agent.json created, ports registered, widget launched.
