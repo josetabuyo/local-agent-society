@@ -61,7 +61,7 @@ python3 -m venv "$VENV"
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
 echo "[ 3/5 ] Installing skills..."
-for skill in new-local-agent local-agent-voice local-agent-pronunciation local-agent-widget; do
+for skill in local-agent-voice local-agent-pronunciation local-agent-widget; do
     mkdir -p ~/.claude/skills/$skill
     sed "s|INSTALL_DIR|$INSTALL_DIR|g" \
         "$INSTALL_DIR/skills/$skill/SKILL.md" \
@@ -134,6 +134,14 @@ if [ -n "$LEGACY" ]; then
     done
 else
     echo "         none found"
+fi
+
+# ── Purge legacy new-local-agent skill ────────────────────────────────────────
+# Registration is now covered by `las agent new` alone; the skill duplicated
+# that flow by hand (curl/python3) instead of calling the CLI.
+if [ -d ~/.claude/skills/new-local-agent ]; then
+    rm -rf ~/.claude/skills/new-local-agent
+    echo "         removed legacy new-local-agent skill"
 fi
 
 # ── Register launchd agent (backend) ─────────────────────────────────────────

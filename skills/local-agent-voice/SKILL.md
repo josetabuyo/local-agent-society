@@ -15,7 +15,7 @@ allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
 ```bash
 python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name'), d.get('voice','Samantha'))"
 ```
-If file does not exist, tell the user this directory has no agent (run `/new-local-agent` first).
+If file does not exist, tell the user this directory has no agent (run `las agent new NAME` first).
 
 ### 2. Determine new voice
 - If `$1` provided: use it as VOICE

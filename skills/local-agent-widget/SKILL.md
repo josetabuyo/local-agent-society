@@ -20,7 +20,7 @@ PATH="$HOME/.local/bin:$PATH" las widget
 Pass a name explicitly to target a different agent: `PATH="$HOME/.local/bin:$PATH" las widget HomeControl`.
 To reopen ALL agent widgets at once: `PATH="$HOME/.local/bin:$PATH" las widgets`.
 
-If `.agent.json` doesn't exist, tell the user to run `/new-local-agent` first.
+If `.agent.json` doesn't exist, tell the user to run `las agent new NAME` first.
 
 Report: "Widget reopened on this Space."
 

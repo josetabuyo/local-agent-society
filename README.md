@@ -40,13 +40,13 @@ This compiles the tray app, registers the LaunchAgent, starts the backend on por
 
 ## Create your first agent
 
-Open Claude Code in any project directory and run:
+In any project directory, run:
 
 ```
-/new-local-agent
+las agent new MyProject
 ```
 
-The skill registers the agent with the backend, assigns a unique voice (with its language), and opens the widget.
+The command writes `.agent.json`, registers the agent with the backend, assigns a unique voice (with its language), and opens the widget.
 
 ---
 
@@ -220,7 +220,6 @@ Long-press the mic button to change the speech recognition language (independent
 
 | Skill | What it does |
 |---|---|
-| `/new-local-agent` | Register a new agent with voice + locale |
 | `/local-agent-voice` | Change the agent's TTS voice (updates locale too) |
 | `/local-agent-pronunciation` | Set a phonetic hint for TTS |
 | `/local-agent-widget` | Reopen the floating widget |

@@ -29,12 +29,12 @@ cd local-agent-society
 
 ## Usage
 
-Open Claude in any project folder:
+Open a terminal in any project folder:
 ```
-/new-local-agent MyProject
+las agent new MyProject
 ```
 
-That's it. The system handles the rest: it writes `.agent.json`, registers the agent with the backend, assigns a voice, and opens the widget.
+That's it. The command handles the rest: it writes `.agent.json`, registers the agent with the backend, assigns a voice, and opens the widget.
 
 Once registered, key day-to-day commands are `las agent inject NAME "msg"` (talk to another agent's terminal), `las widget [NAME]` (reopen a widget), and `las ports claim APP` (safely grab a port before starting a server).
 
@@ -42,7 +42,6 @@ Once registered, key day-to-day commands are `las agent inject NAME "msg"` (talk
 
 | Skill | Description |
 |-------|-------------|
-| `/new-local-agent <Name>` | Register a new agent |
 | `/local-agent-voice [VoiceName]` | Change the agent's TTS voice |
 | `/local-agent-pronunciation <text>` | Set phonetic hint for TTS |
 | `/local-agent-widget` | Reopen the floating widget |

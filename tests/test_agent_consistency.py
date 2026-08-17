@@ -24,16 +24,6 @@ def test_backend_reachable():
         raise AssertionError(f"Backend not responding at {BACKEND}: {e}")
 
 
-def test_new_local_agent_skill_opens_widget():
-    """new-local-agent skill must open widgets via las widget (which uses localagentsociety:// internally)."""
-    skill = ROOT / "skills" / "new-local-agent" / "SKILL.md"
-    if not skill.exists():
-        return
-    text = skill.read_text()
-    assert "las widget" in text or "localagentsociety://" in text, \
-        "new-local-agent skill does not open widgets via las widget or localagentsociety:// URL scheme"
-
-
 def test_inject_uses_ascii_13_for_enter():
     """_inject_via_iterm must use 'ASCII character 13' for Enter — not System Events."""
     text = (ROOT / "backend" / "main.py").read_text()
