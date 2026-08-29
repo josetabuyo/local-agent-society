@@ -21,9 +21,22 @@ else
     fi
 fi
 
-# ── tray app ──────────────────────────────────────────────────────────────────
-if pgrep -x "tray" > /dev/null 2>&1; then
-    pkill -x "tray" && echo "Society    → stopped"
+# ── widget (Electron) ────────────────────────────────────────────────────────
+# Covers both the packaged app (process name matches the productName, "Local
+# Agent Society") and a dev instance launched via `npm start`/`electron .`
+# under widget-electron/ (process name "Electron", cwd under widget-electron).
+FOUND=0
+PACKAGED_PIDS=$(pgrep -f "Local Agent Society.app/Contents/MacOS/Local Agent Society" 2>/dev/null || true)
+if [ -n "$PACKAGED_PIDS" ]; then
+    kill $PACKAGED_PIDS 2>/dev/null && FOUND=1
+fi
+DEV_PIDS=$(pgrep -f "widget-electron" 2>/dev/null || true)
+if [ -n "$DEV_PIDS" ]; then
+    kill $DEV_PIDS 2>/dev/null && FOUND=1
+fi
+
+if [ "$FOUND" -eq 1 ]; then
+    echo "Society    → stopped"
 else
     echo "Society    → not running"
 fi

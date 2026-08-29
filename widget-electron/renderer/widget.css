@@ -1,0 +1,276 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+.widget {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--widget-color, #90c060);
+  opacity: var(--widget-opacity, 0.72);
+  -webkit-app-region: drag;
+  display: flex;
+  flex-direction: column;
+}
+
+.name {
+  font-size: 26px;
+  font-weight: 700;
+  color: #141414;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * "Expand when hidden" (retired Swift "Expand on space change" — see
+ * main.js's window:set-occlusion-expanded comment): when occluded/off-Space
+ * and the pref is on, the window itself is resized to fill the screen by
+ * main.js; this class makes the CONTENT match that — a big centered banner,
+ * no border radius (it's covering the whole display), buttons hidden since
+ * the window is also click-through at that point (non-interactive, purely
+ * a visual reminder that this agent's widget is still around).
+ */
+.widget.occlusion-expanded {
+  border-radius: 0;
+  justify-content: center;
+  align-items: center;
+}
+
+.widget.occlusion-expanded .name {
+  font-size: min(18vw, 20vh);
+  white-space: normal;
+  text-align: center;
+  line-height: 1.05;
+}
+
+.widget.occlusion-expanded .log,
+.widget.occlusion-expanded .buttonbar,
+.widget.occlusion-expanded .gear,
+.widget.occlusion-expanded .resize-handle {
+  display: none;
+}
+
+.log {
+  margin-top: 8px;
+  flex: 1;
+  overflow-y: auto;
+  font-size: 11px;
+  color: #222;
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * Frameless (frame:false) windows have no native OS resize border. When the
+ * whole window is a drag region, Chromium/Electron also swallows edge
+ * mousedowns that would otherwise let the OS start a resize, so
+ * `resizable: true` alone does nothing here. This corner grip is a manual
+ * resize handle: it's a no-drag region, and widget.js turns a mousedown+drag
+ * on it into explicit BrowserWindow#setBounds calls via IPC.
+ */
+.resize-handle {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 26px;
+  height: 26px;
+  cursor: nwse-resize;
+  z-index: 10;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 14px;
+  height: 14px;
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.45) 0px,
+    rgba(0, 0, 0, 0.45) 1.5px,
+    transparent 1.5px,
+    transparent 5px
+  );
+  -webkit-mask-image: linear-gradient(-45deg, black 40%, transparent 40%);
+  mask-image: linear-gradient(-45deg, black 40%, transparent 40%);
+}
+
+.resize-handle:hover::after {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.75) 0px,
+    rgba(0, 0, 0, 0.75) 1.5px,
+    transparent 1.5px,
+    transparent 5px
+  );
+}
+
+.log .entry {
+  padding: 2px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.log .entry .from {
+  font-weight: 600;
+}
+
+.log .entry.speak .from::before {
+  content: "\1F50A ";
+}
+
+/*
+ * Bottom button row: ALL face buttons live here now, gear included — moved
+ * off its earlier top-right absolute position on request, so there's a
+ * single row along the bottom edge and nothing floating up top. Order:
+ * gear + clear on the left, terminal/speaker/mic/focus on the right.
+ * Flex layout (rather than the Swift version's fixed pixel x-coordinates)
+ * so it holds up across this app's resizable window.
+ */
+.buttonbar {
+  -webkit-app-region: no-drag;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.bar-left,
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.facebtn {
+  -webkit-app-region: no-drag;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.12);
+  color: #141414;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.facebtn:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.facebtn.active {
+  background: rgba(200, 40, 40, 0.55);
+  color: #fff;
+}
+
+/* Mic button while transcribing (local Whisper inference, including the
+ * first-run model download) — distinct from .active (recording) so the two
+ * states read differently rather than the button looking stuck on "armed". */
+.facebtn.busy {
+  background: rgba(200, 140, 40, 0.55);
+  color: #fff;
+  cursor: wait;
+  animation: mic-busy-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes mic-busy-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Command palette: list of saved commands + an edit form, reusing the
+ * full-overlay .settings look for visual consistency with the gear panel. */
+.commands-list {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.command-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.command-row .command-label {
+  flex: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-row .command-kind {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-right: 4px;
+}
+
+.command-row button {
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings select {
+  flex: 1;
+}
+
+
+.settings {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 14px;
+  /* Same hue as the widget face (--widget-color), but fully opaque — unlike
+   * the widget itself, which uses --widget-opacity, these overlay panels
+   * should always be fully readable regardless of how transparent the user
+   * set the compact widget. */
+  background: var(--widget-color, #90c060);
+  color: #141414;
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+
+.settings.hidden {
+  display: none;
+}
+
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+#closeSettings {
+  width: 100%;
+  padding: 6px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}

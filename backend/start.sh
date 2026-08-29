@@ -17,7 +17,7 @@ VENV="$SCRIPT_DIR/.venv"
 if [ ! -f "$VENV/bin/pip" ]; then
     python3 -m venv "$VENV"
 fi
-"$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
+"$VENV/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
 
 cd "$SCRIPT_DIR"
 PYTHONPATH="$SCRIPT_DIR/.." nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &

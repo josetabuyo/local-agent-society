@@ -122,7 +122,7 @@ Agents share resources and follow a civility contract:
 2. **Voice language** — each TTS voice has a fixed language; English voices speak English text, Spanish voices speak Spanish text — never mix them
 3. **Ports** — always reserved via `las ports claim` or `POST /ports/claim` before starting any server
 4. **Voices** — unique per agent; declared in `.agent.json` with a `locale` field (e.g. `en-US`, `es-MX`)
-5. **Messages** — sent live via `las agent inject NAME "msg"` or `POST /agents/{name}/inject`; delivered straight into the target agent's TTY. There are no inbox files and no polling — if the agent has no live terminal the message isn't delivered (or is queued for delivery when it comes back live, depending on the backend response); retry or wait for them to start a session.
+5. **Messages** — sent via `las agent inject NAME "msg"` or `POST /agents/{name}/inject`, delivered over **vortexia** (a sibling MQTT broker, see `vortexia/PROTOCOL.md`) rather than terminal injection. Not retained — the recipient only receives it if their `/las-agent` skill happens to be polling their vortexia inbox at that moment (it does so once, at the start of each session, via `las agent poll`). No live terminal, no on-disk queue; retry or wait for them to start a session.
 6. **Response language** — agents respond in the language of their TTS voice (`locale` field in `.agent.json`)
 
 ---
@@ -143,9 +143,9 @@ Endpoints below are cross-checked against `app.openapi()['paths']` in `backend/m
 | `POST /agents/{name}/focus` | Bring the agent's iTerm2 window to the front |
 | `POST /agents/{name}/terminal` | Open a new iTerm2 window running `claude` in the agent's directory |
 | `GET /agents/{name}/ttys` | List TTYs known to be associated with the agent |
-| `POST /agents/{name}/inject` | Inject a message into a live terminal (queues it if the agent isn't live and `queue` is set) |
-| `GET /agents/{name}/pending` | List messages queued for delivery when the agent comes back live |
-| `DELETE /agents/{name}/pending` | Clear the pending-message queue for an agent |
+| `POST /agents/{name}/inject` | Publish a message to the agent's vortexia inbox (`las/agent/{name}/inbox`) |
+| `POST /agents/{name}/vortexia/register` | Publish a retained "online" presence payload for the agent on vortexia |
+| `GET /agents/{name}/vortexia/poll` | Drain the agent's vortexia inbox for up to `timeout` seconds and return what arrived |
 | `POST /agents/{name}/mute` | Mute agent TTS |
 | `DELETE /agents/{name}/mute` | Unmute agent TTS |
 | `GET /agents/{name}/muted` | Check whether an agent is muted |

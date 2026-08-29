@@ -20,6 +20,10 @@ import socket
 from pathlib import Path
 from datetime import datetime
 
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
+import vortexia_client as vx
+
 app = FastAPI(title="Local Agent Society", version="1.0.0")
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -89,6 +93,86 @@ _attribution_lock = threading.Lock()
 _pending_links_lock = threading.Lock()
 
 
+# ── vortexia integration ──────────────────────────────────────────────────────
+#
+# Inter-agent messaging (agent inject) and the TTS speak queue are both
+# delivered over vortexia (a sibling MQTT broker — see
+# ../vortexia/PROTOCOL.md), not AppleScript/TTY injection or `say`. This
+# backend is also the port registry vortexia claims its ports from, so we
+# resolve vortexia's current MQTT port by reading our own PORTS_FILE rather
+# than making an HTTP round-trip to ourselves.
+#
+# Every vortexia call below fails soft: if vortexia isn't running, we log a
+# warning and keep going — :8700 must stay usable even when vortexia is down.
+
+SPEAK_TOPIC = "las/speak"
+
+
+def _vortexia_mqtt_port() -> int:
+    ports = load_json(PORTS_FILE, {})
+    for info in ports.values():
+        if info.get("app") == "vortexia-mqtt":
+            return info.get("port", vx.DEFAULT_PORT)
+    return vx.DEFAULT_PORT
+
+
+def _vortexia_publish(topic: str, envelope: dict, retain: bool = False) -> bool:
+    """Fire-and-forget publish of one envelope. Fails soft if vortexia is unreachable.
+
+    `retain=True` for inbox messages (see vortexia_client.py's VortexiaClient.send
+    for the full rationale): plain MQTT delivery only reaches subscribers connected
+    at that instant, which silently loses a message sent while nobody happened to be
+    listening — e.g. `las agent inject` firing while the recipient's Claude Code
+    session isn't running yet. Retained delivery means their next
+    GET /agents/{name}/vortexia/poll (via vortexia_client.poll_inbox, which clears
+    the retained flag once read) still finds it. Not used for the TTS speak topic —
+    a stale replayed "speak this" the moment a new widget connects would be wrong.
+    """
+    try:
+        import paho.mqtt.publish as _mqtt_publish
+        _mqtt_publish.single(
+            topic,
+            payload=json.dumps(envelope),
+            qos=1,
+            retain=retain,
+            hostname="localhost",
+            port=_vortexia_mqtt_port(),
+        )
+        return True
+    except Exception as exc:
+        print(f"[vortexia] publish to {topic!r} failed (is vortexia running?): {exc}", flush=True)
+        return False
+
+
+def _vortexia_set_presence_online(name: str) -> bool:
+    """One-shot retained presence publish — the CLI/skill 'register' call can't hold
+    a persistent MQTT connection open across a session, so we publish the retained
+    'online' payload directly instead of keeping a VortexiaClient connected."""
+    try:
+        import paho.mqtt.publish as _mqtt_publish
+        _mqtt_publish.single(
+            vx.presence_topic(name),
+            payload="online",
+            qos=1,
+            retain=True,
+            hostname="localhost",
+            port=_vortexia_mqtt_port(),
+        )
+        return True
+    except Exception as exc:
+        print(f"[vortexia] presence publish for {name!r} failed (is vortexia running?): {exc}", flush=True)
+        return False
+
+
+def _vortexia_poll_inbox(name: str, timeout: float = 2.0) -> list[dict]:
+    """Drain whatever's waiting in `name`'s vortexia inbox. Fails soft (returns [])."""
+    try:
+        return vx.poll_inbox(name, host="localhost", port=_vortexia_mqtt_port(), timeout=timeout)
+    except Exception as exc:
+        print(f"[vortexia] poll_inbox for {name!r} failed (is vortexia running?): {exc}", flush=True)
+        return []
+
+
 # ── TTS drainer (background thread) ──────────────────────────────────────────
 
 def tts_drainer():
@@ -111,8 +195,23 @@ def tts_drainer():
         if voice not in NICE_VOICE_NAMES:
             print(f"[tts] skipping unknown voice {voice!r} for {name!r}", flush=True)
             continue
-        if text:
-            subprocess.run(["say", "-v", voice, text], check=False)
+        if not text:
+            continue
+        # Publish to vortexia instead of shelling out to `say`. Whichever
+        # Electron widget is running for `name` picks this up off las/speak
+        # and does the actual TTS playback (Web Speech API) — see the note
+        # appended to vortexia/PROTOCOL.md. Nothing currently produces sound
+        # from this path until that widget exists.
+        envelope = {
+            "from": "queue",
+            "to": name,
+            "source": "system",
+            "kind": "speak",
+            "text": text,
+            "voice": voice,
+            "ts": int(time.time() * 1000),
+        }
+        _vortexia_publish(SPEAK_TOPIC, envelope)
 
 
 threading.Thread(target=tts_drainer, daemon=True).start()
@@ -166,10 +265,12 @@ class RenameRequest(BaseModel):
 
 class InjectRequest(BaseModel):
     message:     str = Field(max_length=10000)
-    source:      str           = "voice"   # "voice" | "agent" | "external"
+    source:      str           = "voice"   # "voice" | "agent" | "external" | "raw"
     from_agent:  Optional[str] = None
-    tty:         Optional[str] = None      # specific TTY to inject into (skips auto-discovery)
-    queue:       bool          = True      # enqueue if agent is offline, deliver on next live inject
+    # `tty` / `queue` are no longer meaningful — delivery is 100% vortexia now
+    # (no TTY concept, no local pending-queue file). Kept out of the model on
+    # purpose; any caller still sending them (e.g. an unrebuilt widget) is
+    # unaffected since pydantic ignores unknown fields by default.
 
 
 class TerminalRequest(BaseModel):
@@ -371,40 +472,12 @@ def clear_queue():
     return {"ok": True}
 
 
-# ── pending inject queue ──────────────────────────────────────────────────────
-
-def _pending_path(agent_path: str) -> Path:
-    return Path(agent_path) / "session" / "pending-injects.json"
-
-
-def _enqueue_pending(agent_path: str, text: str, source: str) -> None:
-    p = _pending_path(agent_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    queue = load_json(p, [])
-    queue.append({
-        "text": text,
-        "source": source,
-        "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    })
-    save_json(p, queue)
-
-
-def _drain_pending(agent_path: str, tty: str) -> int:
-    """Inject all queued messages into tty and clear the queue. Returns count delivered."""
-    p = _pending_path(agent_path)
-    queue = load_json(p, [])
-    if not queue:
-        return 0
-    delivered = 0
-    for item in queue:
-        result = _inject_via_iterm(tty, item["text"])
-        if result and result["success"]:
-            delivered += 1
-    save_json(p, [])
-    return delivered
-
-
 # ── agent inject ─────────────────────────────────────────────────────────────
+# Delivery is 100% vortexia now (see the "vortexia integration" section
+# above) — no AppleScript/TTY injection, no on-disk pending-message queue.
+# The old file-based pending queue (session/pending-injects.json, drained
+# into a live TTY on the next inject) is gone; vortexia's own inbox is the
+# queue now, drained via GET /agents/{name}/vortexia/poll (see below).
 
 from cli.path_utils import find_nearest_agent_dir as _find_nearest_agent_dir
 
@@ -589,7 +662,12 @@ tell application "iTerm2"
                     set theTab to tab ti of theWin
                     set theSes to session si of theTab
                     set index of theWin to 1
-                    set current tab of theWin to theTab
+                    -- NOT "set current tab of theWin to theTab" — that raises
+                    -- "AppleEvent handler failed (-10000)" on this iTerm2
+                    -- version (reproduced directly via osascript). Selecting
+                    -- the session already switches to its parent tab per
+                    -- iTerm2's own scripting dictionary, so the explicit
+                    -- current-tab assignment was both redundant and broken.
                     tell theSes to select
                     activate
                     return "ok|sessions=" & sessionCount & "|ttys=" & seenTTYs
@@ -645,18 +723,22 @@ def focus_agent_terminal(name: str):
 @app.get("/debug/iterm_ttys")
 def debug_iterm_ttys():
     """List all TTYs currently known to iTerm2 via AppleScript."""
+    # `result` shadows AppleScript's own implicit `result` variable (holds
+    # the value of the last executed statement) — using it as a normal list
+    # broke `set end of result to ...` with "Can't set end of ... (-10006)",
+    # reproduced directly via osascript. Renamed to `ttyList`.
     script = """
-set result to {}
+set ttyList to {}
 tell application "iTerm2"
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in sessions of t
-                set end of result to (tty of s)
+                set end of ttyList to (tty of s)
             end repeat
         end repeat
     end repeat
 end tell
-return result
+return ttyList
 """
     out = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=5)
     raw = out.stdout.strip()
@@ -699,102 +781,105 @@ def get_agent_ttys(name: str):
     return {"ttys": _find_all_claude_ttys(path)}
 
 
-@app.post("/agents/{name}/inject")
-def inject_message(name: str, body: InjectRequest):
-    if body.tty is not None:
-        tty_dev = body.tty if body.tty.startswith("/") else f"/dev/{body.tty}"
-        if not TTY_RE.match(tty_dev):
-            raise HTTPException(status_code=404, detail="Invalid tty")
-
-    registry = load_json(REGISTRY_FILE, {})
-    if name not in registry:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    path    = registry[name].get("path", "")
-    message = body.message
-
-    # Build context prefix so the agent always knows who's talking
-    sender = body.from_agent
-    if body.source == "raw":
-        terminal_text = message
-    elif body.source == "agent" and sender:
-        terminal_text = f"[Message from {sender}]: {message}"
-    elif body.source == "voice":
-        terminal_text = f"[Widget Voice]: {message}"
-    elif sender:
-        terminal_text = f"[External: {sender}]: {message}"
-    else:
-        terminal_text = f"[External]: {message}"
-
-    # Find the live claude session and inject directly into the terminal
-    tty = body.tty or _find_claude_tty(path)
-
-    queued   = False
-    drained  = 0
-    if tty:
-        # Drain any pending messages before the new one
-        drained = _drain_pending(path, tty)
-        result  = _inject_via_iterm(tty, terminal_text)
-        injected = result["success"] if result else False
-    else:
-        result   = None
-        injected = False
-        if body.queue:
-            _enqueue_pending(path, terminal_text, body.source)
-            queued = True
-
-    # ── structured inject log ──────────────────────────────────────────────────
-    log_path = Path(path) / "session" / "inject.log"
-    if log_path.parent.exists():
-        ts_full = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        preview = terminal_text[:60].replace("\n", " ") + ("…" if len(terminal_text) > 60 else "")
-        if result:
-            status = "OK" if result["success"] else f"FAIL(rc={result['returncode']})"
-            log_line = (
-                f"[{ts_full}] name={name} source={body.source} "
-                f"tty={result['tty']} len={result['text_len']} "
-                f"delay={result['delay_s']}s status={status} "
-                f"stdout={result['stdout']!r} stderr={result['stderr']!r} "
-                f"msg={preview!r}\n"
-            )
-        else:
-            q_tag = "queued" if queued else "dropped"
-            log_line = (
-                f"[{ts_full}] name={name} source={body.source} "
-                f"tty=not_found — {q_tag} msg={preview!r}\n"
-            )
-        with open(log_path, "a") as f:
-            f.write(log_line)
-
-    return {
-        "ok":      True,
-        "injected": injected,
-        "queued":   queued,
-        "drained":  drained,
-        "tty":      tty or "not found",
-    }
+class TtyWriteRequest(BaseModel):
+    text: str = Field(max_length=10000)
+    tty:  Optional[str] = None  # write to this one TTY only; omit to write to all found
 
 
-@app.get("/agents/{name}/pending")
-def get_pending(name: str):
-    registry = load_json(REGISTRY_FILE, {})
-    if name not in registry:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    path  = registry[name].get("path", "")
-    queue = load_json(_pending_path(path), [])
-    return {"count": len(queue), "messages": queue}
+@app.post("/agents/{name}/tty-write")
+def write_to_tty(name: str, body: TtyWriteRequest):
+    """Type `text` directly into the agent's live iTerm2 session(s) — raw
+    terminal injection via _inject_via_iterm, NOT vortexia messaging. This is
+    the mechanism the widget's Clear button used (typing a literal "/clear")
+    before the inter-agent inject pipeline was migrated to vortexia; that
+    migration only retired cross-agent *messaging*, not this local
+    "type into my own linked terminal" action, which still works exactly as
+    before (mac-only, via iTerm2 AppleScript).
 
-
-@app.delete("/agents/{name}/pending")
-def clear_pending(name: str):
+    An agent can have more than one live terminal open at once (see
+    _find_all_claude_ttys) — with no `tty` given, this writes to ALL of them.
+    """
     registry = load_json(REGISTRY_FILE, {})
     if name not in registry:
         raise HTTPException(status_code=404, detail="Agent not found")
     path = registry[name].get("path", "")
-    p    = _pending_path(path)
-    count = len(load_json(p, []))
-    save_json(p, [])
-    return {"ok": True, "cleared": count}
+    ttys = [body.tty] if body.tty else _find_all_claude_ttys(path)
+    results = [_inject_via_iterm(tty, body.text) for tty in ttys]
+    written = [r["tty"] for r in results if r["success"]]
+    return {"ok": True, "written": written, "ttys_found": len(ttys)}
+
+
+@app.post("/agents/{name}/inject")
+def inject_message(name: str, body: InjectRequest):
+    """Send a message to `name` over vortexia (las/agent/<name>/inbox).
+
+    No terminal, no TTY, no AppleScript — this used to type directly into
+    the agent's live iTerm2 session; now it publishes an envelope to
+    vortexia and returns once the publish succeeds (or fails soft if
+    vortexia isn't running). The recipient only actually sees it if their
+    `/las-agent` skill happens to be polling at that moment (see
+    GET /agents/{name}/vortexia/poll) — messages aren't retained, matching
+    vortexia's own documented delivery semantics.
+    """
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    sender = body.from_agent or body.source or "external"
+    envelope = {
+        "from": sender,
+        "to": name,
+        "source": body.source,
+        "text": body.message,
+        "ts": int(time.time() * 1000),
+    }
+    delivered = _vortexia_publish(vx.inbox_topic(name), envelope, retain=True)
+
+    # ── structured inject log ──────────────────────────────────────────────────
+    path = registry[name].get("path", "")
+    log_path = Path(path) / "session" / "inject.log"
+    if log_path.parent.exists():
+        ts_full = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        preview = body.message[:60].replace("\n", " ") + ("…" if len(body.message) > 60 else "")
+        status  = "OK" if delivered else "FAIL(vortexia unreachable)"
+        with open(log_path, "a") as f:
+            f.write(
+                f"[{ts_full}] name={name} source={body.source} from={sender} "
+                f"via=vortexia status={status} msg={preview!r}\n"
+            )
+
+    return {"ok": True, "injected": delivered, "queued": False, "via": "vortexia"}
+
+
+@app.post("/agents/{name}/vortexia/register")
+def vortexia_register(name: str):
+    """Called by the /las-agent skill at session start. Publishes a retained
+    'online' presence payload for `name` on vortexia (las/agent/<name>/presence).
+
+    This is a one-shot publish, not a persistent VortexiaClient.register()
+    connection — a freshly-invoked `las` CLI process can't stay connected for
+    the life of a Claude Code session, so there's no LWT here. Presence just
+    reflects "was seen recently", not "is connected right now".
+    """
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    ok = _vortexia_set_presence_online(name)
+    return {"ok": True, "registered": ok, "via": "vortexia"}
+
+
+@app.get("/agents/{name}/vortexia/poll")
+def vortexia_poll(name: str, timeout: float = 2.0):
+    """Drain `name`'s vortexia inbox for up to `timeout` seconds and return
+    whatever arrived. Called by the /las-agent skill at session start, replacing
+    the old live-TTY-injection model (which needed no polling because the
+    backend typed straight into an already-open terminal)."""
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    timeout = max(0.1, min(timeout, 10.0))
+    messages = _vortexia_poll_inbox(name, timeout=timeout)
+    return {"count": len(messages), "messages": messages}
 
 
 # ── agent mute ────────────────────────────────────────────────────────────────

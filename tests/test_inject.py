@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
 """
-Tests for POST /agents/{name}/inject endpoint.
+Tests for POST /agents/{name}/inject and the vortexia messaging path
+(GET /agents/{name}/vortexia/poll, POST /agents/{name}/vortexia/register).
 
-Runs against a disposable, throwaway agent + terminal created just for this
-test run — never against a real live agent's terminal. A fake "claude"
-process (argv0 rewritten via `exec -a claude`) is launched in a brand-new
-iTerm2 window backed by `cat`, which makes it indistinguishable to the
-backend's process-discovery logic (ps/lsof) from a real agent session, while
-just appending whatever gets injected into a local capture.log we can assert
-on. The window, process, temp dir, and agent registration are all torn down
-at the end (best-effort, even on failure).
+Inject used to type directly into a disposable iTerm2/AppleScript probe
+terminal — that mechanism is gone. Delivery is now 100% vortexia (a
+sibling MQTT broker, see ../vortexia/PROTOCOL.md): /inject publishes an
+envelope to las/agent/<name>/inbox, and a receiver only sees it if
+something is polling that inbox at the time (vortexia doesn't retain
+inbox/broadcast messages — same semantics as vortexia's own poll_inbox()
+helper).
 
-Usage: python3 tests/test_inject.py
+These tests run against the real, live backend at localhost:8700 and
+(for the delivery test) the real vortexia broker it talks to — nothing is
+mocked. If vortexia isn't running, the delivery test is skipped rather
+than failed, since the backend is documented to fail soft in that case.
+
+Usage: python3 tests/test_inject.py  (or via pytest)
 """
 import json
-import os
-import shutil
-import signal
-import subprocess
 import sys
-import tempfile
+import threading
 import time
-import urllib.request
 import urllib.error
-from pathlib import Path
+import urllib.request
 
 BACKEND = "http://localhost:8700"
-PROBE_NAME = "__e2e_inject_probe__"
+SENDER_NAME   = "__e2e_inject_sender__"
+RECEIVER_NAME = "__e2e_inject_receiver__"
 PASS = 0
 FAIL = 0
 
@@ -60,6 +61,16 @@ def post(path: str, body: dict, timeout: int = 5) -> tuple[int, dict]:
         return 0, {"error": str(e)}
 
 
+def get(path: str, timeout: int = 8) -> tuple[int, dict]:
+    try:
+        with urllib.request.urlopen(f"{BACKEND}{path}", timeout=timeout) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, {}
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
 def delete(path: str, timeout: int = 5) -> int:
     req = urllib.request.Request(f"{BACKEND}{path}", method="DELETE")
     try:
@@ -69,88 +80,24 @@ def delete(path: str, timeout: int = 5) -> int:
         return 0
 
 
-def get(path: str, timeout: int = 3) -> dict:
+def _backend_reachable() -> bool:
     try:
-        with urllib.request.urlopen(f"{BACKEND}{path}", timeout=timeout) as r:
-            return json.loads(r.read())
-    except Exception as e:
-        print(f"FAIL  backend unreachable: {e}")
-        sys.exit(1)
+        with urllib.request.urlopen(f"{BACKEND}/health", timeout=3):
+            return True
+    except Exception:
+        return False
 
 
-# ── disposable probe terminal ────────────────────────────────────────────────
-# A real iTerm2 window running a process that *looks* like a claude session
-# (ps shows command="claude") so the backend's real discovery/injection path
-# runs unmodified, but nothing it does can touch a real agent.
-
-def _osascript(script: str) -> str:
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
-    if result.returncode != 0:
-        raise RuntimeError(f"osascript failed: {result.stderr.strip()}")
-    return result.stdout.strip()
+def setup_probes():
+    for name in (SENDER_NAME, RECEIVER_NAME):
+        status, _ = post("/agents", {"name": name, "voice": "Samantha", "path": f"/tmp/{name}"})
+        if status != 200:
+            raise RuntimeError(f"failed to register probe agent {name!r}: HTTP {status}")
 
 
-def setup_probe():
-    tmp_dir = Path(tempfile.mkdtemp(prefix="e2e_inject_probe_")).resolve()
-    (tmp_dir / "session").mkdir()
-    (tmp_dir / ".agent.json").write_text(
-        json.dumps({"name": PROBE_NAME, "voice": "Samantha", "locale": "en-US"})
-    )
-    launcher = tmp_dir / "run_fake_claude.sh"
-    launcher.write_text(
-        f'#!/bin/bash\ncd "{tmp_dir}"\nexec -a claude cat >> "{tmp_dir}/capture.log"\n'
-    )
-    launcher.chmod(0o755)
-
-    window_id = int(_osascript(
-        f'tell application "iTerm2"\n'
-        f'    create window with default profile command "bash \\"{launcher}\\""\n'
-        f'    return id of current window\n'
-        f'end tell'
-    ))
-
-    # Register the probe as a temp agent and wait for the backend to discover
-    # the fake claude process's tty (mirrors real agent startup timing).
-    status, _ = post("/agents", {"name": PROBE_NAME, "voice": "Samantha", "path": str(tmp_dir)})
-    if status != 200:
-        raise RuntimeError(f"failed to register probe agent: HTTP {status}")
-
-    pid = None
-    tty = None
-    for _ in range(20):
-        ttys = get(f"/agents/{PROBE_NAME}/ttys").get("ttys", [])
-        if ttys:
-            tty = ttys[0]
-            break
-        time.sleep(0.25)
-    if tty is None:
-        raise RuntimeError("backend never discovered the probe's fake claude process")
-
-    # Resolve the pid for cleanup (best-effort — not required for tests to run).
-    ps_out = subprocess.run(["ps", "-ax", "-o", "pid=,tty=,command="], capture_output=True, text=True).stdout
-    for line in ps_out.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) == 3 and parts[2].strip() == "claude" and tty in parts[1]:
-            pid = int(parts[0])
-            break
-
-    return {"tmp_dir": tmp_dir, "window_id": window_id, "pid": pid, "tty": tty}
-
-
-def teardown_probe(ctx: dict):
-    delete(f"/agents/{PROBE_NAME}")
-    if ctx.get("pid"):
-        try:
-            os.kill(ctx["pid"], signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    for _ in range(3):
-        try:
-            _osascript(f'tell application "iTerm2" to close window id {ctx["window_id"]}')
-            break
-        except RuntimeError:
-            time.sleep(0.3)
-    shutil.rmtree(ctx["tmp_dir"], ignore_errors=True)
+def teardown_probes():
+    delete(f"/agents/{SENDER_NAME}")
+    delete(f"/agents/{RECEIVER_NAME}")
 
 
 # ── tests ─────────────────────────────────────────────────────────────────────
@@ -164,24 +111,25 @@ def test_unknown_agent_returns_404():
 
 
 def test_inject_response_shape():
-    status, body = post(f"/agents/{PROBE_NAME}/inject", {"message": "shape test"})
+    status, body = post(f"/agents/{RECEIVER_NAME}/inject", {"message": "shape test"})
     if status != 200:
         fail("response shape", f"HTTP {status}")
         return
-
-    for key in ("ok", "injected", "tty"):
+    for key in ("ok", "injected", "via"):
         if key not in body:
             fail("response shape", f"missing field '{key}'")
             return
-    if "inbox" in body:
-        fail("response shape", "inbox field should not exist — inbox was removed")
+    if body.get("via") != "vortexia":
+        fail("response shape", f"expected via='vortexia', got {body.get('via')!r}")
         return
-    ok("response contains ok, injected, tty (no inbox)")
+    if "tty" in body:
+        fail("response shape", "tty field should not exist — TTY injection was removed")
+        return
+    ok("response contains ok, injected, via=vortexia (no tty)")
 
 
 def test_voice_source_returns_ok():
-    marker = "__voice_prefix_test__"
-    status, body = post(f"/agents/{PROBE_NAME}/inject", {"message": marker, "source": "voice"})
+    status, body = post(f"/agents/{RECEIVER_NAME}/inject", {"message": "__voice_test__", "source": "voice"})
     if status == 200 and body.get("ok"):
         ok("voice source inject returns ok=true")
     else:
@@ -189,10 +137,9 @@ def test_voice_source_returns_ok():
 
 
 def test_agent_source_returns_ok():
-    marker = "__agent_prefix_test__"
     status, body = post(
-        f"/agents/{PROBE_NAME}/inject",
-        {"message": marker, "source": "agent", "from_agent": "TestBot"},
+        f"/agents/{RECEIVER_NAME}/inject",
+        {"message": "__agent_test__", "source": "agent", "from_agent": SENDER_NAME},
     )
     if status == 200 and body.get("ok"):
         ok("agent source inject returns ok=true")
@@ -201,7 +148,7 @@ def test_agent_source_returns_ok():
 
 
 def test_newlines_in_message_dont_crash():
-    status, _ = post(f"/agents/{PROBE_NAME}/inject", {"message": "line1\nline2\r\nline3"})
+    status, _ = post(f"/agents/{RECEIVER_NAME}/inject", {"message": "line1\nline2\r\nline3"})
     if status in (200, 422):
         ok("newlines in message don't cause 500")
     else:
@@ -209,94 +156,119 @@ def test_newlines_in_message_dont_crash():
 
 
 def test_empty_message_accepted():
-    status, _ = post(f"/agents/{PROBE_NAME}/inject", {"message": ""})
+    status, _ = post(f"/agents/{RECEIVER_NAME}/inject", {"message": ""})
     if status == 200:
         ok("empty message accepted without error")
     else:
         fail("empty message accepted without error", f"HTTP {status}")
 
 
-def test_raw_source_lands_in_real_terminal(tmp_dir: Path):
-    """The strongest e2e check: verify the message actually arrived in the
-    disposable terminal's real capture log, delivered via real AppleScript/
-    iTerm2 — not just that the backend claims success."""
-    marker = "__raw_prefix_test__"
-    capture_log = tmp_dir / "capture.log"
-    before_size = capture_log.stat().st_size if capture_log.exists() else 0
-
-    status, body = post(f"/agents/{PROBE_NAME}/inject", {"message": marker, "source": "raw"})
-    if not (status == 200 and body.get("ok") and body.get("injected")):
-        fail("raw source actually delivered to terminal", f"HTTP {status} body={body}")
-        return
-
-    time.sleep(0.5)
-    if not capture_log.exists():
-        fail("raw source actually delivered to terminal", "capture.log not found")
-        return
-    with open(capture_log) as f:
-        f.seek(before_size)
-        new_text = f.read()
-    if marker in new_text:
-        ok("raw source: message actually landed in the real terminal (verified via capture.log)")
+def test_oversized_message_rejected():
+    status, _ = post(f"/agents/{RECEIVER_NAME}/inject", {"message": "x" * 20000})
+    if status == 422:
+        ok("oversized message rejected with 422")
     else:
-        fail("raw source actually delivered to terminal", f"capture.log new bytes: {new_text!r}")
+        fail("oversized message rejected with 422", f"HTTP {status}")
 
 
-def test_audit_log_confirms_no_prefix(tmp_dir: Path):
-    marker = "__audit_log_prefix_test__"
-    log_path = tmp_dir / "session" / "inject.log"
-    before_size = log_path.stat().st_size if log_path.exists() else 0
+def test_message_actually_arrives_via_vortexia():
+    """The strongest e2e check: publish while the receiver is polling and
+    confirm the exact envelope shows up — real MQTT round-trip, nothing
+    mocked. Requires vortexia to actually be running; skipped otherwise."""
+    marker = f"__e2e_marker_{int(time.time() * 1000)}__"
+    result_holder: dict = {}
 
-    status, body = post(f"/agents/{PROBE_NAME}/inject", {"message": marker, "source": "raw"})
-    if not (status == 200 and body.get("ok")):
-        fail("audit log confirms no prefix", f"HTTP {status} body={body}")
+    def do_poll():
+        status, body = get(f"/agents/{RECEIVER_NAME}/vortexia/poll?timeout=3")
+        result_holder["status"] = status
+        result_holder["body"] = body
+
+    t = threading.Thread(target=do_poll)
+    t.start()
+    time.sleep(0.4)  # let the poll subscribe before we publish
+    inject_status, inject_body = post(
+        f"/agents/{RECEIVER_NAME}/inject",
+        {"message": marker, "source": "agent", "from_agent": SENDER_NAME},
+    )
+    t.join(timeout=5)
+
+    if not inject_body.get("injected"):
+        fail("message arrives via vortexia (real round-trip)",
+             "inject reported injected=false — is vortexia running? (`vortexia start` in the vortexia repo)")
         return
 
-    if not log_path.exists():
-        fail("audit log confirms no prefix", "log file not found")
+    messages = result_holder.get("body", {}).get("messages", [])
+    matches = [m for m in messages if m.get("text") == marker]
+    if not matches:
+        fail("message arrives via vortexia (real round-trip)", f"marker not found in polled messages: {messages}")
         return
-    with open(log_path) as f:
-        f.seek(before_size)
-        new_lines = f.read()
-    if f"msg='{marker}'" in new_lines and "source=raw" in new_lines:
-        ok("inject.log confirms message injected without prefix")
+    m = matches[0]
+    if m.get("from") == SENDER_NAME and m.get("to") == RECEIVER_NAME:
+        ok("message actually arrived via vortexia (real MQTT round-trip, envelope verified)")
     else:
-        fail("inject.log confirms message injected without prefix", f"new log lines: {new_lines!r}")
+        fail("message arrives via vortexia (real round-trip)", f"envelope fields wrong: {m}")
 
 
-def test_inject_sends_return_via_iterm():
-    """Verify _inject_via_iterm sends Enter within the iTerm2 tell block (not via System Events)."""
-    main_py = Path(__file__).parent.parent / "backend" / "main.py"
-    text = main_py.read_text()
-    assert "ASCII character 13" in text, \
-        "_inject_via_iterm does not use ASCII character 13 — Enter won't be pressed after injection"
-    assert not ("System Events" in text and "key code 36" in text), \
-        "_inject_via_iterm still uses System Events key code 36"
+def test_register_sets_presence_online():
+    status, body = post(f"/agents/{SENDER_NAME}/vortexia/register", {})
+    if status == 200 and "registered" in body:
+        ok("vortexia/register returns registered field")
+    else:
+        fail("vortexia/register returns registered field", f"HTTP {status} body={body}")
+
+
+def test_audit_log_records_via_vortexia():
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp(prefix="e2e_inject_audit_"))
+    (tmp / "session").mkdir()
+    audit_name = "__e2e_inject_audit__"
+    post("/agents", {"name": audit_name, "voice": "Samantha", "path": str(tmp)})
+    try:
+        marker = "__audit_marker__"
+        status, body = post(f"/agents/{audit_name}/inject", {"message": marker, "source": "raw"})
+        if status != 200:
+            fail("audit log records via=vortexia", f"HTTP {status} body={body}")
+            return
+        log_path = tmp / "session" / "inject.log"
+        if not log_path.exists():
+            fail("audit log records via=vortexia", "inject.log not written")
+            return
+        text = log_path.read_text()
+        if "via=vortexia" in text and f"msg={marker!r}" in text:
+            ok("inject.log records via=vortexia delivery")
+        else:
+            fail("audit log records via=vortexia", f"unexpected log contents: {text!r}")
+    finally:
+        delete(f"/agents/{audit_name}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("=== Inject Endpoint Tests ===\n")
-    get("/health")
+    print("=== Inject / vortexia messaging tests ===\n")
+    if not _backend_reachable():
+        print("FAIL  backend unreachable at", BACKEND)
+        sys.exit(1)
 
     test_unknown_agent_returns_404()
-    test_inject_sends_return_via_iterm()
 
-    print("\n→ Setting up disposable probe terminal (throwaway agent, closed at the end)...")
-    ctx = setup_probe()
-    print(f"  probe agent={PROBE_NAME!r} tty={ctx['tty']} tmp_dir={ctx['tmp_dir']}\n")
+    print("\n→ Registering disposable probe agents (torn down at the end)...")
+    setup_probes()
     try:
         test_inject_response_shape()
         test_voice_source_returns_ok()
         test_agent_source_returns_ok()
         test_newlines_in_message_dont_crash()
         test_empty_message_accepted()
-        test_raw_source_lands_in_real_terminal(ctx["tmp_dir"])
-        test_audit_log_confirms_no_prefix(ctx["tmp_dir"])
+        test_oversized_message_rejected()
+        test_register_sets_presence_online()
+        test_message_actually_arrives_via_vortexia()
+        test_audit_log_records_via_vortexia()
     finally:
-        print("\n→ Tearing down probe terminal...")
-        teardown_probe(ctx)
+        print("\n→ Unregistering probe agents...")
+        teardown_probes()
 
     print(f"\n══════════════════════════════════")
     print(f"Results: {PASS} passed, {FAIL} failed")

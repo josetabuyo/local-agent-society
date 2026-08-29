@@ -1,0 +1,67 @@
+{
+  "name": "widget-electron",
+  "version": "0.1.0",
+  "description": "Electron replacement for the Local Agent Society native Swift widget (widget/tray.swift). Cutover complete: this is now the widget `las start`/`las widget`/`las stop` launch and control.",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/",
+    "build": "electron-builder --mac --dir"
+  },
+  "dependencies": {
+    "@xenova/transformers": "^2.17.2",
+    "electron-store": "^8.2.0",
+    "vortexia": "file:/Users/josetabuyo/Development/vortexia"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "build": {
+    "appId": "com.localagentsociety.electron",
+    "productName": "Local Agent Society",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "tray.js",
+      "lib/**/*",
+      "renderer/**/*",
+      "node_modules/**/*",
+      "!node_modules/electron-builder/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**/*",
+      "node_modules/onnxruntime-common/**/*",
+      "node_modules/@xenova/transformers/**/*"
+    ],
+    "icon": "build/icon.icns",
+    "mac": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.utilities",
+      "identity": null,
+      "protocols": [
+        {
+          "name": "Local Agent Society URL Scheme",
+          "schemes": [
+            "localagentsociety"
+          ]
+        }
+      ]
+    }
+  }
+}

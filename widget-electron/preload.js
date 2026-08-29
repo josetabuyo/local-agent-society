@@ -1,0 +1,87 @@
+'use strict';
+
+/**
+ * contextBridge surface for the renderer. Renderer runs with
+ * contextIsolation + sandbox, no direct Node/Electron access — everything it
+ * needs comes through here.
+ */
+
+const { contextBridge, ipcRenderer } = require('electron');
+const { pickVoice } = require('./lib/voiceHash');
+
+contextBridge.exposeInMainWorld('las', {
+  /** Deterministic voice selection — see lib/voiceHash.js. */
+  pickVoice: (name, locale, voices) => pickVoice(name, locale, voices),
+
+  /** Agent name this window was opened for, read from ?agent= query string. */
+  getAgentName: () => new URLSearchParams(window.location.search).get('agent') || '',
+
+  getPrefs: (name) => ipcRenderer.invoke('prefs:get', name),
+  setPrefs: (name, patch) => ipcRenderer.invoke('prefs:set', name, patch),
+
+  /** Grow/shrink this window by (dw, dh) pixels — see .resize-handle in widget.css. */
+  resizeBy: (dw, dh) => ipcRenderer.send('window:resize-by', dw, dh),
+
+  /** Grow the window to fit an overlay panel (settings/commands/TTY picker),
+   * or shrink it back to its remembered compact size. Idempotent. */
+  setExpanded: (expanded) => ipcRenderer.send('window:set-expanded', expanded),
+
+  /** "Expand when hidden" (retired Swift "Expand on space change"): balloon
+   * to fill the screen, click-through, when occluded/off-Space; shrink back
+   * when visible again. See main.js's window:set-occlusion-expanded comment. */
+  setOcclusionExpanded: (expanded) => ipcRenderer.send('window:set-occlusion-expanded', expanded),
+
+  /** @param {(envelope: object, topic: string) => void} cb */
+  onVortexiaMessage: (cb) => {
+    ipcRenderer.on('vortexia:message', (_event, envelope, topic) => cb(envelope, topic));
+  },
+
+  /** @param {(status: {connected: boolean, error?: string}) => void} cb */
+  onVortexiaStatus: (cb) => {
+    ipcRenderer.on('vortexia:status', (_event, status) => cb(status));
+  },
+
+  // ── face buttons ───────────────────────────────────────────────────────
+
+  /** This agent's registered voice + its locale (e.g. "es-MX"), from the backend. */
+  getAgentInfo: (name) => ipcRenderer.invoke('agent:info', name),
+
+  /** Generalized "publish `text` to `toName`'s vortexia inbox" primitive. */
+  vortexiaSend: (toName, text) => ipcRenderer.invoke('vortexia:send', toName, text),
+
+  /** Mic dictation -> this agent's own inbox (the faithful equivalent of the
+   * retired live-TTY injectToSession). Thin wrapper over vortexiaSend. */
+  sendToSelf: (name, text) => ipcRenderer.invoke('vortexia:send', name, text),
+
+  /** Local Whisper transcription (main.js's "audio transcription" section) —
+   * replaces the broken Electron SpeechRecognition/webkitSpeechRecognition.
+   * `pcmBuffer` must be an ArrayBuffer of mono Float32 PCM samples at 16kHz
+   * (see renderer/widget.js's blobToMono16kPCM). Returns
+   * {ok:true, text} or {ok:false, error}. */
+  transcribeAudio: (pcmBuffer, languageHint) => ipcRenderer.invoke('audio:transcribe', pcmBuffer, languageHint),
+
+  /** Progress/state pushes during transcribeAudio (model download/load vs.
+   * actual inference), so the mic button isn't silent during first-run
+   * latency. @param {(status: {state:string, progress?:number, file?:string}) => void} cb */
+  onAudioStatus: (cb) => {
+    ipcRenderer.on('audio:status', (_event, status) => cb(status));
+  },
+
+  /** Command-palette persistence (electron-store, per agent). */
+  getCommands: (name) => ipcRenderer.invoke('commands:get', name),
+  setCommands: (name, commands) => ipcRenderer.invoke('commands:set', name, commands),
+
+  /** Open a real terminal window (kind "openTerminal" commands). Fire-and-forget. */
+  openTerminal: (cwd, command) => ipcRenderer.send('terminal:open', { cwd, command }),
+
+  /** Focus/scope button: proxied backend calls (still AppleScript-based on
+   * the backend side, untouched — see CLAUDE.md). */
+  focusAgent: (name) => ipcRenderer.invoke('agent:focus', name),
+  getAgentTtys: (name) => ipcRenderer.invoke('agent:ttys', name),
+  pinTty: (name, tty) => ipcRenderer.invoke('agent:pin-tty', name, tty),
+
+  /** Clear button: types `text` (literally "/clear") into the agent's live
+   * linked terminal(s) — same AppleScript-via-iTerm write the Focus button
+   * uses to bring a terminal forward, not vortexia messaging. */
+  writeToTty: (name, text) => ipcRenderer.invoke('agent:tty-write', name, text),
+});

@@ -175,9 +175,9 @@ def focus(name):
 @agent.command("inject")
 @click.argument("name", shell_complete=complete_agent_names)
 @click.argument("message")
-@click.option("--from", "from_agent", default=None, help="Sender name shown in the terminal prefix")
+@click.option("--from", "from_agent", default=None, help="Sender name shown to the recipient")
 def inject(name, message, from_agent):
-    """Inject a message into a live agent terminal."""
+    """Send a message to another agent via vortexia (las/agent/<name>/inbox)."""
     payload = {
         "message": message,
         "source": "agent" if from_agent else "external",
@@ -186,16 +186,107 @@ def inject(name, message, from_agent):
         payload["from_agent"] = from_agent
     result = api.post(f"/agents/{name}/inject", payload)
     injected = result.get("injected", False)
-    queued   = result.get("queued", False)
-    drained  = result.get("drained", 0)
     if injected:
-        suffix = f" (+ {drained} queued drained)" if drained else ""
-        status = f"injected into terminal{suffix}"
-    elif queued:
-        status = "agent offline — queued for delivery when live"
+        status = "sent via vortexia"
     else:
-        status = "agent not live — not delivered"
+        status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
     click.echo(f"{name}: {status}")
+
+
+@agent.command("register")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def register(name):
+    """Announce presence on vortexia (las/agent/<name>/presence, retained online).
+
+    Called by the /las-agent skill at the start of a session. One-shot —
+    doesn't hold a live MQTT connection open, so it's safe to run from a
+    short-lived CLI process.
+    """
+    name = resolve_agent_name(name)
+    result = api.post(f"/agents/{name}/vortexia/register", {})
+    status = "online" if result.get("registered") else "vortexia unreachable — presence not set"
+    click.echo(f"{name}: {status}")
+
+
+@agent.command("poll")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+@click.option("--timeout", default=2.0, type=float, help="Seconds to wait for pending inbox messages.")
+def poll(name, timeout):
+    """Drain this agent's vortexia inbox and print any pending messages.
+
+    Called by the /las-agent skill at the start of a session — replaces the
+    old live-TTY injection model, which didn't need polling because the
+    backend typed straight into an already-open terminal.
+    """
+    name = resolve_agent_name(name)
+    result = api.get(f"/agents/{name}/vortexia/poll?timeout={timeout}")
+    messages = result.get("messages", [])
+    if not messages:
+        click.echo(f"{name}: no pending messages.")
+        return
+    click.echo(f"{name}: {len(messages)} pending message(s):")
+    for m in messages:
+        sender = m.get("from", "?")
+        text   = m.get("text", "")
+        click.echo(f"  [{sender}]: {text}")
+
+
+@agent.command("listen")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def listen(name):
+    """Stay connected and print each inbox message the INSTANT it arrives.
+
+    `las agent poll` only catches whatever happens to be waiting at the
+    moment you run it — good for "what did I miss since last time" at
+    session start, useless for hearing something the moment it's said.
+    `listen` is the live counterpart: it holds an MQTT connection open and
+    prints one JSON line per message as it arrives, forever, until killed.
+
+    This is meant to run under something that reacts to each printed line —
+    Claude Code's Monitor tool is the intended consumer (see
+    .claude/skills/las-agent/SKILL.md, which wires this up automatically at
+    session start so live delivery is standard behavior for every agent,
+    not something improvised per-conversation).
+
+    Each message is consumed on receipt (its retained flag is cleared, same
+    as `las agent poll` does) — while `listen` is running, it IS the live
+    delivery path, so a later `poll` won't see the same message again.
+    """
+    name = resolve_agent_name(name)
+    ports = api.get("/ports") or {}
+    mqtt_port = next((info.get("port") for info in ports.values() if info.get("app") == "vortexia-mqtt"), None)
+    if mqtt_port is None:
+        click.echo("vortexia unreachable — is `vortexia start` running?", err=True)
+        sys.exit(1)
+
+    # Reuse the backend's vendored vortexia client (topic naming, envelope
+    # shape) instead of duplicating that logic here.
+    backend_dir = Path(__file__).resolve().parents[2] / "backend"
+    sys.path.insert(0, str(backend_dir))
+    import vortexia_client as vx  # noqa: E402  (path must be set first)
+    import paho.mqtt.client as mqtt  # noqa: E402
+
+    topic = vx.inbox_topic(name)
+    client = mqtt.Client(client_id=f"las-listen-{name}-{os.getpid()}", protocol=mqtt.MQTTv311)
+
+    def on_connect(c, userdata, flags, rc):
+        c.subscribe(topic, qos=1)
+
+    def on_message(c, userdata, msg):
+        try:
+            envelope = json.loads(msg.payload.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return
+        click.echo(json.dumps(envelope))
+        sys.stdout.flush()
+        # Consume: clear the retained flag so a later `poll` doesn't see
+        # this same message again — this listener IS the delivery.
+        c.publish(topic, payload=None, qos=1, retain=True)
+
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect("localhost", mqtt_port, keepalive=30)
+    client.loop_forever()
 
 
 @agent.command("rename")
@@ -234,11 +325,18 @@ def rename(old_name, new_name, pronunciation):
 @agent.command("clean")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def clean(name):
-    """Inject /clear into the agent terminal (same as the broom button)."""
+    """Send a '/clear' message to the agent's vortexia inbox.
+
+    NOTE: this no longer types /clear into a live terminal (that required
+    AppleScript/TTY injection, now removed). It only actually clears
+    anything if something is polling the agent's inbox and interprets a
+    literal '/clear' message as a command — today that's just the
+    /las-agent skill surfacing it as a regular message.
+    """
     name = resolve_agent_name(name)
     result = api.post(f"/agents/{name}/inject", {"message": "/clear", "source": "raw"})
     injected = result.get("injected", False)
-    status = "cleared" if injected else "agent not live (not injected)"
+    status = "sent via vortexia" if injected else "vortexia unreachable — not delivered"
     click.echo(f"{name}: {status}")
 
 

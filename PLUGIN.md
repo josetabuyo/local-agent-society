@@ -1,6 +1,6 @@
 ---
 name: local-agent-society
-description: Multi-agent society for Claude Code. Each project folder gets a named agent that shares a port registry, communicates via live terminal injection, and announces via macOS TTS.
+description: Multi-agent society for Claude Code. Each project folder gets a named agent that shares a port registry, communicates via vortexia (a local MQTT broker), and announces via macOS TTS.
 version: 2.0.0
 author: josetabuyo
 requires: macOS, Swift 5.6+, Python 3.10+, Claude Code CLI
@@ -15,7 +15,7 @@ A system that turns Claude Code sessions into a coordinated society of agents.
 - **Agent** — a named identity tied to a project directory (e.g. `System`, `Garantido`), declared in that directory's `.agent.json`
 - **Voice** — each agent has one unique TTS voice with a fixed language
 - **Widget** — an always-on-top floating tray window showing the agent name on every Space
-- **Inject** — live delivery of a message into another agent's terminal via `las agent inject` or `POST /agents/{name}/inject`; there are no inbox files and no polling
+- **Inject** — send a message to another agent via `las agent inject` or `POST /agents/{name}/inject`, delivered over vortexia (`las/agent/{name}/inbox`), not a live terminal. Not retained — the recipient sees it only if polling (`las agent poll`), which the `/las-agent` skill does once at the start of each session
 
 ## Install
 
@@ -36,7 +36,7 @@ las agent new MyProject
 
 That's it. The command handles the rest: it writes `.agent.json`, registers the agent with the backend, assigns a voice, and opens the widget.
 
-Once registered, key day-to-day commands are `las agent inject NAME "msg"` (talk to another agent's terminal), `las widget [NAME]` (reopen a widget), and `las ports claim APP` (safely grab a port before starting a server).
+Once registered, key day-to-day commands are `las agent inject NAME "msg"` (send NAME a message over vortexia), `las agent poll` (drain your own vortexia inbox), `las widget [NAME]` (reopen a widget), and `las ports claim APP` (safely grab a port before starting a server).
 
 ## Skills
 
@@ -53,7 +53,8 @@ Backend runs at `http://localhost:8700`. Full endpoint list is in `README.md`; t
 | Endpoint | Description |
 |----------|-------------|
 | `GET /agents` | List all registered agents |
-| `POST /agents/{name}/inject` | Inject a message into a live agent terminal |
+| `POST /agents/{name}/inject` | Publish a message to the agent's vortexia inbox |
+| `GET /agents/{name}/vortexia/poll` | Drain the agent's vortexia inbox |
 | `GET /ports` | Port registry |
 | `GET /ports/free` | Get a free port |
 | `POST /ports/claim` | Atomically claim + register a port |

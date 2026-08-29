@@ -37,3 +37,20 @@ def test_agent_new_propagates_backend_failure(monkeypatch, tmp_path):
 
     # It must not have gotten far enough to write a bogus .agent.json either.
     assert not (tmp_path / "agentdir" / ".agent.json").exists()
+
+
+def test_agent_listen_exits_cleanly_when_vortexia_unreachable(monkeypatch):
+    """`las agent listen` must fail soft (clear message, exit 1) — not hang or
+    crash — when it can't find a vortexia-mqtt port in the registry. This is
+    the live-delivery counterpart to `las agent poll`: it's meant to be run
+    under Claude Code's Monitor tool (see .claude/skills/las-agent/SKILL.md),
+    so a hang here would hang the whole session-start flow instead of just
+    reporting "no live delivery available" and moving on.
+    """
+    monkeypatch.setattr(agents_mod.api, "get", lambda path: {})  # no vortexia-mqtt entry
+
+    runner = CliRunner()
+    result = runner.invoke(agents_mod.listen, ["testagent"])
+
+    assert result.exit_code != 0
+    assert "vortexia unreachable" in result.output.lower()

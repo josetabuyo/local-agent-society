@@ -153,28 +153,34 @@ def test_concurrent_ports_free_and_claim_no_duplicates(client, monkeypatch, app_
 
 # ── (c) input validation ───────────────────────────────────────────────────────
 
-def test_inject_rejects_invalid_tty(client, app_module):
+def test_inject_ignores_malformed_legacy_tty_field(client, app_module, monkeypatch):
     app_module_agents = client.post(
         "/agents", json={"name": "Bob", "voice": "Samantha", "path": "/tmp/bob"}
     )
     assert app_module_agents.status_code == 200
 
+    # `tty` is no longer a recognized field (TTY injection was removed) —
+    # pydantic silently ignores unknown fields, so this must NOT 404 or
+    # otherwise choke on the leftover field from an unrebuilt caller.
+    monkeypatch.setattr(app_module, "_vortexia_publish", lambda topic, envelope, retain=False: True)
     resp = client.post(
         "/agents/Bob/inject",
         json={"message": "hi", "tty": "not-a-tty; rm -rf /"},
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 200
 
 
-def test_inject_accepts_valid_tty_format(client, app_module, monkeypatch):
+def test_inject_ignores_unknown_legacy_fields(client, app_module, monkeypatch):
+    """A widget/caller still sending the old tty/queue fields must not break —
+    they're just ignored, delivery goes through vortexia regardless."""
     client.post("/agents", json={"name": "Alice", "voice": "Samantha", "path": "/tmp/alice"})
-    monkeypatch.setattr(app_module, "_find_claude_tty", lambda path: None)
-    monkeypatch.setattr(app_module, "_drain_pending", lambda path, tty: 0)
+    monkeypatch.setattr(app_module, "_vortexia_publish", lambda topic, envelope, retain=False: True)
     resp = client.post(
         "/agents/Alice/inject",
-        json={"message": "hi", "tty": "/dev/ttys004"},
+        json={"message": "hi", "tty": "/dev/ttys004", "queue": True},
     )
     assert resp.status_code == 200
+    assert resp.json()["injected"] is True
 
 
 def test_inject_rejects_oversized_message(client, app_module):

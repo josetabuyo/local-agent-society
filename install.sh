@@ -12,55 +12,31 @@ echo "  Directory : $INSTALL_DIR"
 echo "  Agent     : $FAMILY"
 echo ""
 
-# ── 1. Compile tray app bundle ────────────────────────────────────────────────
-echo "[ 1/5 ] Compiling tray app..."
-APP="$INSTALL_DIR/widget/Local Agent Society.app"
-mkdir -p "$APP/Contents/MacOS"
-swiftc "$INSTALL_DIR/widget/tray.swift" \
-    -framework AppKit -framework Foundation -framework Speech -framework AVFoundation \
-    -target arm64-apple-macos12 \
-    -o "$APP/Contents/MacOS/tray"
-codesign --force --deep --sign - "$APP"
-# Only reset TCC permissions on first install (no existing binary).
-# Re-running install.sh to update code must NOT break granted permissions.
-if [ ! -f "$APP/Contents/Info.plist" ]; then
-    tccutil reset Microphone com.localagentsociety.tray 2>/dev/null || true
-    tccutil reset SpeechRecognition com.localagentsociety.tray 2>/dev/null || true
+# ── 1. Build the Electron widget app bundle ───────────────────────────────────
+# (Replaces the old Swift tray.swift build — see swift-widget-final git tag
+# for the retired native implementation.)
+echo "[ 1/6 ] Building Electron widget..."
+ELECTRON_DIR="$INSTALL_DIR/widget-electron"
+(cd "$ELECTRON_DIR" && npm install --no-audit --no-fund -q && npm run build -q)
+ELECTRON_APP="$ELECTRON_DIR/dist/mac-arm64/Local Agent Society.app"
+if [ ! -d "$ELECTRON_APP" ]; then
+    # Intel build output path differs from Apple Silicon's.
+    ELECTRON_APP="$ELECTRON_DIR/dist/mac/Local Agent Society.app"
 fi
-cat > "$APP/Contents/Info.plist" <<INFOPLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleIdentifier</key><string>com.localagentsociety.tray</string>
-    <key>CFBundleName</key><string>Local Agent Society</string>
-    <key>CFBundleDisplayName</key><string>Local Agent Society</string>
-    <key>CFBundleExecutable</key><string>tray</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleVersion</key><string>1.1</string>
-    <key>CFBundleShortVersionString</key><string>1.1</string>
-    <key>NSPrincipalClass</key><string>NSApplication</string>
-    <key>NSMicrophoneUsageDescription</key><string>Voice input for local agent session injection</string>
-    <key>NSSpeechRecognitionUsageDescription</key><string>Transcribe voice notes to inject into the local agent session</string>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLSchemes</key><array><string>localagentsociety</string></array>
-            <key>CFBundleURLName</key><string>com.localagentsociety.open</string>
-        </dict>
-    </array>
-</dict>
-</plist>
-INFOPLIST
+if [ -d "$ELECTRON_APP" ]; then
+    echo "         built: $ELECTRON_APP"
+else
+    echo "         ⚠️  Electron widget build did not produce an .app bundle — check widget-electron/dist"
+fi
 
 # ── 2. Python dependencies ────────────────────────────────────────────────────
-echo "[ 2/5 ] Installing Python dependencies..."
+echo "[ 2/6 ] Installing Python dependencies..."
 VENV="$INSTALL_DIR/backend/.venv"
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
-echo "[ 3/5 ] Installing skills..."
+echo "[ 3/6 ] Installing skills..."
 for skill in local-agent-voice local-agent-pronunciation local-agent-widget; do
     mkdir -p ~/.claude/skills/$skill
     sed "s|INSTALL_DIR|$INSTALL_DIR|g" \
@@ -76,13 +52,13 @@ cp "$INSTALL_DIR/.claude/skills/las-agent/SKILL.md" ~/.claude/skills/las-agent/S
 echo "         skill: las-agent"
 
 # ── 4. Install hook ───────────────────────────────────────────────────────────
-echo "[ 4/5 ] Installing stop hook..."
+echo "[ 4/6 ] Installing stop hook..."
 mkdir -p ~/.claude/hooks
 cp "$INSTALL_DIR/hooks/announce-here.sh" ~/.claude/hooks/announce-here.sh
 chmod +x ~/.claude/hooks/announce-here.sh
 
 # ── 5. Update ~/.claude/settings.json ────────────────────────────────────────
-echo "[ 5/5 ] Updating Claude settings..."
+echo "[ 5/6 ] Updating Claude settings..."
 python3 - <<PYEOF
 import json, os
 

@@ -251,37 +251,90 @@ def test_open_terminal_osascript_failure_returns_500(client, app_module, monkeyp
     assert resp.status_code == 500
 
 
-# ── agents: pending ──────────────────────────────────────────────────────────────
+# ── agents: vortexia messaging (inject / register / poll) ─────────────────────
+#
+# Delivery is 100% vortexia now — no TTY, no on-disk pending queue. These
+# tests stub out the actual MQTT calls (_vortexia_publish /
+# _vortexia_set_presence_online / _vortexia_poll_inbox) so they run fully
+# offline, same spirit as subprocess.run being mocked above. Real end-to-end
+# delivery against a live vortexia broker is covered separately by
+# tests/test_inject.py.
 
-def test_pending_missing_agent_404(client):
-    resp = client.get("/agents/Ghost/pending")
+def test_inject_missing_agent_404(client):
+    resp = client.post("/agents/Ghost/inject", json={"message": "hi"})
     assert resp.status_code == 404
-    resp = client.delete("/agents/Ghost/pending")
+
+
+def test_vortexia_register_and_poll_missing_agent_404(client):
+    resp = client.post("/agents/Ghost/vortexia/register")
+    assert resp.status_code == 404
+    resp = client.get("/agents/Ghost/vortexia/poll")
     assert resp.status_code == 404
 
 
-def test_pending_get_and_clear(client, app_module, tmp_path):
-    agent_dir = tmp_path / "opal"
-    register(client, name="Opal", path=str(agent_dir))
+def test_inject_publishes_envelope_to_vortexia(client, app_module, monkeypatch):
+    register(client, name="Opal", path="/tmp/opal")
 
-    empty = client.get("/agents/Opal/pending").json()
-    assert empty == {"count": 0, "messages": []}
+    published = {}
 
-    app_module._enqueue_pending(str(agent_dir), "hello", "voice")
-    app_module._enqueue_pending(str(agent_dir), "world", "agent")
+    def fake_publish(topic, envelope, retain=False):
+        published["topic"] = topic
+        published["envelope"] = envelope
+        published["retain"] = retain
+        return True
 
-    resp = client.get("/agents/Opal/pending")
+    monkeypatch.setattr(app_module, "_vortexia_publish", fake_publish)
+
+    resp = client.post(
+        "/agents/Opal/inject",
+        json={"message": "hello", "source": "agent", "from_agent": "Sender"},
+    )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["count"] == 2
-    assert [m["text"] for m in body["messages"]] == ["hello", "world"]
+    assert body == {"ok": True, "injected": True, "queued": False, "via": "vortexia"}
 
-    clear_resp = client.delete("/agents/Opal/pending")
-    assert clear_resp.status_code == 200
-    assert clear_resp.json() == {"ok": True, "cleared": 2}
+    assert published["topic"] == app_module.vx.inbox_topic("Opal")
+    envelope = published["envelope"]
+    assert envelope["from"] == "Sender"
+    assert envelope["to"] == "Opal"
+    assert envelope["source"] == "agent"
+    assert envelope["text"] == "hello"
+    assert "ts" in envelope
+    assert published["retain"] is True, (
+        "inject must publish retained — otherwise a message sent while the "
+        "recipient's session isn't polling right now is lost forever instead "
+        "of surviving until their next /las-agent session-start poll"
+    )
 
-    after = client.get("/agents/Opal/pending").json()
-    assert after == {"count": 0, "messages": []}
+
+def test_inject_reports_failure_when_vortexia_unreachable(client, app_module, monkeypatch):
+    register(client, name="Nomi", path="/tmp/nomi")
+    monkeypatch.setattr(app_module, "_vortexia_publish", lambda topic, envelope, retain=False: False)
+
+    resp = client.post("/agents/Nomi/inject", json={"message": "hi"})
+    assert resp.status_code == 200
+    assert resp.json()["injected"] is False
+
+
+def test_vortexia_register_sets_presence(client, app_module, monkeypatch):
+    register(client, name="Rex2", path="/tmp/rex2")
+    calls = []
+    monkeypatch.setattr(app_module, "_vortexia_set_presence_online", lambda name: calls.append(name) or True)
+
+    resp = client.post("/agents/Rex2/vortexia/register")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "registered": True, "via": "vortexia"}
+    assert calls == ["Rex2"]
+
+
+def test_vortexia_poll_returns_pending_messages(client, app_module, monkeypatch):
+    register(client, name="Opal2", path="/tmp/opal2")
+    fake_messages = [{"from": "Bob", "to": "Opal2", "source": "agent", "text": "hi", "ts": 1}]
+    monkeypatch.setattr(app_module, "_vortexia_poll_inbox", lambda name, timeout=2.0: fake_messages)
+
+    resp = client.get("/agents/Opal2/vortexia/poll")
+    assert resp.status_code == 200
+    assert resp.json() == {"count": 1, "messages": fake_messages}
 
 
 # ── agents: mute ─────────────────────────────────────────────────────────────────

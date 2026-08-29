@@ -6,7 +6,7 @@ You are the protagonist agent of this project. You are part of the **Local Agent
 
 ## At the start of each conversation
 
-Messages from other agents or external processes are injected directly into the terminal by the backend — no polling needed.
+Messages from other agents or external processes arrive over **vortexia** (a sibling MQTT broker — see `vortexia/PROTOCOL.md`), not by being injected into the terminal. The `/las-agent` skill, loaded at the start of a session, registers this agent's presence and polls its vortexia inbox for anything that arrived before this session started (`las agent register` + `las agent poll`, or the equivalent backend calls). This is polling, not push — nothing is delivered to you outside that skill's session-start check, so if the skill hasn't loaded yet, pending messages are just sitting in the inbox.
 
 ---
 
@@ -61,8 +61,9 @@ curl -s -X POST http://localhost:8700/queue/speak \
   -d '{"text":"Hola, tarea completada.","voice":"Paulina","name":"AGENT"}'
 ```
 
-### 4. Inter-agent messages — via `las agent inject`
-To send a message to another live agent's terminal:
+### 4. Inter-agent messages — via vortexia
+Messaging goes over **vortexia** (a local MQTT broker, sibling project — see `vortexia/PROTOCOL.md`), not terminal injection. `las agent inject` / `POST /agents/{name}/inject` publish to the recipient's vortexia inbox (`las/agent/<name>/inbox`); they no longer type into anyone's terminal.
+
 ```bash
 las agent inject OtherAgent "message here" --from MyAgentName
 ```
@@ -72,9 +73,10 @@ curl -s -X POST http://localhost:8700/agents/OtherAgent/inject \
   -H "Content-Type: application/json" \
   -d '{"message":"...","source":"agent","from_agent":"MyAgentName"}'
 ```
-If the target agent has no live terminal, the message is not delivered — try again later or wait for the agent to start a session.
 
-There are no inbox files. There is no `extern-inbox.md`. Communication is live, direct, and goes through the TTY. No file polling.
+Inbox messages ARE retained (MQTT `retain`) — a message sent while the recipient's session isn't polling right now still survives and is waiting whenever it next polls. It's a single-slot mailbox, not a queue: only the *most recent* unread message per agent is kept, so a second inject before the first is read overwrites it. The recipient sees it when their `/las-agent` skill drains it at the start of their next session (see "At the start of each conversation" above), or by running `las agent poll OtherAgent` (or `GET /agents/{name}/vortexia/poll`) themselves — either of which also clears the retained flag, so it isn't handed out again on a later poll. Broadcast (`las/broadcast`) is NOT retained — only currently-connected listeners get it.
+
+There are no inbox files on disk. There is no `extern-inbox.md`. The "inbox" is vortexia's MQTT topic, drained by polling at session start — not a live TTY, and not a filesystem queue.
 
 ### 5. Ports — check BEFORE every server start
 Before starting any HTTP server, **always** run this check:
@@ -104,24 +106,25 @@ Read `.agent.json`:
 
 The user may write in any language. Respond in the locale of this agent. All code, comments, skills, and system files are always written in **English**.
 
-### 8. Widget management — one tray, reopen not focus
+### 8. Widget management — one widget, reopen not focus
 
-**Never launch `tray.app` directly.** The canonical app is `Local Agent Society.app`. Running both simultaneously causes every agent widget to open twice on different Spaces. The system is managed exclusively via:
+The widget is now an Electron app (`widget-electron/`), cross-platform (macOS + Windows), replacing the old native Swift `tray.swift` (retired — see the `swift-widget-final` git tag if it's ever needed). The system is managed exclusively via:
 ```bash
-las start   # launches backend + Local Agent Society.app
+las start   # launches backend + the Electron widget app
 las stop    # stops both
 ```
 
-**`las widget` closes and reopens** on the current Space — it does not just focus. This is guaranteed by `?action=reopen` in the URL scheme. If a widget appears stuck on another Space, run `las widget [name]` and it will move to where you are.
+**Never launch the Electron app's binary directly** — always go through `las start`/`las widget`/`las stop`, for the same reason as before: running it outside that path can leave duplicate processes fighting over the same agent windows.
 
-**To diagnose duplicate tray processes:**
+**`las widget` closes and reopens** on the current Space — it does not just focus. This is guaranteed by `?action=reopen` on the `localagentsociety://` URL scheme, implemented in `widget-electron/main.js` as destroy-then-recreate (a plain `.focus()` does not move a window to the current Space on macOS). If a widget appears stuck on another Space, run `las widget [name]` and it will move to where you are.
+
+**To diagnose duplicate widget processes:**
 ```bash
-ps aux | grep -E "tray" | grep -v grep
-# Should show exactly ONE process: Local Agent Society.app/Contents/MacOS/tray
-# If tray.app also appears: kill its PID immediately
+ps aux | grep -iE "electron|Local Agent Society" | grep -v grep
+# Should show exactly ONE Electron process family.
 ```
 
-**Tests that enforce these invariants:** `tests/test_widget_reopen.py` — run after any change to `tray.swift`, `start.sh`, or `cli/commands/agents.py`.
+**Tests that enforce these invariants:** `widget-electron/test/test_widget_electron.js` — run after any change to `widget-electron/main.js`, `start.sh`, or `cli/commands/agents.py`.
 
 ---
 

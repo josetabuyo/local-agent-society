@@ -23,6 +23,36 @@ cat .agent.json 2>/dev/null
   Nunca llamar directamente a la cola HTTP (`POST /queue/speak`). Solo el modelo de entrada (protagonista) habla — los sub-agentes Haiku y Opus son siempre silenciosos.
 - **Si no existe:** sin integración LAS esta sesión. Comportamiento estándar.
 
+### Registro de presencia y mensajes pendientes (vortexia)
+
+Si `.agent.json` existe, ejecutar esto una sola vez al cargar el skill:
+
+```bash
+las agent register            # publica presencia "online" (retained) en vortexia
+las agent poll --timeout 2    # drena el inbox de vortexia y muestra mensajes pendientes
+```
+
+`las agent poll` reemplaza la vieja inyección directa en la terminal: los mensajes de otros agentes ya no llegan solos, hay que pedirlos. Si `poll` devuelve mensajes pendientes, tratarlos como si acabaran de llegar — mencionarlos al usuario o actuar según corresponda antes de continuar con la tarea. Si vortexia no está corriendo, ambos comandos fallan sin romper la sesión (fail soft); simplemente no habrá mensajes.
+
+### Escucha en vivo (obligatorio, no opcional)
+
+Además del poll inicial, dejar corriendo un escucha en vivo para el resto de la sesión — esto es lo que permite que un dictado desde el widget (o un `las agent inject` de otro agente) llegue a esta sesión apenas se manda, sin depender de que alguien pida un poll manual. Es parte estándar de cómo arranca cualquier sesión con `.agent.json`, no algo puntual para una conversación en particular.
+
+Con la tool `Monitor` (si está disponible en este entorno):
+
+```
+Monitor({
+  description: "Dictado en vivo de <nombre_agente> (las agent listen)",
+  command: "las agent listen <nombre_agente>",
+  persistent: true,
+  timeout_ms: 3600000,
+})
+```
+
+`las agent listen` se queda conectado a vortexia y emite una línea JSON por mensaje apenas llega — cada línea genera una notificación de Monitor en esta sesión. Consume el mensaje al recibirlo (limpia el retained flag), así que mientras el listener esté activo, la entrega en vivo reemplaza al poll — un `las agent poll` posterior no va a volver a ver el mismo mensaje.
+
+Si `Monitor` no está disponible en este entorno, no bloquear el arranque de la sesión por esto — seguir solo con el poll inicial y avisar al usuario que la entrega en vivo no está activa en esta sesión.
+
 ### Idioma del TTS — obligatorio hacer match con la voz
 
 El motor TTS solo suena natural cuando el texto está en el idioma de la voz. **Nunca mezclar idiomas.**
@@ -96,11 +126,19 @@ las agent inject <OtroAgente> "Port <PUERTO> is needed — can you release it?" 
 | LocalModels | Eddy (EN) | `local-models` | Ollama + gemma4:e4b, API :11434 | 9002 |
 | Luganense | Jorge (ES) | `Luganense` | Next.js | 9003 |
 
-### Comunicación entre agentes
+### Comunicación entre agentes (vía vortexia)
+
+La mensajería entre agentes va sobre **vortexia** (broker MQTT local, proyecto hermano — ver `vortexia/PROTOCOL.md`), no inyección de terminal. `las agent inject` publica en el inbox de vortexia del destinatario; no escribe nada en su terminal.
 
 ```bash
-# Inyectar mensaje en la terminal de otro agente
+# Enviar mensaje al inbox de vortexia de otro agente
 las agent inject <NombreAgente> "<mensaje>" --from <EsteAgente>
+
+# Drenar mi propio inbox de vortexia (mensajes pendientes)
+las agent poll [<MiNombre>] --timeout 2
+
+# Anunciar presencia online en vortexia (ya se hace al inicio del skill)
+las agent register [<MiNombre>]
 
 # Hablar por TTS como este agente
 las speak "<texto en idioma de la voz>" --name <NombreAgente>
@@ -111,6 +149,8 @@ las agent focus <NombreAgente>
 # Estado completo de la sociedad
 las status
 ```
+
+La entrega **no está garantizada**: vortexia no retiene mensajes de inbox, así que el destinatario solo los ve si algo está haciendo poll en ese momento (típicamente, el skill `/las-agent` al inicio de su próxima sesión). No hay cola en disco ni reintento automático.
 
 ### Issues conocidos
 
