@@ -44,6 +44,7 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 const Store = require('electron-store');
 const { createTray } = require('./tray');
+const spaces = require('./lib/spaces');
 
 // Real protocol scheme, claimed by this Electron app as of the full cutover
 // (see CLAUDE.md task history). The Swift app (widget/tray.swift) previously
@@ -227,19 +228,31 @@ function createWidgetWindow(name) {
     setPrefs(name, { color: randomWidgetColor() });
   }
   const prefs = getPrefs(name);
-  // Position, on the other hand, is never persisted (there's no concept of
-  // a "saved" position today) — every start/reopen picks a fresh random
-  // spot so multiple agents' widgets don't stack on top of each other.
-  const display = screen.getPrimaryDisplay();
-  const { x: sx, y: sy, width: aw, height: ah } = display.workArea;
-  const rx = sx + Math.floor(Math.random() * Math.max(1, aw - WIDGET_WIDTH));
-  const ry = sy + Math.floor(Math.random() * Math.max(1, ah - WIDGET_HEIGHT));
+  // Position/size: like Chrome remembering where a window sat before it was
+  // closed, reuse the last bounds this agent's widget was left at (see
+  // getSavedBounds/saveBounds below). Only first-ever open (or a saved spot
+  // that's now off any connected display, e.g. an external monitor got
+  // unplugged) falls back to a fresh random spot so widgets don't stack.
+  const saved = getSavedBounds(name);
+  let bounds;
+  if (saved && boundsOnScreen(saved)) {
+    bounds = saved;
+  } else {
+    const display = screen.getPrimaryDisplay();
+    const { x: sx, y: sy, width: aw, height: ah } = display.workArea;
+    bounds = {
+      x: sx + Math.floor(Math.random() * Math.max(1, aw - WIDGET_WIDTH)),
+      y: sy + Math.floor(Math.random() * Math.max(1, ah - WIDGET_HEIGHT)),
+      width: WIDGET_WIDTH,
+      height: WIDGET_HEIGHT,
+    };
+  }
 
   const win = new BrowserWindow({
-    width: WIDGET_WIDTH,
-    height: WIDGET_HEIGHT,
-    x: rx,
-    y: ry,
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     frame: false,
     resizable: true,
     alwaysOnTop: prefs.alwaysOnTop !== false,
@@ -280,6 +293,19 @@ function createWidgetWindow(name) {
     query: { agent: name },
   });
 
+  // Space (macOS virtual desktop) memory: a window is only ever placed on
+  // whichever Space is currently active at creation time — there's no way to
+  // create it "on" a different Space directly. So once it's actually on
+  // screen (electron assigns a CGWindowID only once shown — see
+  // lib/spaces.js), move it to its saved Space, if any, matching where the
+  // agent's own bounds already put it. Own-window-only, see lib/spaces.js.
+  const savedSpace = getSavedSpace(name);
+  if (savedSpace != null) {
+    win.once('show', () => {
+      setTimeout(() => spaces.moveWindowToSpace(win, savedSpace), 150);
+    });
+  }
+
   // Forward renderer console output to the main process's stdout — handy
   // for headless smoke-testing and debugging; harmless in normal use.
   win.webContents.on('console-message', (_event, _level, message) => {
@@ -295,9 +321,83 @@ function createWidgetWindow(name) {
     }
   });
 
+  // Persist bounds like Chrome persists a window's position/size — but only
+  // while the widget is in its normal compact face. While a settings/
+  // commands panel or the occlusion banner is expanded, 'move'/'resize' keep
+  // firing (setBounds triggers them same as a user drag), and saving those
+  // would clobber the real collapsed position with the panel's blown-up one.
+  const persistBounds = () => {
+    if (expandedWindows.has(win) || occlusionExpandedWindows.has(win)) return;
+    if (win.isDestroyed()) return;
+    saveBounds(name, win.getBounds());
+  };
+  win.on('move', persistBounds);
+  win.on('resize', persistBounds);
+
+  // Persist which Space this widget is on right now. There's no Electron/
+  // AppKit event for "the user dragged this window to another Space" — so
+  // this piggybacks on events that correlate with the window having settled
+  // somewhere: move/resize (a drag can end on a different Space than it
+  // started, e.g. a swipe mid-drag) and focus (switching Spaces to reach a
+  // window and clicking it is the single most common way its Space changes).
+  const persistSpace = () => {
+    if (win.isDestroyed()) return;
+    const current = spaces.getSpaceForWindow(win);
+    if (current != null) saveSpace(name, current);
+  };
+  win.on('move', persistSpace);
+  win.on('resize', persistSpace);
+  win.on('focus', persistSpace);
+
   windows.set(name, win);
   connectVortexia(name, win);
   return win;
+}
+
+// ── window bounds (position/size) persistence ───────────────────────────────
+// Chrome-style "reopen where it was" — separate from prefs.color/opacity/etc
+// above since it's per-window geometry, not a user setting, and is skipped
+// entirely (falls back to random placement) until an agent's widget has
+// actually been moved/resized at least once.
+
+function getSavedBounds(name) {
+  return store.get(`bounds.${name}`) || null;
+}
+
+function saveBounds(name, bounds) {
+  store.set(`bounds.${name}`, {
+    x: Math.round(bounds.x),
+    y: Math.round(bounds.y),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  });
+}
+
+// Guards against a saved spot that's no longer reachable (e.g. an external
+// display that hosted it got unplugged) — screen.getDisplayMatching falls
+// back to the nearest display when a rect doesn't overlap the point/rect on
+// any display, which is a lot more forgiving than an exact bounds check.
+function boundsOnScreen(bounds) {
+  const display = screen.getDisplayMatching(bounds);
+  const { x, y, width, height } = display.workArea;
+  return (
+    bounds.x + bounds.width > x &&
+    bounds.x < x + width &&
+    bounds.y + bounds.height > y &&
+    bounds.y < y + height
+  );
+}
+
+// Space ids (CGSSpaceID) are 64-bit and come back as JS BigInt from
+// lib/spaces.js — electron-store's JSON backing can't serialize BigInt
+// directly, so store/read them as decimal strings.
+function getSavedSpace(name) {
+  const raw = store.get(`space.${name}`);
+  return raw == null ? null : BigInt(raw);
+}
+
+function saveSpace(name, spaceId) {
+  store.set(`space.${name}`, spaceId.toString());
 }
 
 // ── prefs (electron-store) ──────────────────────────────────────────────────
