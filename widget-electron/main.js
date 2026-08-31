@@ -184,11 +184,24 @@ function handleProtocolUrl(rawUrl) {
 
 // ── window management ───────────────────────────────────────────────────────
 
+// Visible and active are the same thing for now (see the `las agent
+// deactivate`/inactive design discussion) — any deliberate single-agent open
+// (tray click, `las widget NAME`, the explicit-agent launch path) clears the
+// inactive flag, whether or not the window already existed. Fire-and-forget:
+// never block window creation on this, and a failed request just means the
+// backend hasn't caught up yet, not a reason to refuse opening the widget.
+// The BULK "open everything" path (app.whenReady()) filters inactive agents
+// out before ever calling openWidget, so this never fires for those.
+function clearInactiveRemote(name) {
+  fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/inactive`, { method: 'DELETE' }).catch(() => {});
+}
+
 /**
  * Focus an existing window for `name`, or create one. Does NOT destroy an
  * existing window — that's reopenWidget's job.
  */
 function openWidget(name) {
+  clearInactiveRemote(name);
   const existing = windows.get(name);
   if (existing && !existing.isDestroyed()) {
     existing.show();
@@ -205,6 +218,7 @@ function openWidget(name) {
  * fix documented in CLAUDE.md / tests/test_widget_reopen.py.
  */
 function reopenWidget(name) {
+  clearInactiveRemote(name);
   const existing = windows.get(name);
   if (existing && !existing.isDestroyed()) {
     existing.destroy();
@@ -1125,10 +1139,19 @@ app.whenReady().then(async () => {
 
   const explicit = resolveInitialAgentNames(process.argv);
   if (explicit) {
+    // A specific agent was named (via --agent=/cwd .agent.json) — deliberate,
+    // opens even if inactive, same as `las widget NAME` from that agent's own
+    // folder.
     for (const name of explicit) openWidget(name);
   } else {
+    // Bulk "open everything" (`las start`'s plain launch, no args): inactive
+    // agents must stay put away here — only a deliberate `las widget NAME`/
+    // `las agent activate`, or the vortexia wake-enabled fallback, should
+    // bring one back. See main.js's set_inactive/`agent:deactivate` comments.
     const agents = await fetchAgents();
-    for (const name of Object.keys(agents).sort()) openWidget(name);
+    for (const name of Object.keys(agents).sort()) {
+      if (!agents[name].inactive) openWidget(name);
+    }
   }
 });
 

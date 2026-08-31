@@ -39,6 +39,34 @@ def test_agent_new_propagates_backend_failure(monkeypatch, tmp_path):
     assert not (tmp_path / "agentdir" / ".agent.json").exists()
 
 
+def test_widgets_all_skips_inactive_agents(monkeypatch):
+    """`las widgets` is a bulk/auto reopen — an inactive agent must stay put
+    away unless deliberately reactivated (`las widget NAME`, `las agent
+    activate`, or the vortexia wake-enabled fallback), none of which go
+    through this command."""
+    monkeypatch.setattr(
+        agents_mod.api,
+        "get",
+        lambda path: {
+            "Active1": {"inactive": False},
+            "Inactive1": {"inactive": True},
+            "Active2": {},  # no "inactive" key at all -> must still open
+        },
+    )
+    opened = []
+    monkeypatch.setattr(
+        agents_mod.subprocess, "run", lambda cmd, **kw: opened.append(cmd[-1])
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(agents_mod.widgets_all)
+
+    assert result.exit_code == 0
+    assert any("Active1" in url for url in opened)
+    assert any("Active2" in url for url in opened)
+    assert not any("Inactive1" in url for url in opened)
+
+
 def test_agent_listen_exits_cleanly_when_vortexia_unreachable(monkeypatch):
     """`las agent listen` must fail soft (clear message, exit 1) — not hang or
     crash — when it can't find a vortexia-mqtt port in the registry. This is

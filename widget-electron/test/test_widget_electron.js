@@ -667,3 +667,29 @@ test('restore-after-visible delay is a single named constant, easy to retune, de
   const body = extractFunctionBody(src, "document.addEventListener('visibilitychange', () => {");
   assert.match(body, /hidden \? 400 : RESTORE_DELAY_MS/, 'hide path keeps its short flicker-guard debounce; the show path uses the configurable restore delay');
 });
+
+// ── inactive agents must NOT come back on a bulk/auto open ──────────────────
+// `las start`'s plain launch (no args) hits the "open everything" branch;
+// only a deliberate single-agent open (explicit --agent=/cwd .agent.json, or
+// `las widget NAME`/wake-via-vortexia — neither goes through this branch)
+// should ever open an inactive widget.
+
+test('the bulk "open everything" startup branch skips agents marked inactive', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'app.whenReady().then(async () => {');
+  const bulkBranch = body.slice(body.indexOf('} else {'));
+  assert.match(bulkBranch, /if \(!agents\[name\]\.inactive\) openWidget\(name\);/);
+});
+
+test('visible and active are correlated: openWidget/reopenWidget both clear the inactive flag remotely on every deliberate single-agent open', () => {
+  const src = readSrc('main.js');
+  assert.match(
+    readSrc('main.js'),
+    /function clearInactiveRemote\(name\) \{[\s\S]*?method: 'DELETE'/,
+    'clearInactiveRemote must DELETE the inactive flag'
+  );
+  const openBody = extractFunctionBody(src, 'function openWidget(name) {');
+  const reopenBody = extractFunctionBody(src, 'function reopenWidget(name) {');
+  assert.match(openBody, /clearInactiveRemote\(name\)/);
+  assert.match(reopenBody, /clearInactiveRemote\(name\)/);
+});

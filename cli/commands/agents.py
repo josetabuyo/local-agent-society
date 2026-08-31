@@ -418,12 +418,15 @@ def widget(name):
 
 @click.command("widgets")
 def widgets_all():
-    """Reopen all agent widgets on the current Space."""
+    """Reopen all ACTIVE agent widgets on the current Space (inactive ones stay put away —
+    use `las widget NAME` or `las agent activate NAME` for a specific one)."""
     data = api.get("/agents")
     if not data:
         click.echo("No agents registered.")
         return
-    for name in data:
+    for name, info in data.items():
+        if info.get("inactive"):
+            continue
         subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=reopen"], check=False)
         click.echo(f"  ↺ {name}")
 
