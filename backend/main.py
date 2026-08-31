@@ -34,6 +34,8 @@ QUEUE_FILE    = DATA_DIR / "queue.json"
 PORTS_FILE       = DATA_DIR / "ports.json"
 ATTRIBUTION_FILE = DATA_DIR / "attribution.json"
 MUTED_FILE    = DATA_DIR / "muted.json"
+INACTIVE_FILE      = DATA_DIR / "inactive.json"
+WAKE_ENABLED_FILE  = DATA_DIR / "wake_enabled.json"
 
 NICE_VOICES = [
     {"name": "Samantha",               "lang": "en-US", "flag": "🇺🇸"},
@@ -89,6 +91,8 @@ def save_json(path: Path, data):
 _registry_lock    = threading.Lock()
 _queue_lock       = threading.Lock()
 _muted_lock       = threading.Lock()
+_inactive_lock     = threading.Lock()
+_wake_enabled_lock = threading.Lock()
 _attribution_lock = threading.Lock()
 _pending_links_lock = threading.Lock()
 
@@ -316,7 +320,15 @@ def get_voice(name: str):
 @app.get("/agents")
 def list_agents():
     with _registry_lock:
-        return load_json(REGISTRY_FILE, {})
+        registry = load_json(REGISTRY_FILE, {})
+    with _inactive_lock:
+        inactive = load_json(INACTIVE_FILE, [])
+    with _wake_enabled_lock:
+        wake_enabled = load_json(WAKE_ENABLED_FILE, [])
+    return {
+        name: {**info, "inactive": name in inactive, "wake_enabled": name in wake_enabled}
+        for name, info in registry.items()
+    }
 
 
 @app.post("/agents")
@@ -705,7 +717,16 @@ return "not_found|sessions=" & sessionCount & "|ttys=" & seenTTYs
 
 @app.post("/agents/{name}/focus")
 def focus_agent_terminal(name: str):
-    """Bring the agent's iTerm2 window/tab/session to the foreground."""
+    """Bring the agent's iTerm2 window/tab/session to the foreground.
+
+    Wake-via-vortexia fallback: if no live session is found AND the agent is
+    both inactive and opted into wake-enabled, open a fresh iTerm2 window
+    running `claude --dangerously-skip-permissions` in its directory instead
+    of just reporting "not found", and mark it active again. Both flags must
+    be set (see set_inactive/set_wake_enabled) — this must never fire for an
+    agent that merely doesn't have iTerm2 open right now for some unrelated
+    reason.
+    """
     registry = load_json(REGISTRY_FILE, {})
     if name not in registry:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -716,8 +737,26 @@ def focus_agent_terminal(name: str):
         result = _focus_via_iterm(tty)
         print(f"[focus]   tty={tty} success={result['success']} stdout={result['stdout']!r}", flush=True)
         if result["success"]:
-            return {"ok": True, "focused": True, "tty": result["tty"], "ttys_found": len(ttys)}
-    return {"ok": True, "focused": False, "tty": ttys[0] if ttys else "not found", "ttys_found": len(ttys)}
+            return {"ok": True, "focused": True, "woke": False, "tty": result["tty"], "ttys_found": len(ttys)}
+
+    with _inactive_lock:
+        is_inactive = name in load_json(INACTIVE_FILE, [])
+    with _wake_enabled_lock:
+        wake_enabled = name in load_json(WAKE_ENABLED_FILE, [])
+    if not ttys and is_inactive and wake_enabled and path:
+        shell_cmd = f"cd {shlex.quote(path)} && claude --dangerously-skip-permissions"
+        result = _open_iterm_window(shell_cmd)
+        if result.returncode == 0:
+            with _inactive_lock:
+                inactive = load_json(INACTIVE_FILE, [])
+                if name in inactive:
+                    inactive.remove(name)
+                    save_json(INACTIVE_FILE, inactive)
+            print(f"[focus] agent={name} woke via vortexia (opened new iTerm2 window)", flush=True)
+            return {"ok": True, "focused": False, "woke": True, "tty": "new window", "ttys_found": 0}
+        print(f"[focus] agent={name} wake failed: {result.stderr.strip()}", flush=True)
+
+    return {"ok": True, "focused": False, "woke": False, "tty": ttys[0] if ttys else "not found", "ttys_found": len(ttys)}
 
 
 @app.get("/debug/iterm_ttys")
@@ -746,6 +785,20 @@ return ttyList
     return {"iterm_ttys": ttys, "count": len(ttys)}
 
 
+def _open_iterm_window(shell_cmd: str) -> subprocess.CompletedProcess:
+    """Open a new iTerm2 window running `shell_cmd`, then drop into an
+    interactive login shell so the window stays open after it exits. Shared
+    by open_terminal and focus_agent_terminal's wake-via-vortexia fallback —
+    same osascript both callers used to build independently."""
+    user_shell = os.environ.get("SHELL", "/bin/zsh")
+    script = (
+        'tell application "iTerm2"\n'
+        f'    create window with default profile command "{user_shell} -l -c \'{shell_cmd}; exec {user_shell} -l\'"\n'
+        'end tell'
+    )
+    return subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
+
+
 @app.post("/agents/{name}/terminal")
 def open_terminal(name: str, body: TerminalRequest):
     """Open a new iTerm2 window running claude in the agent's directory."""
@@ -760,13 +813,7 @@ def open_terminal(name: str, body: TerminalRequest):
     else:
         claude_cmd = f"claude --model {body.model_id}" if body.model_id else "claude"
         shell_cmd = f"cd {shlex.quote(path)} && {claude_cmd}"
-    user_shell = os.environ.get("SHELL", "/bin/zsh")
-    script = (
-        'tell application "iTerm2"\n'
-        f'    create window with default profile command "{user_shell} -l -c \'{shell_cmd}; exec {user_shell} -l\'"\n'
-        'end tell'
-    )
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=10)
+    result = _open_iterm_window(shell_cmd)
     if result.returncode != 0:
         raise HTTPException(status_code=500, detail=f"osascript error: {result.stderr.strip()}")
     return {"ok": True, "model": body.model}
@@ -909,6 +956,75 @@ def get_muted(name: str):
     with _muted_lock:
         muted = load_json(MUTED_FILE, [])
     return {"muted": name in muted, "name": name}
+
+
+# ── agent inactive/active ──────────────────────────────────────────────────────
+# "Inactive" marks an agent as put away — the widget's door button and
+# `las agent deactivate` set this and close the widget; it does not touch the
+# registry entry or kill any running Claude Code session, it's purely a
+# visibility/status flag consulted by `las agents` (to list/filter) and by
+# focus_agent_terminal's wake fallback below.
+
+@app.post("/agents/{name}/inactive")
+def set_inactive(name: str):
+    with _inactive_lock:
+        inactive = load_json(INACTIVE_FILE, [])
+        if name not in inactive:
+            inactive.append(name)
+            save_json(INACTIVE_FILE, inactive)
+    return {"ok": True, "inactive": True, "name": name}
+
+
+@app.delete("/agents/{name}/inactive")
+def clear_inactive(name: str):
+    with _inactive_lock:
+        inactive = load_json(INACTIVE_FILE, [])
+        if name in inactive:
+            inactive.remove(name)
+            save_json(INACTIVE_FILE, inactive)
+    return {"ok": True, "inactive": False, "name": name}
+
+
+@app.get("/agents/{name}/inactive")
+def get_inactive(name: str):
+    with _inactive_lock:
+        inactive = load_json(INACTIVE_FILE, [])
+    return {"inactive": name in inactive, "name": name}
+
+
+# ── wake-up via vortexia (opt-in per agent) ────────────────────────────────────
+# When enabled, an inactive agent with no live terminal session gets woken up
+# by focus_agent_terminal below instead of just reporting "not found": a new
+# iTerm2 window is opened running `claude --dangerously-skip-permissions` in
+# its registered directory, and the agent is marked active again. Off by
+# default — waking a session unattended is exactly the kind of thing that
+# should require an explicit opt-in per agent.
+
+@app.post("/agents/{name}/wake-enabled")
+def set_wake_enabled(name: str):
+    with _wake_enabled_lock:
+        enabled = load_json(WAKE_ENABLED_FILE, [])
+        if name not in enabled:
+            enabled.append(name)
+            save_json(WAKE_ENABLED_FILE, enabled)
+    return {"ok": True, "wake_enabled": True, "name": name}
+
+
+@app.delete("/agents/{name}/wake-enabled")
+def clear_wake_enabled(name: str):
+    with _wake_enabled_lock:
+        enabled = load_json(WAKE_ENABLED_FILE, [])
+        if name in enabled:
+            enabled.remove(name)
+            save_json(WAKE_ENABLED_FILE, enabled)
+    return {"ok": True, "wake_enabled": False, "name": name}
+
+
+@app.get("/agents/{name}/wake-enabled")
+def get_wake_enabled(name: str):
+    with _wake_enabled_lock:
+        enabled = load_json(WAKE_ENABLED_FILE, [])
+    return {"wake_enabled": name in enabled, "name": name}
 
 
 # ── terminal link (drag-to-link via `las link`) ───────────────────────────────

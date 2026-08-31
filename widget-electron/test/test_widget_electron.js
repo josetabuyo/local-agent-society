@@ -55,9 +55,9 @@ test('reopenWidget destroys the existing window before creating a new one', () =
   const src = readSrc('main.js');
   const body = extractFunctionBody(src, 'function reopenWidget(name)');
   const destroyPos = body.indexOf('.destroy()');
-  const createPos = body.indexOf('createWidgetWindow(name)');
+  const createPos = body.indexOf('createWidgetWindow(name');
   assert.notEqual(destroyPos, -1, 'reopenWidget must call .destroy() on the existing window');
-  assert.notEqual(createPos, -1, 'reopenWidget must call createWidgetWindow(name)');
+  assert.notEqual(createPos, -1, 'reopenWidget must call createWidgetWindow(name, ...)');
   assert.ok(
     destroyPos < createPos,
     'destroy() must happen before createWidgetWindow so the old window is gone before the new one is made (matches the Swift reopen-not-focus fix)'
@@ -371,19 +371,25 @@ test('preload.js exposes setExpanded on window.las', () => {
   assert.match(src, /setExpanded\s*:/);
 });
 
-test('gear button expands the window on open and collapses it on close', () => {
+test('gear button toggles settings mode, which expands the window open and shrinks it back closed', () => {
   const src = readSrc('renderer', 'widget.js');
-  const openBody = extractFunctionBody(src, "gearEl.addEventListener('click', () => {");
-  assert.match(openBody, /window\.las\.setExpanded\(true\)/);
-  const closeBody = extractFunctionBody(src, "closeSettingsEl.addEventListener('click', () => {");
-  assert.match(closeBody, /window\.las\.setExpanded\(false\)/);
+  assert.match(src, /gearEl\.addEventListener\('click',\s*\(\)\s*=>\s*setSettingsOpen\(!settingsOpen\)\)/);
+  const body = extractFunctionBody(src, 'function setSettingsOpen(open) {');
+  assert.match(body, /window\.las\.setExpanded\(open,\s*SETTINGS_HEIGHT\)/, 'must pass open through, covering both the expand and the shrink-back-closed path');
+  assert.match(body, /gearEl\.classList\.toggle\('active', open\)/, "gear must visually show 'pressed' while settings is open");
 });
 
-test('every panel that calls setExpanded(true) has a corresponding path back to setExpanded(false)', () => {
+test('every panel that calls setExpanded(true, ...) has a corresponding path back to setExpanded(false)', () => {
   const src = readSrc('renderer', 'widget.js');
-  const trueCount = [...src.matchAll(/setExpanded\(true\)/g)].length;
+  const trueCount = [...src.matchAll(/setExpanded\(true\b/g)].length;
   const falseCount = [...src.matchAll(/setExpanded\(false\)/g)].length;
   assert.ok(trueCount > 0 && falseCount > 0, 'expected both expand and collapse call sites');
+});
+
+test('window:set-expanded accepts an optional height override, falling back to EXPANDED_HEIGHT', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, "ipcMain.on('window:set-expanded', (event, expanded, height) => {");
+  assert.match(body, /height\s*\|\|\s*EXPANDED_HEIGHT/);
 });
 
 // ── expand when hidden (retired Swift "Expand on space change") ────────────
@@ -396,10 +402,10 @@ test('main.js exposes window:set-occlusion-expanded, defers to panel-expand, and
   assert.match(body, /setIgnoreMouseEvents\(false\)/, 'must restore normal mouse handling on collapse');
 });
 
-test('expandWhenHidden defaults to false, matching the retired Prefs.expandOnSpaceChange default', () => {
+test('expandWhenHidden defaults to true, per explicit request (was off by default, matching the retired Prefs.expandOnSpaceChange default, until changed)', () => {
   const src = readSrc('main.js');
   const body = extractFunctionBody(src, 'const DEFAULT_PREFS = {');
-  assert.match(body, /expandWhenHidden:\s*false/);
+  assert.match(body, /expandWhenHidden:\s*true/);
 });
 
 test('visibilitychange handler is debounced and gated by the expandWhenHidden pref', () => {
@@ -472,7 +478,10 @@ test('backgroundThrottling is NOT disabled unconditionally at window creation �
   // share the same underlying signal. Detection must stay on by default;
   // see the next test for the correct dynamic approach.
   const src = readSrc('main.js');
-  const body = extractFunctionBody(src, 'function createWidgetWindow(name) {');
+  const start = src.indexOf('function createWidgetWindow(name');
+  assert.notEqual(start, -1, 'could not find createWidgetWindow');
+  const end = src.indexOf('\nfunction ', start + 1);
+  const body = src.slice(start, end === -1 ? undefined : end);
   assert.doesNotMatch(body, /webPreferences:\s*\{[^}]*backgroundThrottling:\s*false/s);
 });
 
@@ -483,4 +492,178 @@ test('window:set-occlusion-expanded toggles backgroundThrottling dynamically: of
   const onIdx = body.indexOf('setBackgroundThrottling(true)');
   assert.notEqual(offIdx, -1, 'expected setBackgroundThrottling(false) once occlusion is already detected, so the fullscreen banner actually paints while off-Space');
   assert.notEqual(onIdx, -1, 'expected setBackgroundThrottling(true) on collapse, restoring normal detection for the next cycle');
+});
+
+// ── mosaic tiling for multiple occlusion-expanded widgets on one display ───
+// Ported from the retired Swift widget's AppDelegate.mosaicTiles/
+// applyMosaicLayout (swift-widget-final tag, tray.swift) — without this,
+// several widgets going occlusion-expanded on the same screen at once just
+// stack exactly on top of each other instead of tiling.
+
+test('window:set-occlusion-expanded schedules a mosaic re-layout on expand (not a direct full-workArea setBounds), but NOT on collapse', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, "ipcMain.on('window:set-occlusion-expanded', (event, expanded) => {");
+  const collapseIdx = body.indexOf('} else if');
+  const expandBranch = body.slice(0, collapseIdx);
+  const collapseBranch = body.slice(collapseIdx);
+  assert.match(expandBranch, /scheduleMosaicLayout\(/, 'expand branch must schedule a mosaic layout instead of unconditionally filling the whole display');
+  assert.doesNotMatch(
+    collapseBranch,
+    /scheduleMosaicLayout\(/,
+    'collapse must NOT re-tile remaining siblings — that produced a visible two-step animation (jump to a bigger tile, then immediately collapse); survivors keep their tile until they too restore'
+  );
+});
+
+test('mosaic grouping key is (display, macOS Space), not display alone — every widget on the machine sharing one physical display must not be lumped into a single giant grid', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function mosaicKeyFor(win) {');
+  assert.match(body, /spaces\.getSpaceForWindow\(win\)/);
+  assert.match(body, /`\$\{displayId\}:\$\{spaceId/, 'key must combine displayId with spaceId, not displayId alone');
+});
+
+test('mosaicTiles returns the full work area for 0 or 1 windows, and non-overlapping tiles otherwise', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function mosaicTiles(count, workArea) {');
+  const fn = new Function(`function mosaicTiles(count, workArea) ${body} return mosaicTiles;`)();
+  const area = { x: 0, y: 0, width: 1000, height: 800 };
+
+  assert.deepEqual(fn(0, area), []);
+  assert.deepEqual(fn(1, area), [{ x: 0, y: 0, width: 1000, height: 800 }]);
+
+  // 2, 3, and even counts >=4 (full 2xN grid) cover the work area exactly;
+  // an odd count >=4 (e.g. 5 = 2 cols x 3 rows) leaves one grid cell empty,
+  // same as the ported Swift layout.
+  for (const count of [2, 3, 4, 5, 6]) {
+    const tiles = fn(count, area);
+    assert.equal(tiles.length, count, `expected ${count} tiles`);
+    const totalArea = tiles.reduce((sum, t) => sum + t.width * t.height, 0);
+    if (count < 4 || count % 2 === 0) {
+      assert.ok(
+        Math.abs(totalArea - area.width * area.height) < 1,
+        `tiles for count=${count} should exactly cover the work area, got total ${totalArea}`
+      );
+    }
+    for (const t of tiles) {
+      assert.ok(t.x >= area.x && t.y >= area.y, `tile out of bounds for count=${count}`);
+      assert.ok(t.x + t.width <= area.x + area.width + 0.01, `tile overflows width for count=${count}`);
+      assert.ok(t.y + t.height <= area.y + area.height + 0.01, `tile overflows height for count=${count}`);
+    }
+  }
+});
+
+// ── reopen (`las widget`) forgets saved position, keeps color/prefs ────────
+// The saved-bounds restore is meant for a plain relaunch (`las start`); the
+// explicit reopen command exists to grab a widget that is stuck or hard to
+// find, so reappearing at the exact same spot would defeat the point.
+
+test('reopenWidget passes forgetPosition so createWidgetWindow skips the saved bounds', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function reopenWidget(name)');
+  assert.match(body, /createWidgetWindow\(name,\s*\{\s*forgetPosition:\s*true\s*\}\)/);
+});
+
+test('createWidgetWindow only consults getSavedBounds when forgetPosition is false', () => {
+  const src = readSrc('main.js');
+  assert.match(src, /const saved = !forgetPosition && getSavedBounds\(name\);/);
+});
+
+test('openWidget (plain relaunch path) does not pass forgetPosition, so it keeps restoring the last position', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function openWidget(name)');
+  assert.match(body, /createWidgetWindow\(name\)\s*;/, 'openWidget should call createWidgetWindow(name) with no options, preserving saved-bounds restore');
+});
+
+// ── door button / `las agent deactivate` (close widget, mark inactive) ─────
+
+test('handleProtocolUrl routes action=close to closeWidget, distinct from reopen/open', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function handleProtocolUrl(rawUrl) {');
+  assert.match(body, /action === 'close'/);
+  assert.match(body, /closeWidget\(name\)/);
+});
+
+test('closeWidget destroys the existing window and does NOT recreate one', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function closeWidget(name) {');
+  assert.match(body, /\.destroy\(\)/);
+  assert.doesNotMatch(body, /createWidgetWindow/, 'closeWidget must not reopen the widget — that would defeat "put it away"');
+});
+
+test('agent:deactivate calls the backend inactive endpoint and destroys the calling window', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, "ipcMain.handle('agent:deactivate', async (event, name) => {");
+  assert.match(body, /\/agents\/\$\{encodeURIComponent\(name\)\}\/inactive/, 'must POST to the inactive endpoint');
+  assert.match(body, /method:\s*'POST'/);
+  assert.match(body, /win\.destroy\(\)/, 'must destroy the window the request came from');
+});
+
+test('preload.js exposes deactivateAgent and the wake-enabled getter/setter', () => {
+  const src = readSrc('preload.js');
+  assert.match(src, /deactivateAgent\s*:/);
+  assert.match(src, /setWakeEnabled\s*:/);
+  assert.match(src, /getWakeEnabled\s*:/);
+});
+
+test('index.html has a door button and a wake-enabled settings checkbox', () => {
+  const src = readSrc('renderer', 'index.html');
+  assert.match(src, /id="door"/);
+  assert.match(src, /id="wakeEnabled"/);
+});
+
+test('widget.js wires the door button to deactivateAgent and the wake checkbox to setWakeEnabled', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /doorEl\.addEventListener\('click'/);
+  assert.match(src, /window\.las\.deactivateAgent\(agentName\)/);
+  assert.match(src, /wakeEnabledEl\.addEventListener\('change'/);
+  assert.match(src, /window\.las\.setWakeEnabled\(agentName,\s*wakeEnabledEl\.checked\)/);
+});
+
+// ── wake-enabled IPC handlers ────────────────────────────────────────────────
+
+test('agent:set-wake-enabled toggles POST/DELETE on the wake-enabled endpoint based on the enabled flag', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, "ipcMain.handle('agent:set-wake-enabled', async (_event, name, enabled) => {");
+  assert.match(body, /\/wake-enabled/);
+  assert.match(body, /method:\s*enabled \? 'POST' : 'DELETE'/);
+});
+
+// ── name sizing/line-breaking (ported smartSplit/fitFontSizeAndSplit) ──────
+
+test('smartSplit breaks at the space/hyphen closest to the middle, else the camelCase boundary closest to the middle, else leaves text alone', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function smartSplit(text) {');
+  const smartSplit = new Function(`function smartSplit(text) ${body} return smartSplit;`)();
+  assert.equal(smartSplit('Minis App Acces'), 'Minis App\nAcces');
+  assert.equal(smartSplit('LocalAgentSociety'), 'LocalAgent\nSociety');
+  assert.equal(smartSplit('agentname'), 'agentname');
+});
+
+test('fitNameToBox shrinks the compact font from COMPACT_START_SIZE down to fit, and applies pre-line white-space only when split', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /const COMPACT_START_SIZE = 32;/);
+  assert.match(src, /const COMPACT_MIN_SIZE = 13;/);
+  const body = extractFunctionBody(src, 'function fitNameToBox() {');
+  assert.match(body, /nameEl\.style\.whiteSpace = isSplit \? 'pre-line' : 'nowrap';/);
+});
+
+test('occlusion-expanded name fill is solid black with no text-stroke, per explicit request', () => {
+  const src = readSrc('renderer', 'widget.css');
+  const idx = src.indexOf('.widget.occlusion-expanded .name {');
+  assert.notEqual(idx, -1);
+  const block = src.slice(idx, src.indexOf('}', idx));
+  assert.match(block, /color:\s*#000/);
+  assert.match(block, /-webkit-text-stroke:\s*0/);
+});
+
+test('the door button always stays visible (both compact and settings-open) while every other face button hides in settings-open', () => {
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.widget\.settings-open \.buttonbar \.facebtn:not\(#gear\)\s*\{\s*display:\s*none;/);
+  assert.doesNotMatch(css, /\.widget\.settings-open[^{]*door[^{]*\{\s*display:\s*none/);
+});
+
+test('restore-after-visible delay is a single named constant, easy to retune, defaulting to 2000ms', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /const RESTORE_DELAY_MS = 2000;/);
+  const body = extractFunctionBody(src, "document.addEventListener('visibilitychange', () => {");
+  assert.match(body, /hidden \? 400 : RESTORE_DELAY_MS/, 'hide path keeps its short flicker-guard debounce; the show path uses the configurable restore delay');
 });

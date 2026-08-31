@@ -7,7 +7,10 @@
 </head>
 <body>
   <div id="widget" class="widget">
-    <div id="name" class="name">Agent</div>
+    <div class="topbar">
+      <div id="name" class="name">Agent</div>
+      <button id="door" class="facebtn door-corner" title="Deactivate (close widget, mark inactive)">&#128682;</button>
+    </div>
     <div id="log" class="log"></div>
 
     <div class="buttonbar">
@@ -20,6 +23,46 @@
         <button id="speaker" class="facebtn" title="Mute/unmute">&#128266;</button>
         <button id="mic" class="facebtn" title="Dictate (click to start/stop)">&#127908;</button>
         <button id="focus" class="facebtn" title="Focus terminal (right-click to link a TTY)">&#8982;</button>
+      </div>
+    </div>
+
+    <!-- Inline, NOT a full-screen overlay (unlike #commands/#commandEdit/
+         #ttyPicker below) — settings mode keeps the real name/log visible
+         above it. See widget.js's setSettingsOpen. -->
+    <div id="settings" class="settings settings-inline hidden">
+      <div class="settings-row">
+        <label for="color">Color</label>
+        <input id="color" type="color" />
+      </div>
+      <div class="settings-row">
+        <label for="opacity">Opacity</label>
+        <input id="opacity" type="range" min="0.2" max="1" step="0.02" />
+      </div>
+      <div class="settings-row">
+        <label for="alwaysOnTop">Always on top</label>
+        <input id="alwaysOnTop" type="checkbox" />
+      </div>
+      <div class="settings-row">
+        <label for="mute">Mute</label>
+        <input id="mute" type="checkbox" />
+      </div>
+      <div class="settings-row">
+        <label for="expandWhenHidden">Expand when hidden</label>
+        <input id="expandWhenHidden" type="checkbox" />
+      </div>
+      <div class="settings-row">
+        <label for="wakeEnabled">Wake up via vortexia</label>
+        <input id="wakeEnabled" type="checkbox" />
+      </div>
+      <div class="settings-row">
+        <label for="micLanguage">Dictation language</label>
+        <select id="micLanguage">
+          <option value="es">Español</option>
+          <option value="en">English</option>
+          <option value="pt">Português</option>
+          <option value="fr">Français</option>
+          <option value="auto">Auto-detect</option>
+        </select>
       </div>
     </div>
 
@@ -69,40 +112,6 @@
     <div class="settings-row">
       <button id="closeTtyPicker">Cancel</button>
     </div>
-  </div>
-
-  <div id="settings" class="settings hidden">
-    <div class="settings-row">
-      <label for="color">Color</label>
-      <input id="color" type="color" />
-    </div>
-    <div class="settings-row">
-      <label for="opacity">Opacity</label>
-      <input id="opacity" type="range" min="0.2" max="1" step="0.02" />
-    </div>
-    <div class="settings-row">
-      <label for="alwaysOnTop">Always on top</label>
-      <input id="alwaysOnTop" type="checkbox" />
-    </div>
-    <div class="settings-row">
-      <label for="mute">Mute</label>
-      <input id="mute" type="checkbox" />
-    </div>
-    <div class="settings-row">
-      <label for="expandWhenHidden">Expand when hidden</label>
-      <input id="expandWhenHidden" type="checkbox" />
-    </div>
-    <div class="settings-row">
-      <label for="micLanguage">Dictation language</label>
-      <select id="micLanguage">
-        <option value="es">Español</option>
-        <option value="en">English</option>
-        <option value="pt">Português</option>
-        <option value="fr">Français</option>
-        <option value="auto">Auto-detect</option>
-      </select>
-    </div>
-    <button id="closeSettings">Done</button>
   </div>
 
   <script src="widget.js"></script>

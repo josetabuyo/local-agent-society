@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
@@ -16,16 +17,26 @@ def agent():
 
 
 @click.command("agents")
-def agents_list():
+@click.option("--inactive", "inactive_only", is_flag=True, help="Show only inactive (put-away) agents.")
+@click.option("--active", "active_only", is_flag=True, help="Show only active agents (default: shows all).")
+def agents_list(inactive_only, active_only):
     """List all registered agents."""
     data = api.get("/agents")
     if not data:
         click.echo("No agents registered.")
         return
-    click.echo(f"{'Name':<20} {'Voice':<25} {'Path'}")
-    click.echo("-" * 70)
+    if inactive_only:
+        data = {n: i for n, i in data.items() if i.get("inactive")}
+    elif active_only:
+        data = {n: i for n, i in data.items() if not i.get("inactive")}
+    if not data:
+        click.echo("No matching agents.")
+        return
+    click.echo(f"{'Name':<20} {'Voice':<25} {'Status':<10} {'Path'}")
+    click.echo("-" * 80)
     for name, info in data.items():
-        click.echo(f"{name:<20} {info.get('voice','?'):<25} {info.get('path','?')}")
+        status = "inactive" if info.get("inactive") else "active"
+        click.echo(f"{name:<20} {info.get('voice','?'):<25} {status:<10} {info.get('path','?')}")
 
 
 @agent.command("new")
@@ -82,7 +93,7 @@ def new(name, voice, target_dir):
     click.echo(f"Registered '{name}' with backend.")
 
     # Launch widget
-    subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
+    subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=reopen"], check=False)
     click.echo(f"Widget launched.")
 
     # Announce
@@ -358,12 +369,50 @@ def unmute(name):
     click.echo(f"{name}: unmuted.")
 
 
+@agent.command("deactivate")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def deactivate(name):
+    """Mark an agent inactive and close its widget (does not touch its Claude Code session)."""
+    name = resolve_agent_name(name)
+    api.post(f"/agents/{name}/inactive", {})
+    subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=close"], check=False)
+    click.echo(f"{name}: inactive.")
+
+
+@agent.command("activate")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def activate(name):
+    """Mark an agent active again (see `las agents --inactive` to find one)."""
+    name = resolve_agent_name(name)
+    api.delete(f"/agents/{name}/inactive")
+    click.echo(f"{name}: active.")
+
+
+@agent.command("wake-enable")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def wake_enable(name):
+    """Allow `las agent focus`/vortexia to wake this agent when inactive (opens a new
+    iTerm2 window running `claude --dangerously-skip-permissions` in its directory)."""
+    name = resolve_agent_name(name)
+    api.post(f"/agents/{name}/wake-enabled", {})
+    click.echo(f"{name}: wake-up via vortexia enabled.")
+
+
+@agent.command("wake-disable")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def wake_disable(name):
+    """Disallow waking this agent up automatically while inactive."""
+    name = resolve_agent_name(name)
+    api.delete(f"/agents/{name}/wake-enabled")
+    click.echo(f"{name}: wake-up via vortexia disabled.")
+
+
 @click.command("widget")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def widget(name):
     """Reopen the agent widget on the current Space."""
     name = resolve_agent_name(name)
-    subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
+    subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=reopen"], check=False)
     click.echo(f"Widget reopened for {name}.")
 
 
@@ -375,7 +424,7 @@ def widgets_all():
         click.echo("No agents registered.")
         return
     for name in data:
-        subprocess.run(["open", f"localagentsociety://{name}?action=reopen"], check=False)
+        subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=reopen"], check=False)
         click.echo(f"  ↺ {name}")
 
 

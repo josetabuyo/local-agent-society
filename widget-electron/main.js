@@ -14,9 +14,11 @@
  *     replacing the old AppleScript/tty-injection pipeline
  *   - minimal settings (color, opacity, always-on-top, mute) via electron-store
  *
- * Explicitly NOT ported in this pass: marquee text, mosaic/tiling window
- * layout animations, drag-to-link-tty, and the full command-palette
- * feature set from tray.swift. See the task report for the full list.
+ * Explicitly NOT ported in this pass: marquee text, drag-to-link-tty, and
+ * the full command-palette feature set from tray.swift. See the task report
+ * for the full list. (Mosaic/tiling layout for multiple occlusion-expanded
+ * widgets sharing a display WAS ported — see mosaicTiles/applyMosaicLayout
+ * below.)
  * (Mic/STT dictation IS implemented — via local offline Whisper, not the
  * Web Speech API; see the "audio transcription" section below for why.)
  *
@@ -155,12 +157,26 @@ function handleProtocolUrl(rawUrl) {
     return;
   }
   if (parsed.protocol !== `${PROTOCOL_SCHEME}:`) return;
-  const name = parsed.hostname || parsed.pathname.replace(/^\/+/, '');
+  // macOS percent-encodes disallowed characters (e.g. a literal space in an
+  // agent name like "Minis App Acces") before delivering the URL via
+  // 'open-url' — parsed.hostname/pathname come back still encoded ("Minis%20
+  // App%20Acces"), which must be decoded back before use. Using it raw would
+  // key this widget's window/prefs/vortexia connection under a name that
+  // never matches the agent's real (decoded) name used everywhere else,
+  // producing a second, duplicate widget for the same agent.
+  let name = parsed.hostname || parsed.pathname.replace(/^\/+/, '');
+  try {
+    name = decodeURIComponent(name);
+  } catch {
+    // malformed percent-encoding — fall back to the raw string
+  }
   if (!name) return;
   const action = parsed.searchParams.get('action');
 
   if (action === 'reopen') {
     reopenWidget(name);
+  } else if (action === 'close') {
+    closeWidget(name);
   } else {
     openWidget(name);
   }
@@ -194,7 +210,20 @@ function reopenWidget(name) {
     existing.destroy();
     windows.delete(name);
   }
-  return createWidgetWindow(name);
+  return createWidgetWindow(name, { forgetPosition: true });
+}
+
+/**
+ * Destroy the existing window for `name`, if any, and do NOT recreate it —
+ * the "door" button / `las agent deactivate` use this to put a widget away.
+ * No-op if the widget isn't currently open.
+ */
+function closeWidget(name) {
+  const existing = windows.get(name);
+  if (existing && !existing.isDestroyed()) {
+    existing.destroy();
+    windows.delete(name);
+  }
 }
 
 // Distinct-enough hues, fixed saturation/lightness so every one stays
@@ -217,7 +246,7 @@ function hslToHex(h, s, l) {
 const WIDGET_WIDTH = 300;
 const WIDGET_HEIGHT = 160;
 
-function createWidgetWindow(name) {
+function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // Random color ONLY the first time this agent ever gets a widget — once a
   // color exists (whether from that first randomization or a manual pick in
   // settings), every later start/reopen respects it, it's never overwritten.
@@ -233,7 +262,14 @@ function createWidgetWindow(name) {
   // getSavedBounds/saveBounds below). Only first-ever open (or a saved spot
   // that's now off any connected display, e.g. an external monitor got
   // unplugged) falls back to a fresh random spot so widgets don't stack.
-  const saved = getSavedBounds(name);
+  //
+  // `forgetPosition` (set by reopenWidget, i.e. `las widget`/the tray "reopen"
+  // action) skips the saved bounds on purpose: that command exists to grab a
+  // widget that's stuck or hard to find, so reappearing at the exact same
+  // spot defeats the point — it needs a fresh, easy-to-spot position instead.
+  // A plain relaunch (`las start`) still restores the last position, since
+  // that IS the desired continuity there.
+  const saved = !forgetPosition && getSavedBounds(name);
   let bounds;
   if (saved && boundsOnScreen(saved)) {
     bounds = saved;
@@ -312,8 +348,11 @@ function createWidgetWindow(name) {
     console.log(`[widget:${name}]`, message);
   });
 
+  win.agentName = name;
+
   win.on('closed', () => {
     windows.delete(name);
+    occlusionExpandedWindows.delete(win);
     const client = vortexiaClients.get(name);
     if (client) {
       client.close().catch(() => {});
@@ -407,7 +446,9 @@ const DEFAULT_PREFS = {
   opacity: 0.72,
   alwaysOnTop: true,
   mute: false,
-  expandWhenHidden: false,
+  // On by default per explicit request — most agents on this machine want
+  // the ambient "still here" banner while off-Space/occluded.
+  expandWhenHidden: true,
   // Mic dictation language hint for Whisper — independent of the agent's
   // TTS voice locale (an agent can speak English while being dictated to in
   // Spanish). Defaults to Spanish per explicit request; 'auto' lets Whisper
@@ -469,14 +510,14 @@ const collapsedBounds = new WeakMap();
 /** @type {WeakSet<BrowserWindow>} */
 const expandedWindows = new WeakSet();
 
-ipcMain.on('window:set-expanded', (event, expanded) => {
+ipcMain.on('window:set-expanded', (event, expanded, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isDestroyed()) return;
   if (expanded && !expandedWindows.has(win)) {
     collapsedBounds.set(win, win.getBounds());
     expandedWindows.add(win);
     const b = win.getBounds();
-    win.setBounds({ x: b.x, y: b.y, width: EXPANDED_WIDTH, height: EXPANDED_HEIGHT });
+    win.setBounds({ x: b.x, y: b.y, width: EXPANDED_WIDTH, height: height || EXPANDED_HEIGHT });
   } else if (!expanded && expandedWindows.has(win)) {
     expandedWindows.delete(win);
     const prev = collapsedBounds.get(win);
@@ -509,8 +550,124 @@ ipcMain.on('window:set-expanded', (event, expanded) => {
 //
 // Off by default per agent (matches Prefs.expandOnSpaceChange's default),
 // toggled from the settings panel.
-/** @type {WeakSet<BrowserWindow>} */
-const occlusionExpandedWindows = new WeakSet();
+//
+// Mosaic tiling: when several widgets are occlusion-expanded on the SAME
+// display at once (their Spaces share a screen), filling each one's bounds
+// with the full workArea makes them stack exactly on top of each other.
+// The retired Swift widget avoided this via AppDelegate.mosaicTiles/
+// applyMosaicLayout (swift-widget-final tag, tray.swift) — ported below
+// verbatim (same tile counts/shapes, same 50ms debounce to batch widgets
+// that go occluded within the same Space-switch).
+/** @type {Set<BrowserWindow>} */
+const occlusionExpandedWindows = new Set();
+
+function mosaicTiles(count, workArea) {
+  const { x: x0, y: y0, width: W, height: H } = workArea;
+  if (count <= 0) return [];
+  if (count === 1) return [{ x: x0, y: y0, width: W, height: H }];
+  if (count === 2) {
+    return Math.random() < 0.5
+      ? [
+          { x: x0, y: y0, width: W / 2, height: H },
+          { x: x0 + W / 2, y: y0, width: W / 2, height: H },
+        ]
+      : [
+          { x: x0, y: y0, width: W, height: H / 2 },
+          { x: x0, y: y0 + H / 2, width: W, height: H / 2 },
+        ];
+  }
+  if (count === 3) {
+    const layouts = [
+      [ // top full, bottom 2
+        { x: x0, y: y0, width: W, height: H / 2 },
+        { x: x0, y: y0 + H / 2, width: W / 2, height: H / 2 },
+        { x: x0 + W / 2, y: y0 + H / 2, width: W / 2, height: H / 2 },
+      ],
+      [ // top 2, bottom full
+        { x: x0, y: y0, width: W / 2, height: H / 2 },
+        { x: x0 + W / 2, y: y0, width: W / 2, height: H / 2 },
+        { x: x0, y: y0 + H / 2, width: W, height: H / 2 },
+      ],
+      [ // left full, right 2
+        { x: x0, y: y0, width: W / 2, height: H },
+        { x: x0 + W / 2, y: y0, width: W / 2, height: H / 2 },
+        { x: x0 + W / 2, y: y0 + H / 2, width: W / 2, height: H / 2 },
+      ],
+      [ // right full, left 2
+        { x: x0 + W / 2, y: y0, width: W / 2, height: H },
+        { x: x0, y: y0, width: W / 2, height: H / 2 },
+        { x: x0, y: y0 + H / 2, width: W / 2, height: H / 2 },
+      ],
+      [ // 3 columns
+        { x: x0, y: y0, width: W / 3, height: H },
+        { x: x0 + W / 3, y: y0, width: W / 3, height: H },
+        { x: x0 + (2 * W) / 3, y: y0, width: W / 3, height: H },
+      ],
+    ];
+    return layouts[Math.floor(Math.random() * layouts.length)];
+  }
+  // 4+: 2 columns, as many rows as needed.
+  const cols = 2;
+  const rows = Math.ceil(count / cols);
+  const tW = W / cols;
+  const tH = H / rows;
+  const tiles = [];
+  for (let i = 0; i < count; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    tiles.push({ x: x0 + col * tW, y: y0 + row * tH, width: tW, height: tH });
+  }
+  return tiles;
+}
+
+let mosaicTimer = null;
+const mosaicPendingKeys = new Set();
+
+// 350ms, not the Swift original's 50ms: that version's mosaic trigger
+// (activeSpaceDidChangeNotification) fired once for every window in the
+// same tick, so 50ms was just a tiny safety margin. Here each widget is a
+// separate renderer with its OWN 400ms debounce before it even tells main
+// it's occluded (see widget.js), so sibling widgets going occluded together
+// (e.g. one Space switch) can still reach main.js tens to a couple hundred
+// ms apart. Too short a window here meant applyMosaicLayout ran once per
+// arrival — 1 window fills the screen, then gets abruptly re-tiled to
+// halves, then to thirds — instead of computing the final N-way layout once.
+const MOSAIC_BATCH_MS = 350;
+
+// Group by (physical display, macOS Space) — NOT display alone. A Mac with
+// one monitor still has many Spaces (virtual desktops), and every widget
+// lives on its own Space by default (see the Space-memory comments near
+// createWidgetWindow). Grouping by display alone lumped EVERY occluded
+// widget on the machine into one giant grid (seen live: 13 agents squeezed
+// into a 2x7 grid covering the whole screen) even though each Space's own
+// Mission Control thumbnail only ever shows the widgets actually pinned to
+// THAT Space. spaces.getSpaceForWindow (see lib/spaces.js) reads the same
+// CGS Space id already used for Space-memory persistence; unsupported/
+// unknown falls back to a shared 'u' bucket per display (old behavior).
+function mosaicKeyFor(win) {
+  const displayId = screen.getDisplayMatching(win.getBounds()).id;
+  const spaceId = spaces.getSpaceForWindow(win);
+  return `${displayId}:${spaceId != null ? spaceId.toString() : 'u'}`;
+}
+
+function scheduleMosaicLayout(win) {
+  mosaicPendingKeys.add(mosaicKeyFor(win));
+  clearTimeout(mosaicTimer);
+  mosaicTimer = setTimeout(applyMosaicLayout, MOSAIC_BATCH_MS);
+}
+
+function applyMosaicLayout() {
+  const keys = [...mosaicPendingKeys];
+  mosaicPendingKeys.clear();
+  for (const key of keys) {
+    const group = [...occlusionExpandedWindows].filter((w) => !w.isDestroyed() && mosaicKeyFor(w) === key);
+    if (group.length === 0) continue;
+    const display = screen.getDisplayMatching(group[0].getBounds());
+    group.sort((a, b) => (a.agentName || '').localeCompare(b.agentName || ''));
+    const tiles = mosaicTiles(group.length, display.workArea);
+    group.forEach((w, i) => w.setBounds(tiles[i]));
+  }
+}
 
 ipcMain.on('window:set-occlusion-expanded', (event, expanded) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -522,20 +679,28 @@ ipcMain.on('window:set-occlusion-expanded', (event, expanded) => {
   if (expanded && !occlusionExpandedWindows.has(win)) {
     collapsedBounds.set(win, win.getBounds());
     occlusionExpandedWindows.add(win);
-    const display = screen.getDisplayMatching(win.getBounds());
-    win.setBounds(display.workArea);
     win.setIgnoreMouseEvents(true, { forward: true });
     // Occlusion (and therefore 'hidden') has already been detected at this
     // point via the DEFAULT throttled behavior — safe to disable throttling
     // now so the fullscreen banner actually paints while still off-Space,
     // instead of only becoming visible once the user returns.
     win.webContents.setBackgroundThrottling(false);
+    scheduleMosaicLayout(win);
   } else if (!expanded && occlusionExpandedWindows.has(win)) {
     occlusionExpandedWindows.delete(win);
     win.setIgnoreMouseEvents(false);
     win.webContents.setBackgroundThrottling(true);
     const prev = collapsedBounds.get(win);
     if (prev) win.setBounds(prev);
+    // Deliberately NOT re-tiling the remaining siblings here (no
+    // scheduleMosaicLayout call) — each widget restores on its own
+    // RESTORE_DELAY_MS timer (widget.js), so they rarely collapse in the
+    // same tick. Re-tiling survivors on every single collapse produced a
+    // visible two-step animation: a sibling about to restore would first
+    // jump to a bigger tile as the group shrank, then immediately collapse
+    // to its compact size a moment later. Leaving survivors at their
+    // existing tile until they too restore trades a briefly-oversized empty
+    // slot for a much smoother, single-step restore per widget.
   }
 });
 
@@ -674,6 +839,44 @@ ipcMain.handle('agent:focus', async (_event, name) => {
     return await res.json();
   } catch (err) {
     return { ok: false, error: String(err) };
+  }
+});
+
+// "Door" button: mark this agent inactive on the backend, then close this
+// very widget window — mirrors `las agent deactivate`. Does not touch the
+// agent's Claude Code session (see backend/main.py's set_inactive comment).
+ipcMain.handle('agent:deactivate', async (event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/inactive`, { method: 'POST' });
+    const json = await res.json();
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) win.destroy();
+    return json;
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+// "Wake up via vortexia" settings checkbox — backed by the same
+// inactive/wake-enabled flags `las agent focus` reads, not electron-store,
+// so the CLI-driven wake fallback sees the same state the widget shows.
+ipcMain.handle('agent:set-wake-enabled', async (_event, name, enabled) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/wake-enabled`, {
+      method: enabled ? 'POST' : 'DELETE',
+    });
+    return await res.json();
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
+
+ipcMain.handle('agent:get-wake-enabled', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/wake-enabled`);
+    return await res.json();
+  } catch (err) {
+    return { wake_enabled: false, error: String(err) };
   }
 });
 

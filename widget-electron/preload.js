@@ -23,8 +23,11 @@ contextBridge.exposeInMainWorld('las', {
   resizeBy: (dw, dh) => ipcRenderer.send('window:resize-by', dw, dh),
 
   /** Grow the window to fit an overlay panel (settings/commands/TTY picker),
-   * or shrink it back to its remembered compact size. Idempotent. */
-  setExpanded: (expanded) => ipcRenderer.send('window:set-expanded', expanded),
+   * or shrink it back to its remembered compact size. Idempotent.
+   * `height` optionally overrides the default expanded height — the settings
+   * panel is short and fixed (no scrolling list), so it asks for a smaller
+   * height than the commands/TTY-picker panels' default. */
+  setExpanded: (expanded, height) => ipcRenderer.send('window:set-expanded', expanded, height),
 
   /** "Expand when hidden" (retired Swift "Expand on space change"): balloon
    * to fill the screen, click-through, when occluded/off-Space; shrink back
@@ -84,4 +87,13 @@ contextBridge.exposeInMainWorld('las', {
    * linked terminal(s) — same AppleScript-via-iTerm write the Focus button
    * uses to bring a terminal forward, not vortexia messaging. */
   writeToTty: (name, text) => ipcRenderer.invoke('agent:tty-write', name, text),
+
+  /** Door button: mark this agent inactive on the backend and close this
+   * widget window. See main.js's agent:deactivate comment. */
+  deactivateAgent: (name) => ipcRenderer.invoke('agent:deactivate', name),
+
+  /** "Wake up via vortexia" settings checkbox — backend-synced (not
+   * electron-store), same flag `las agent focus`'s wake fallback reads. */
+  setWakeEnabled: (name, enabled) => ipcRenderer.invoke('agent:set-wake-enabled', name, enabled),
+  getWakeEnabled: (name) => ipcRenderer.invoke('agent:get-wake-enabled', name),
 });

@@ -13,20 +13,42 @@ html, body {
   height: 100vh;
   padding: 14px 16px;
   border-radius: 14px;
-  background: var(--widget-color, #90c060);
-  opacity: var(--widget-opacity, 0.72);
+  /* Alpha baked into the color itself (see widget.js's hexToRgba) — NOT the
+   * `opacity` property, which used to fade the name/buttons/border along
+   * with the background. */
+  background: var(--widget-bg, rgba(144, 192, 96, 0.72));
   -webkit-app-region: drag;
   display: flex;
   flex-direction: column;
 }
 
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .name {
-  font-size: 26px;
-  font-weight: 700;
-  color: #141414;
+  flex: 1;
+  min-width: 0;
+  font-weight: 800;
+  /* Fill fades with the opacity slider (--text-fill, set in widget.js); the
+   * outline around each letter stays crisp/opaque regardless — see
+   * -webkit-text-stroke below. white-space/line-height are set inline by
+   * widget.js's fitNameToBox, since a split name needs "pre-line" while a
+   * single-line one needs "nowrap" + ellipsis as a last-resort safety net. */
+  color: var(--text-fill, rgba(20, 20, 20, 0.9));
+  -webkit-text-stroke: 1.2px rgba(15, 15, 15, 0.9);
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* Door button: always visible top-right, in both the normal face and
+ * settings mode (see .settings-open below, which hides every OTHER
+ * face button but leaves this and gear alone). */
+.door-corner {
+  flex-shrink: 0;
 }
 
 /*
@@ -44,16 +66,28 @@ html, body {
   align-items: center;
 }
 
+.widget.occlusion-expanded .topbar {
+  justify-content: center;
+  width: 100%;
+}
+
 .widget.occlusion-expanded .name {
-  font-size: min(18vw, 20vh);
-  white-space: normal;
+  /* Font size/line-breaks are computed and applied inline by widget.js's
+   * fitNameToBox (ported from the retired Swift widget's
+   * fitFontSizeAndSplit/smartSplit) so the name fills the now much larger
+   * box instead of just the CSS min(18vw,20vh) guess. Solid black, no
+   * transparency and no stroke needed — full-screen banner should be as
+   * legible as possible, not styled to match the (now irrelevant) widget
+   * opacity. */
+  color: #000;
+  -webkit-text-stroke: 0;
   text-align: center;
-  line-height: 1.05;
+  flex: none;
 }
 
 .widget.occlusion-expanded .log,
 .widget.occlusion-expanded .buttonbar,
-.widget.occlusion-expanded .gear,
+.widget.occlusion-expanded .door-corner,
 .widget.occlusion-expanded .resize-handle {
   display: none;
 }
@@ -155,9 +189,13 @@ html, body {
   -webkit-app-region: no-drag;
   width: 26px;
   height: 26px;
-  border: none;
+  box-sizing: border-box;
+  /* Crisp, always-opaque outline regardless of --widget-bg's transparency;
+   * only the circle's fill (--btn-fill, set in widget.js) fades with the
+   * opacity slider. */
+  border: 2.4px solid rgba(20, 20, 20, 0.55);
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--btn-fill, rgba(0, 0, 0, 0.12));
   color: #141414;
   cursor: pointer;
   font-size: 13px;
@@ -165,6 +203,13 @@ html, body {
   align-items: center;
   justify-content: center;
   padding: 0;
+}
+
+/* Settings mode: only gear (pressed, via .active) and the door stay visible —
+ * every other face button hides. The real name/log stay visible above (see
+ * .settings-inline below), unlike the old full-screen settings overlay. */
+.widget.settings-open .buttonbar .facebtn:not(#gear) {
+  display: none;
 }
 
 .facebtn:hover {
@@ -245,11 +290,11 @@ html, body {
   height: 100vh;
   box-sizing: border-box;
   padding: 14px;
-  /* Same hue as the widget face (--widget-color), but fully opaque — unlike
-   * the widget itself, which uses --widget-opacity, these overlay panels
-   * should always be fully readable regardless of how transparent the user
-   * set the compact widget. */
-  background: var(--widget-color, #90c060);
+  /* Same fill as the widget face, transparency included (per explicit
+   * request) — previously always fully opaque regardless of --widget-bg's
+   * alpha, which made the leftover blank space below "Done" look like a
+   * big solid block. */
+  background: var(--widget-bg, rgba(144, 192, 96, 0.72));
   color: #141414;
   font-size: 12px;
   -webkit-app-region: no-drag;
@@ -257,6 +302,22 @@ html, body {
 
 .settings.hidden {
   display: none;
+}
+
+/* The gear panel only — NOT #commands/#commandEdit/#ttyPicker, which stay
+ * full-screen overlays. Normal flow inside #widget, below the buttonbar, so
+ * the real name/log above it stay visible (see setSettingsOpen in
+ * widget.js) instead of being covered by a full-window opaque panel. */
+.settings.settings-inline {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: auto;
+  height: auto;
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 0;
 }
 
 .settings-row {
@@ -267,10 +328,3 @@ html, body {
   gap: 8px;
 }
 
-#closeSettings {
-  width: 100%;
-  padding: 6px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-}

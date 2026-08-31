@@ -17,26 +17,153 @@ const opacityEl = document.getElementById('opacity');
 const alwaysOnTopEl = document.getElementById('alwaysOnTop');
 const muteEl = document.getElementById('mute');
 const expandWhenHiddenEl = document.getElementById('expandWhenHidden');
+const wakeEnabledEl = document.getElementById('wakeEnabled');
 const micLanguageEl = document.getElementById('micLanguage');
-const closeSettingsEl = document.getElementById('closeSettings');
+const doorEl = document.getElementById('door');
 
-nameEl.textContent = agentName;
 document.title = agentName;
+
+// ── name sizing/line-breaking ────────────────────────────────────────────────
+// Ported from the retired Swift widget's fitFontSizeAndSplit/smartSplit
+// (swift-widget-final tag, widget/tray.swift): shrink the name from a
+// starting size until it fits on one line, and if it still doesn't at a
+// reasonable size, break it at whichever generic title boundary — a space,
+// a hyphen, or a lowercase->Uppercase (camelCase/PascalCase) transition —
+// falls closest to the middle, then fit that two-line version instead.
+// Applied both to the compact face (name must fully fit the default widget
+// width) and the occlusion-expanded banner (name should fill the much
+// bigger box), just with different size/box bounds — see fitNameToBox.
+
+const measureCtx = document.createElement('canvas').getContext('2d');
+
+function measureTextWidth(text, sizePx) {
+  measureCtx.font = `800 ${sizePx}px -apple-system, "Segoe UI", system-ui, sans-serif`;
+  return measureCtx.measureText(text).width;
+}
+
+function smartSplit(text) {
+  const chars = [...text];
+  const mid = chars.length / 2;
+
+  let bestSpaceIdx = -1;
+  let bestSpaceDist = Infinity;
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] === ' ' || chars[i] === '-') {
+      const dist = Math.abs(i - mid);
+      if (dist < bestSpaceDist) { bestSpaceDist = dist; bestSpaceIdx = i; }
+    }
+  }
+  if (bestSpaceIdx !== -1) {
+    const before = chars.slice(0, bestSpaceIdx).join('').trim();
+    const after = chars.slice(bestSpaceIdx + 1).join('').trim();
+    if (before && after) return `${before}\n${after}`;
+  }
+
+  let bestCamelIdx = -1;
+  let bestCamelDist = Infinity;
+  for (let i = 1; i < chars.length; i++) {
+    if (/[A-Z]/.test(chars[i]) && /[a-z]/.test(chars[i - 1])) {
+      const dist = Math.abs(i - mid);
+      if (dist < bestCamelDist) { bestCamelDist = dist; bestCamelIdx = i; }
+    }
+  }
+  if (bestCamelIdx !== -1) return `${chars.slice(0, bestCamelIdx).join('')}\n${chars.slice(bestCamelIdx).join('')}`;
+
+  return text;
+}
+
+function fitFontSizeAndSplit(text, maxWidth, maxHeight, start, min) {
+  const effectiveStart = maxHeight ? Math.min(start, Math.floor(maxHeight * 0.9)) : start;
+
+  let size = effectiveStart;
+  const singleLineFloor = Math.max(min, Math.floor(effectiveStart * 0.5));
+  while (size > singleLineFloor) {
+    if (measureTextWidth(text, size) <= maxWidth) return { size, text };
+    size -= 1;
+  }
+
+  const splitText = smartSplit(text);
+  if (splitText !== text) {
+    const lines = splitText.split('\n');
+    const availH = maxHeight || 96;
+    let splitSize = Math.min(effectiveStart, Math.floor(availH / 2.2));
+    while (splitSize > min) {
+      const maxW = Math.max(...lines.map((l) => measureTextWidth(l, splitSize)));
+      if (maxW <= maxWidth) return { size: splitSize, text: splitText };
+      splitSize -= 1;
+    }
+    return { size: min, text: splitText };
+  }
+
+  while (size > min) {
+    if (measureTextWidth(text, size) <= maxWidth) return { size, text };
+    size -= 1;
+  }
+  return { size: min, text };
+}
+
+const COMPACT_START_SIZE = 32;
+const COMPACT_MIN_SIZE = 13;
+const EXPANDED_MIN_SIZE = 40;
+
+function fitNameToBox() {
+  const expanded = widgetEl.classList.contains('occlusion-expanded');
+  let maxWidth;
+  let maxHeight = null;
+  let start;
+  let min;
+  if (expanded) {
+    maxWidth = window.innerWidth * 0.92;
+    maxHeight = window.innerHeight * 0.8;
+    start = Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.35);
+    min = EXPANDED_MIN_SIZE;
+  } else {
+    const doorWidth = doorEl.offsetWidth || 26;
+    maxWidth = Math.max(40, nameEl.parentElement.clientWidth - doorWidth - 8);
+    start = COMPACT_START_SIZE;
+    min = COMPACT_MIN_SIZE;
+  }
+  const { size, text } = fitFontSizeAndSplit(agentName, maxWidth, maxHeight, start, min);
+  nameEl.style.fontSize = `${size}px`;
+  const isSplit = text.includes('\n');
+  nameEl.style.whiteSpace = isSplit ? 'pre-line' : 'nowrap';
+  nameEl.style.lineHeight = isSplit ? '1.05' : '';
+  nameEl.textContent = text;
+}
+
+fitNameToBox();
 
 // micLanguage defaults to Spanish, not auto-detect or the agent's TTS
 // locale — per explicit request: dictation should assume Spanish unless the
 // user picks otherwise, since it's what most agents on this machine are
 // dictated to in regardless of what language their own TTS voice speaks.
-let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: false, micLanguage: 'es' };
+let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: true, micLanguage: 'es' };
 let locale = 'en-US';
+
+/** '#rrggbb' + 0..1 alpha -> 'rgba(r, g, b, a)'. */
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 function applyPrefsToDom() {
   // Set on the root, not widgetEl: #settings/#commands/#commandEdit/#ttyPicker
   // are siblings of #widget in the DOM (not descendants), so a CSS custom
   // property set on widgetEl's own inline style wouldn't inherit into them —
   // :root is the shared ancestor all of them do inherit from.
-  document.documentElement.style.setProperty('--widget-color', prefs.color);
-  document.documentElement.style.setProperty('--widget-opacity', String(prefs.opacity));
+  //
+  // --widget-bg bakes the opacity into the background color's alpha channel
+  // instead of the old `opacity` CSS property on .widget: that property faded
+  // EVERYTHING including text/buttons, which is why a very transparent widget
+  // used to make the agent name unreadable too. Now only fills fade with the
+  // opacity slider — the crisp outline (text-stroke on the name, border on
+  // the face buttons) stays fully opaque regardless, so both stay legible.
+  document.documentElement.style.setProperty('--widget-bg', hexToRgba(prefs.color, prefs.opacity));
+  document.documentElement.style.setProperty('--text-fill', hexToRgba('#141414', prefs.opacity));
+  document.documentElement.style.setProperty('--btn-fill', `rgba(0, 0, 0, ${(0.16 * prefs.opacity).toFixed(3)})`);
   colorEl.value = prefs.color;
   opacityEl.value = String(prefs.opacity);
   alwaysOnTopEl.checked = !!prefs.alwaysOnTop;
@@ -55,19 +182,34 @@ async function init() {
   } catch (err) {
     console.warn('[widget] could not resolve agent locale, defaulting to en-US:', err);
   }
+  try {
+    const { wake_enabled } = await window.las.getWakeEnabled(agentName);
+    wakeEnabledEl.checked = !!wake_enabled;
+  } catch (err) {
+    console.warn('[widget] could not resolve wake-enabled state:', err);
+  }
 }
 init();
 
 // ── settings panel ──────────────────────────────────────────────────────────
 
-gearEl.addEventListener('click', () => {
-  settingsEl.classList.remove('hidden');
-  window.las.setExpanded(true);
-});
-closeSettingsEl.addEventListener('click', () => {
-  settingsEl.classList.add('hidden');
-  window.las.setExpanded(false);
-});
+// Settings is inline now (see index.html), not a full-screen overlay — the
+// real name/log stay visible above it, and only the bottom-row face buttons
+// (besides gear itself) hide while it's open. Gear toggles it open/closed
+// and shows .active ("pressed") while open, both as the visual indicator
+// and as the only way back besides re-clicking it.
+const SETTINGS_HEIGHT = 360;
+let settingsOpen = false;
+
+function setSettingsOpen(open) {
+  settingsOpen = open;
+  settingsEl.classList.toggle('hidden', !open);
+  widgetEl.classList.toggle('settings-open', open);
+  gearEl.classList.toggle('active', open);
+  window.las.setExpanded(open, SETTINGS_HEIGHT);
+}
+
+gearEl.addEventListener('click', () => setSettingsOpen(!settingsOpen));
 
 async function persist(patch) {
   prefs = await window.las.setPrefs(agentName, patch);
@@ -84,6 +226,22 @@ expandWhenHiddenEl.addEventListener('change', () => {
 });
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
 
+// Backend-synced, not electron-store: `las agent focus`'s wake fallback
+// (Python, backend/main.py) reads the same flag this checkbox sets.
+wakeEnabledEl.addEventListener('change', () => {
+  window.las.setWakeEnabled(agentName, wakeEnabledEl.checked);
+});
+
+// Door button: mark inactive + close this widget. See main.js's
+// agent:deactivate comment — never touches the Claude Code session itself.
+doorEl.addEventListener('click', async () => {
+  try {
+    await window.las.deactivateAgent(agentName);
+  } catch (err) {
+    console.warn('[widget] deactivate: request failed:', err);
+  }
+});
+
 // ── expand when hidden (retired Swift "Expand on space change") ────────────
 //
 // document.visibilitychange on macOS tracks real window occlusion (covered
@@ -99,20 +257,33 @@ micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguag
 let occlusionExpanded = false;
 let visibilityDebounce = null;
 
+// How long to wait, after the widget becomes visible again, before shrinking
+// back down to the compact face — separate from the (short, fixed) debounce
+// on the way INTO occlusion below. Easy to tune: just this one constant.
+const RESTORE_DELAY_MS = 2000;
+
 function setOcclusionExpanded(expanded) {
   if (expanded === occlusionExpanded) return;
   occlusionExpanded = expanded;
   window.las.setOcclusionExpanded(expanded);
   widgetEl.classList.toggle('occlusion-expanded', expanded);
+  fitNameToBox();
 }
 
 document.addEventListener('visibilitychange', () => {
   if (visibilityDebounce) clearTimeout(visibilityDebounce);
+  const hidden = document.visibilityState === 'hidden';
+  // Going hidden: short debounce, just enough to skip brief flickers (e.g. a
+  // menu momentarily covering the widget). Coming back visible: the longer,
+  // configurable RESTORE_DELAY_MS — don't yank the banner away the instant
+  // you glance back at the Space.
   visibilityDebounce = setTimeout(() => {
     if (!prefs.expandWhenHidden) return;
-    setOcclusionExpanded(document.visibilityState === 'hidden');
-  }, 400);
+    setOcclusionExpanded(hidden);
+  }, hidden ? 400 : RESTORE_DELAY_MS);
 });
+
+window.addEventListener('resize', () => fitNameToBox());
 
 // ── message log ─────────────────────────────────────────────────────────────
 

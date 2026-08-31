@@ -76,12 +76,20 @@ las agent inject NAME "msg" --from Me   # with sender label
 las agent clean [NAME]                  # inject /clear into agent terminal
 las agent mute [NAME]                   # silence an agent's TTS
 las agent unmute [NAME]                 # re-enable TTS
+las agent deactivate [NAME]             # mark inactive, close its widget (session untouched)
+las agent activate [NAME]               # mark active again
+las agent wake-enable [NAME]            # allow `las agent focus` to wake it from inactive via vortexia
+las agent wake-disable [NAME]           # disallow the auto-wake fallback above
 las agent delete [NAME] [--yes]         # unregister from backend
-las widget [NAME]                       # reopen one agent's floating widget
+las agents --inactive                   # list only inactive (put-away) agents
+las agents --active                     # list only active agents
+las widget [NAME]                       # reopen one agent's floating widget (new position, keeps color/prefs)
 las widgets                             # reopen every registered agent's widget
 las link [--agent NAME] [--tty PATH]    # link the current (or given) terminal to a widget
 ```
 `NAME` is optional on most `agent` subcommands — it defaults to the agent registered for the current directory (via `.agent.json` or a path match in the backend registry).
+
+`las agent focus` also acts as the wake-up path: if an agent has no live terminal session, is marked inactive, and has `wake-enable`d, it opens a new iTerm2 window running `claude --dangerously-skip-permissions` in the agent's directory and marks it active again — instead of just reporting "not found".
 
 ### Voices
 ```
@@ -175,44 +183,56 @@ A TypeScript SDK is available at `sdk/society.ts`.
 
 ## Widget buttons
 
-Each widget has six buttons at the bottom:
+Each widget (Electron, `widget-electron/`) has a name/log face with a door
+button top-right, and a row of face buttons at the bottom:
 
-| Button | Short press | Long press |
-|---|---|---|
-| ⚙ Gear | Toggle config panel (slides down) | — |
-| 🧹 Clear | Inject `/clear` into linked terminal | — |
-| `>_` Terminal | Toggle command panel (slides down) | — |
-| 🔊 Speaker | Toggle mute | Volume + voice picker |
-| 🎙 Mic | Toggle speech input | Language picker |
-| ⊕ Scope | Focus linked terminal | Drag to link a new TTY |
-
-## Command panel
-
-Click the terminal button (`>_`) to slide open the **command panel** below the widget.
-
-Each row shows a **grip handle** (drag to reorder), a **label** (clickable — executes the command), and a scrolling **marquee** with the exact command that will run.
-
-Three command types:
-
-| Type | What it does |
+| Button | Action |
 |---|---|
-| **claude** | Opens iTerm2 running `claude --model <id>` in the agent's directory |
-| **Terminal** | Opens iTerm2 as a plain shell in the agent's directory (no claude) |
-| **Inject** | Types a command into the currently linked terminal session |
+| 🚪 Door (top-right, next to the name) | Deactivate: mark inactive, close this widget (session untouched) — see `las agent deactivate` |
+| ⚙ Gear | Toggle settings mode inline (name/log stay visible above it; every other face button hides; gear shows "pressed" while open) |
+| 🧹 Clear | Type `/clear` into the linked terminal(s) |
+| `>_` Terminal | Toggle the command palette |
+| 🔊 Speaker | Toggle mute |
+| 🎙 Mic | Toggle dictation (click to start/stop; local Whisper transcription) |
+| ⌦ Focus | Focus the linked terminal (right-click, or long-press, to link a new TTY) |
 
-Click ✏ on any row to edit or delete it. Use `+ Add command` to create new ones. If you leave the alias blank, a clean alias is derived from the payload (e.g. `/clear` → `clear`).
+## Command palette
 
-## Widget config
+Click the terminal button (`>_`) to open the **command palette**. Each saved
+command is either `openTerminal` (opens iTerm2 at a directory, optionally
+running a shell command) or `sendMessage` (sends text to the agent's own
+vortexia inbox — the dictation pipeline's send primitive). Edit or delete a
+row inline; `+ Add command` creates a new one.
 
-Click the ⚙ gear button to slide open the **config panel** below the widget:
+## Widget settings
 
-- **Color** — widget background color
-- **Opacity** — transparency level
-- **Always on top** — keep widget above other windows
-- **Expand on space change** — auto-expand when switching Spaces; when multiple widgets share the same Space they tile the screen as a mosaic (halves for 2, random split for 3, 2×2 grid for 4+) instead of overlapping
-- **Voice** — shows current voice name and language; **Test voice** button speaks in the correct language; **Change voice…** opens a picker
+Click the ⚙ gear button to open **settings** — inline, not a separate
+screen; the widget's own name/log stay visible above it:
 
-Long-press the mic button to change the speech recognition language (independent from TTS voice).
+- **Color** / **Opacity** — the opacity slider only fades the fill of the
+  background, name text, and face-button circles; each one's outline
+  (the name's letter stroke, each button's border) stays crisp/opaque
+  regardless, so the widget stays readable even very transparent.
+- **Always on top**
+- **Mute**
+- **Expand when hidden** (on by default) — while occluded/off-Space, the
+  widget balloons to a big, click-through, full-screen name banner instead
+  of just disappearing; shrinks back `RESTORE_DELAY_MS` (2s by default,
+  `widget-electron/renderer/widget.js`) after becoming visible again.
+  When several widgets share the same macOS Space, they tile that Space's
+  screen as a mosaic (halves for 2, one of five layouts for 3, a 2-column
+  grid for 4+) instead of overlapping — grouped per `(display, Space)`, not
+  just per physical display, so unrelated agents on other Spaces are never
+  pulled into the same grid.
+- **Wake up via vortexia** — lets `las agent focus` wake this agent from
+  inactive (see the CLI table above) instead of reporting "not found".
+- **Dictation language**
+
+The agent's name auto-fits its box: it shrinks to the widest size that still
+fits on one line, and if it still doesn't fit, breaks at whichever generic
+title boundary (a space, a hyphen, or a lowercase→Uppercase transition)
+falls closest to the middle — same rule in both the compact face and the
+expanded/mosaic banner, just with a much bigger target size in the latter.
 
 ---
 
@@ -235,7 +255,7 @@ docs/           boarding.html — full onboarding reference
 sdk/            TypeScript client
 skills/         Claude Code skills
 tests/          Test suite (pytest)
-widget/         macOS tray app (Swift)
+widget-electron/  Cross-platform floating widget (Electron)
 ```
 
 ---
