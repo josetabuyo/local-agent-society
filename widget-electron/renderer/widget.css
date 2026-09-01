@@ -161,6 +161,50 @@ html, body {
   content: "\1F50A ";
 }
 
+/* Agent's own voice: no bubble, no border, left-aligned — a robot glyph is
+ * the only marker, no name label. */
+.log .entry.agent-msg {
+  border-top: none;
+}
+
+.log .entry.agent-msg .agent-icon {
+  margin-right: 4px;
+}
+
+/* Human dictation into this agent: a comic-style speech bubble on the right —
+ * no name, no icon, just the bubble with a small tail pointing at its corner. */
+.log .entry.user-msg {
+  display: flex;
+  justify-content: flex-end;
+  border-top: none;
+  padding-right: 6px;
+}
+
+.log .entry.user-msg .bubble {
+  position: relative;
+  max-width: 75%;
+  padding: 4px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.05);
+  word-wrap: break-word;
+}
+
+/* Tail: a small rotated square clipped to a triangle, border+fill matched to
+ * the bubble, tucked behind its edge so the seam disappears. */
+.log .entry.user-msg .bubble::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  border-right: 1px solid rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
 /*
  * Bottom button row: ALL face buttons live here now, gear included — moved
  * off its earlier top-right absolute position on request, so there's a

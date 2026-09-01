@@ -70,6 +70,30 @@ El motor TTS solo suena natural cuando el texto está en el idioma de la voz. **
 
 **Regla de oro:** el texto que pases a `las speak` siempre debe estar en el idioma que corresponde a la voz del agente. Si la voz es Samantha, habla en inglés. Si es Paulina, habla en español. Aunque el usuario te escriba en otro idioma, el TTS va en el idioma de la voz.
 
+### Reporte de cierre — resumen breve al final de cada respuesta (obligatorio)
+
+Ya no existe el hook global de `Stop` (`~/.claude/hooks/announce-here.sh`) que anunciaba un genérico "Here! `<Nombre>`" sin contenido real — fue removido de `~/.claude/settings.json`. Esa responsabilidad pasa a esta sesión: **antes de devolver el control al usuario, hablar un resumen breve de lo que se acaba de hacer.** Esto es lo que deja, en el historial de mensajes del widget, un registro útil de lo que el agente fue haciendo — no solo "está vivo", sino "hizo esto".
+
+**Formato (plantilla con slot, no un texto fijo):**
+
+```
+"<verbo de reporte>: <resumen>. <NombreAgente>."
+```
+
+- `<verbo de reporte>` es `"Reporting"` en inglés / `"Reportando"` en español, según el idioma de la voz (ver tabla arriba).
+- `<resumen>` es UNA frase de lo que se acaba de hacer, en el idioma de la voz, truncada a `report_max_chars` caracteres.
+  - Leer `report_max_chars` de `.agent.json`. **Si el campo no existe, usar 40 por defecto.**
+  - **Fallback duro** (nunca dejar el slot vacío): si no hay nada sustancial que resumir — turno de solo charla, pregunta sin acción, etc. — usar `"done"` (inglés) / `"listo"` (español) como `<resumen>`.
+- `<NombreAgente>` es el `name` de `.agent.json`.
+
+```bash
+# inglés, voz Samantha, report_max_chars: 40
+las speak "Reporting: widget chat bubbles done. LocalAgentSociety." --name LocalAgentSociety
+
+# español, voz Paulina
+las speak "Reportando: base de datos migrada. Robotics." --name Robotics
+```
+
 ---
 
 ## 2. Sin artefactos de sesión — nunca

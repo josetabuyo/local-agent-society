@@ -15,7 +15,7 @@ echo ""
 # ── 1. Build the Electron widget app bundle ───────────────────────────────────
 # (Replaces the old Swift tray.swift build — see swift-widget-final git tag
 # for the retired native implementation.)
-echo "[ 1/6 ] Building Electron widget..."
+echo "[ 1/5 ] Building Electron widget..."
 ELECTRON_DIR="$INSTALL_DIR/widget-electron"
 (cd "$ELECTRON_DIR" && npm install --no-audit --no-fund -q && npm run build -q)
 ELECTRON_APP="$ELECTRON_DIR/dist/mac-arm64/Local Agent Society.app"
@@ -30,13 +30,13 @@ else
 fi
 
 # ── 2. Python dependencies ────────────────────────────────────────────────────
-echo "[ 2/6 ] Installing Python dependencies..."
+echo "[ 2/5 ] Installing Python dependencies..."
 VENV="$INSTALL_DIR/backend/.venv"
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
-echo "[ 3/6 ] Installing skills..."
+echo "[ 3/5 ] Installing skills..."
 for skill in local-agent-voice local-agent-pronunciation local-agent-widget; do
     mkdir -p ~/.claude/skills/$skill
     sed "s|INSTALL_DIR|$INSTALL_DIR|g" \
@@ -51,14 +51,13 @@ mkdir -p ~/.claude/skills/las-agent
 cp "$INSTALL_DIR/.claude/skills/las-agent/SKILL.md" ~/.claude/skills/las-agent/SKILL.md
 echo "         skill: las-agent"
 
-# ── 4. Install hook ───────────────────────────────────────────────────────────
-echo "[ 4/6 ] Installing stop hook..."
-mkdir -p ~/.claude/hooks
-cp "$INSTALL_DIR/hooks/announce-here.sh" ~/.claude/hooks/announce-here.sh
-chmod +x ~/.claude/hooks/announce-here.sh
-
-# ── 5. Update ~/.claude/settings.json ────────────────────────────────────────
-echo "[ 5/6 ] Updating Claude settings..."
+# ── 4. Update ~/.claude/settings.json ────────────────────────────────────────
+# No Stop hook here anymore — the old one just spoke a fixed "Here! <Family>"
+# with no real content. Reporting is now the las-agent skill's job: it
+# instructs the model to speak an actual closing summary of what it did via
+# `las speak`, so removing any stale Stop-hook entry from a previous install
+# is part of this step too.
+echo "[ 4/5 ] Updating Claude settings..."
 python3 - <<PYEOF
 import json, os
 
@@ -72,22 +71,20 @@ for p in ["Bash(curl:*)", "Bash(python3:*)", "Bash(nohup:*)"]:
     if p not in perms:
         perms.append(p)
 
-# stop hook
-hooks = s.setdefault("hooks", {})
-stop = hooks.setdefault("Stop", [])
-hook_cmd = "bash $HOME/.claude/hooks/announce-here.sh"
-already = any(
-    h.get("command") == hook_cmd
-    for entry in stop
-    for h in entry.get("hooks", [])
-)
-if not already:
-    stop.append({"matcher": "", "hooks": [{"type": "command", "command": hook_cmd}]})
+# Remove any leftover announce-here.sh Stop hook from a previous install.
+stop = s.get("hooks", {}).get("Stop", [])
+for entry in stop:
+    entry["hooks"] = [h for h in entry.get("hooks", []) if "announce-here.sh" not in h.get("command", "")]
+s.setdefault("hooks", {})["Stop"] = [e for e in stop if e.get("hooks")]
+if not s["hooks"]["Stop"]:
+    del s["hooks"]["Stop"]
 
 with open(path, "w") as f:
     json.dump(s, f, indent=2)
 print("         settings.json updated")
 PYEOF
+
+rm -f ~/.claude/hooks/announce-here.sh
 
 # ── Initialize backend data ───────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR/backend/data"
@@ -158,7 +155,8 @@ if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
   "pronunciation": "$FAMILY",
   "backend_url": "http://localhost:8700",
   "frontend_url": "http://localhost:8700/widget/$FAMILY",
-  "created": "$TODAY"
+  "created": "$TODAY",
+  "report_max_chars": 40
 }
 JSON
 fi

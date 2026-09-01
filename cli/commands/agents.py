@@ -76,6 +76,7 @@ def new(name, voice, target_dir):
         "locale": locale,
         "pronunciation": name,
         "created": str(datetime.date.today()),
+        "report_max_chars": 40,
     }
     try:
         agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))

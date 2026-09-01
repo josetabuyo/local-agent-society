@@ -289,18 +289,40 @@ window.addEventListener('resize', () => fitNameToBox());
 
 function appendLogEntry(envelope, { speak } = {}) {
   const row = document.createElement('div');
-  row.className = 'entry' + (speak ? ' speak' : '');
-  const from = document.createElement('span');
-  from.className = 'from';
   // A dictated message is a self-send: {from: agentName, to: agentName,
-  // source: 'human'} — see main.js's vortexia:send handler. Labeling it with
-  // the agent's own name reads as "the agent said this", which is backwards
-  // and was confusing in practice: it's the person dictating TO the agent's
-  // inbox, not the agent talking to itself.
+  // source: 'human'} — see main.js's vortexia:send handler. That's the
+  // person dictating TO the agent's inbox, not the agent talking to itself,
+  // so it renders as a chat bubble on the right (the "user" side).
   const isOwnDictation = envelope.source === 'human' && envelope.from === agentName && envelope.to === agentName;
-  from.textContent = isOwnDictation ? '🎤 You' : (envelope.from || '?');
-  row.appendChild(from);
-  row.appendChild(document.createTextNode(': ' + (envelope.text || '')));
+  // This agent's own voice output (TTS speak events off the queue) arrives
+  // as {from: "queue", to: agentName, kind: "speak"} — see backend/main.py's
+  // tts_drainer, which hardcodes from:"queue" rather than the agent's own
+  // name. So detect it by kind/the `speak` flag, not by `from`. No bubble,
+  // no name label — a robot glyph is enough since it's always this widget's
+  // own agent talking.
+  const isOwnVoice = !isOwnDictation && (speak || envelope.kind === 'speak');
+
+  if (isOwnDictation) {
+    row.className = 'entry user-msg';
+    const bubble = document.createElement('span');
+    bubble.className = 'bubble';
+    bubble.textContent = envelope.text || '';
+    row.appendChild(bubble);
+  } else if (isOwnVoice) {
+    row.className = 'entry agent-msg' + (speak ? ' speak' : '');
+    const icon = document.createElement('span');
+    icon.className = 'agent-icon';
+    icon.textContent = speak ? '🔊' : '🤖';
+    row.appendChild(icon);
+    row.appendChild(document.createTextNode(envelope.text || ''));
+  } else {
+    row.className = 'entry' + (speak ? ' speak' : '');
+    const from = document.createElement('span');
+    from.className = 'from';
+    from.textContent = envelope.from || '?';
+    row.appendChild(from);
+    row.appendChild(document.createTextNode(': ' + (envelope.text || '')));
+  }
   logEl.appendChild(row);
   logEl.scrollTop = logEl.scrollHeight;
 
@@ -455,7 +477,7 @@ document.getElementById('clear').addEventListener('click', async () => {
 // the same destination the old SpeechRecognition.onresult used.
 
 const micEl = document.getElementById('mic');
-const MAX_RECORDING_MS = 30000; // safety net if the user forgets to click stop
+const MAX_RECORDING_MS = 600000; // 10 min safety net if the user forgets to click stop
 
 let mediaRecorder = null;
 let recordedChunks = [];
