@@ -260,7 +260,7 @@ let visibilityDebounce = null;
 // How long to wait, after the widget becomes visible again, before shrinking
 // back down to the compact face — separate from the (short, fixed) debounce
 // on the way INTO occlusion below. Easy to tune: just this one constant.
-const RESTORE_DELAY_MS = 2000;
+const RESTORE_DELAY_MS = 1000;
 
 function setOcclusionExpanded(expanded) {
   if (expanded === occlusionExpanded) return;
@@ -281,6 +281,18 @@ document.addEventListener('visibilitychange', () => {
     if (!prefs.expandWhenHidden) return;
     setOcclusionExpanded(hidden);
   }, hidden ? 400 : RESTORE_DELAY_MS);
+});
+
+// System sleep/wake: no NEW occlusion notification fires on wake if the
+// window's occlusion state is unchanged from before sleep (see main.js's
+// powerMonitor 'resume' comment), so a widget that was off-Space going into
+// sleep can wake up stuck compact instead of expanded/mosaic. Re-read the
+// actual visibilityState immediately (no debounce) rather than waiting on an
+// event that may never re-fire.
+window.las.onSystemResume(() => {
+  if (visibilityDebounce) clearTimeout(visibilityDebounce);
+  if (!prefs.expandWhenHidden) return;
+  setOcclusionExpanded(document.visibilityState === 'hidden');
 });
 
 window.addEventListener('resize', () => fitNameToBox());

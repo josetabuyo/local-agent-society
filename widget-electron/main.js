@@ -39,7 +39,7 @@
  * to that one function and no in-process Apple Events appear anywhere.
  */
 
-const { app, BrowserWindow, ipcMain, screen, session } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, session, powerMonitor } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -349,12 +349,46 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // screen (electron assigns a CGWindowID only once shown — see
   // lib/spaces.js), move it to its saved Space, if any, matching where the
   // agent's own bounds already put it. Own-window-only, see lib/spaces.js.
+  //
+  // moveWindowToSpace goes through CGSMoveWindowsToManagedSpace — a private,
+  // direct connection call that bypasses the normal AppKit window-ordering
+  // path. A hide()+show() nudge to force a fresh occlusion notification after
+  // this move was tried here and reverted live: show()'ing a window that
+  // lives on an inactive Space makes macOS switch the user's ACTIVE SPACE to
+  // reveal it — exactly the kind of disruptive, screen-stealing behavior the
+  // occlusion-expanded banner is designed to never cause (see the
+  // window:set-occlusion-expanded comment below on staying click-through and
+  // non-blocking). Do not reintroduce hide()/show() (or any focus/order-front
+  // call) as a fix here without confirming live that it does NOT move the
+  // user off their current Space. Turned out unnecessary anyway: the priming
+  // resync just below (reading document.visibilityState directly, not
+  // waiting on the event) already reports the correct post-move state in
+  // practice — confirmed live after rebuilding the app (see
+  // feedback_widget_electron_build memory: most of one debugging session was
+  // actually spent testing a stale prebuilt bundle that had none of these
+  // changes in it).
   const savedSpace = getSavedSpace(name);
   if (savedSpace != null) {
     win.once('show', () => {
       setTimeout(() => spaces.moveWindowToSpace(win, savedSpace), 150);
     });
   }
+
+  // Prime occlusion state without waiting to be looked at: a widget that
+  // starts life already off the active Space (e.g. `las start` recreates
+  // every agent's window while you're sitting on just one Space) may never
+  // get an initial 'hidden' visibilitychange event — Chromium/AppKit only
+  // push a DELTA when occlusion changes, and a window that's occluded from
+  // the moment it's first shown can have no prior "visible" state to change
+  // FROM, so the very first push can be missed. Ask the renderer to read its
+  // OWN current document.visibilityState directly (a live property, not the
+  // event) and apply it — correct immediately, including right after the CGS
+  // Space move above.
+  win.once('show', () => {
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.webContents.send('system:resume');
+    }, 3000);
+  });
 
   // Forward renderer console output to the main process's stdout — handy
   // for headless smoke-testing and debugging; harmless in normal use.
@@ -1136,6 +1170,37 @@ app.whenReady().then(async () => {
   });
 
   createTray({ registryUrl: REGISTRY_URL, onSelectAgent: openWidget, onQuit: () => app.quit() });
+
+  // System sleep/wake: the occlusion-expand/mosaic feature (see
+  // window:set-occlusion-expanded below) drives off document.visibilitychange,
+  // which tracks real macOS window-occlusion notifications. Those go quiet for
+  // the whole sleep duration, and a window that was already occluded going
+  // into sleep gets no NEW occlusion notification on wake (same state as
+  // before → no event) — so it can wake up stuck compact instead of
+  // expanded/mosaic, even though it's still off-Space. Nudge every renderer to
+  // re-read its actual visibilityState and re-apply immediately on resume,
+  // instead of waiting on an occlusion event that may never re-fire.
+  const resyncAllOcclusion = () => {
+    for (const win of windows.values()) {
+      if (!win.isDestroyed()) win.webContents.send('system:resume');
+    }
+  };
+  powerMonitor.on('resume', resyncAllOcclusion);
+
+  // Belt-and-suspenders beyond sleep/wake: sleep is the ONE case we can
+  // detect and react to (powerMonitor above), but it's not the only way
+  // macOS/Chromium's occlusion-notification delivery can go quiet — e.g.
+  // rapid Space switching, Mission Control, or long idle stretches are all
+  // unconfirmed but plausible ways the underlying push notifications could
+  // silently stop arriving with no OS-level event this process gets to hook.
+  // Rather than chase each one individually as it's reported, self-heal on a
+  // timer: every few minutes, ask every renderer to re-read its OWN current
+  // document.visibilityState (a live property, always accurate regardless of
+  // whether the 'change' event fired) and re-apply. Cheap — a property read
+  // per widget, a no-op when the applied state already matches (see
+  // setOcclusionExpanded's early-return) — so this is pure insurance, not a
+  // replacement for the event-driven paths above.
+  setInterval(resyncAllOcclusion, 5 * 60 * 1000);
 
   const explicit = resolveInitialAgentNames(process.argv);
   if (explicit) {

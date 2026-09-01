@@ -44,6 +44,14 @@ contextBridge.exposeInMainWorld('las', {
     ipcRenderer.on('vortexia:status', (_event, status) => cb(status));
   },
 
+  /** Fired after the system wakes from sleep (main.js's powerMonitor
+   * 'resume' handler) — tells the renderer to re-check document.
+   * visibilityState immediately instead of waiting on a fresh occlusion
+   * event that may never re-fire. @param {() => void} cb */
+  onSystemResume: (cb) => {
+    ipcRenderer.on('system:resume', () => cb());
+  },
+
   // ── face buttons ───────────────────────────────────────────────────────
 
   /** This agent's registered voice + its locale (e.g. "es-MX"), from the backend. */

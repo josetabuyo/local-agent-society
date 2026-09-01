@@ -661,9 +661,9 @@ test('the door button always stays visible (both compact and settings-open) whil
   assert.doesNotMatch(css, /\.widget\.settings-open[^{]*door[^{]*\{\s*display:\s*none/);
 });
 
-test('restore-after-visible delay is a single named constant, easy to retune, defaulting to 2000ms', () => {
+test('restore-after-visible delay is a single named constant, easy to retune to whatever value is currently set', () => {
   const src = readSrc('renderer', 'widget.js');
-  assert.match(src, /const RESTORE_DELAY_MS = 2000;/);
+  assert.match(src, /const RESTORE_DELAY_MS = \d+;/, 'RESTORE_DELAY_MS must stay a bare numeric literal, not an expression, so it stays a one-line, easy-to-retune knob');
   const body = extractFunctionBody(src, "document.addEventListener('visibilitychange', () => {");
   assert.match(body, /hidden \? 400 : RESTORE_DELAY_MS/, 'hide path keeps its short flicker-guard debounce; the show path uses the configurable restore delay');
 });
