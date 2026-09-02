@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('las', {
   /** Agent name this window was opened for, read from ?agent= query string. */
   getAgentName: () => new URLSearchParams(window.location.search).get('agent') || '',
 
+  /** Write a line to session/widget.log (see main.js's persistent logging
+   * section) — the renderer has no fs access, so this is the only way it
+   * can leave a durable trace. level: 'debug'|'info'|'warn'|'error'. */
+  log: (level, component, message) => ipcRenderer.send('log:write', level, component, message),
+
   getPrefs: (name) => ipcRenderer.invoke('prefs:get', name),
   setPrefs: (name, patch) => ipcRenderer.invoke('prefs:set', name, patch),
 

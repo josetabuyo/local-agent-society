@@ -298,7 +298,25 @@ test('mic button has a distinct busy/transcribing visual state, separate from th
 test('mic recording has a max-duration safety net so a forgotten click-to-stop does not record forever', () => {
   const src = readSrc('renderer', 'widget.js');
   assert.match(src, /MAX_RECORDING_MS/);
-  assert.match(src, /setTimeout\(\(\)\s*=>\s*stopRecordingAndTranscribe\(\),\s*MAX_RECORDING_MS\)/);
+  assert.match(src, /maxDurationTimer = setTimeout\(\(\) => \{[\s\S]*?stopRecordingAndTranscribe\(\);[\s\S]*?\}, MAX_RECORDING_MS\);/);
+});
+
+test('mic recording schedules countdown beeps (10s/5s/2s) before the max-duration cutoff, cleared on manual stop', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /scheduleCountdownBeeps/);
+  assert.match(src, /MAX_RECORDING_MS - 10000/);
+  assert.match(src, /MAX_RECORDING_MS - 5000/);
+  assert.match(src, /MAX_RECORDING_MS - 2000/);
+  const stopBody = extractFunctionBody(src, 'async function stopRecordingAndTranscribe() {');
+  assert.match(stopBody, /clearCountdownTimers\(\)/);
+});
+
+test('double-clicking the mic runs a self-test (not a real recording) and shows a floating toast', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /micEl\.addEventListener\('dblclick', \(\) => \{/);
+  const testBody = extractFunctionBody(src, 'async function runMicSelfTest() {');
+  assert.match(testBody, /getUserMedia/);
+  assert.match(testBody, /showMicToast/);
 });
 
 test('main.js vortexia:send handler resolves the sending agent from the window map (reuses the existing per-window VortexiaClient)', () => {

@@ -57,6 +57,39 @@ const spaces = require('./lib/spaces');
 const PROTOCOL_SCHEME = 'localagentsociety';
 const REGISTRY_URL = process.env.LAS_REGISTRY_URL || 'http://localhost:8700';
 
+// ── persistent logging (session/widget.log) ─────────────────────────────────
+// Launched via `open` (see start.sh), so this process's stdout/stderr goes
+// nowhere any tool can read — console.log/warn here were silent in practice.
+// This app has always assumed one fixed checkout of this repo (see the
+// hardcoded vortexia file: dependency in package.json); resolving the log
+// path the same way keeps this working both unpacked (`npm start`, __dirname
+// is widget-electron/) and packaged (__dirname is inside app.asar, so the
+// repo-relative candidate doesn't exist and we fall back to the known
+// checkout path). Format matches the project-wide convention documented in
+// the log-debug skill and tailed by `/log-debug ui`:
+//   [ISO8601_TIMESTAMP] LEVEL [component] message
+function resolveSessionLogPath() {
+  const devPath = path.join(__dirname, '..', 'session', 'widget.log');
+  if (fs.existsSync(path.dirname(devPath))) return devPath;
+  return '/Users/josetabuyo/Development/local-agent-society/session/widget.log';
+}
+const SESSION_LOG_PATH = resolveSessionLogPath();
+
+function writeLog(level, component, message) {
+  try {
+    const line = `[${new Date().toISOString()}] ${level.padEnd(5)} [${component}] ${message}\n`;
+    fs.appendFileSync(SESSION_LOG_PATH, line);
+  } catch {
+    // best-effort — never let logging itself break the app
+  }
+}
+const log = {
+  debug: (component, message) => writeLog('DEBUG', component, message),
+  info: (component, message) => writeLog('INFO', component, message),
+  warn: (component, message) => writeLog('WARN', component, message),
+  error: (component, message) => writeLog('ERROR', component, message),
+};
+
 /**
  * Which agent this launch is for. Mirrors how the Swift tray discovers it:
  * this app reads the same registry as `cli/commands/agents.py` /
@@ -844,13 +877,21 @@ function nameForWindow(win) {
 ipcMain.handle('vortexia:send', async (event, toName, text) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const fromName = win ? nameForWindow(win) : null;
-  if (!fromName) return { ok: false, error: 'could not resolve sending agent for this window' };
+  if (!fromName) {
+    log.error('mic', 'vortexia:send failed: could not resolve sending agent for this window');
+    return { ok: false, error: 'could not resolve sending agent for this window' };
+  }
   const client = vortexiaClients.get(fromName);
-  if (!client) return { ok: false, error: 'vortexia client not connected' };
+  if (!client) {
+    log.error('mic', `vortexia:send failed: no vortexia client connected for ${fromName}`);
+    return { ok: false, error: 'vortexia client not connected' };
+  }
   try {
     client.send(toName, text, { from: fromName, source: 'human' });
+    log.info('mic', `vortexia:send ok from=${fromName} to=${toName} chars=${text.length}`);
     return { ok: true };
   } catch (err) {
+    log.error('mic', `vortexia:send failed from=${fromName} to=${toName}: ${err && err.stack ? err.stack : err}`);
     return { ok: false, error: String(err) };
   }
 });
@@ -1024,6 +1065,7 @@ let whisperPipelinePromise = null;
  */
 function getWhisperPipeline(onProgress) {
   if (!whisperPipelinePromise) {
+    log.info('mic', `whisper: loading model ${WHISPER_MODEL} (first use — cache=${WHISPER_CACHE_DIR})`);
     whisperPipelinePromise = (async () => {
       const { pipeline, env } = await import('@xenova/transformers');
       env.cacheDir = WHISPER_CACHE_DIR;
@@ -1031,7 +1073,17 @@ function getWhisperPipeline(onProgress) {
         quantized: true,
         progress_callback: onProgress,
       });
-    })();
+    })().then(
+      (p) => {
+        log.info('mic', 'whisper: model loaded');
+        return p;
+      },
+      (err) => {
+        log.error('mic', `whisper: model load failed: ${err && err.stack ? err.stack : err}`);
+        whisperPipelinePromise = null; // allow retry on next dictation
+        throw err;
+      }
+    );
   }
   return whisperPipelinePromise;
 }
@@ -1048,6 +1100,9 @@ async function transcribeAudio(win, pcmFloat32, languageHint) {
   const send = (status) => {
     if (win && !win.isDestroyed()) win.webContents.send('audio:status', status);
   };
+  const durationS = (pcmFloat32.length / 16000).toFixed(1);
+  log.info('mic', `transcribe: start samples=${pcmFloat32.length} (~${durationS}s) language=${languageHint || 'auto'}`);
+  const startedAt = Date.now();
   const modelAlreadyLoaded = whisperPipelinePromise !== null;
   if (!modelAlreadyLoaded) send({ state: 'loading-model' });
   const transcriber = await getWhisperPipeline((progress) => {
@@ -1067,15 +1122,26 @@ async function transcribeAudio(win, pcmFloat32, languageHint) {
     // be one Whisper's language-token table accepts; degrade to
     // auto-detection rather than failing the whole dictation.
     if (options.language) {
-      console.warn('[widget] whisper: language hint failed, retrying with auto-detect:', err);
+      log.warn('mic', `transcribe: language hint "${options.language}" failed, retrying with auto-detect: ${err && err.message ? err.message : err}`);
       delete options.language;
       output = await transcriber(pcmFloat32, options);
     } else {
+      log.error('mic', `transcribe: inference failed: ${err && err.stack ? err.stack : err}`);
       throw err;
     }
   }
-  return (output && output.text ? output.text : '').trim();
+  const text = (output && output.text ? output.text : '').trim();
+  log.info('mic', `transcribe: done in ${Date.now() - startedAt}ms, ${text.length} chars`);
+  return text;
 }
+
+// Lets the sandboxed renderer (no fs access) write into session/widget.log
+// through the same logger the main process uses — needed because the mic
+// click-handling, MediaRecorder, and PCM decode steps all run in the
+// renderer, upstream of anything main.js sees.
+ipcMain.on('log:write', (_event, level, component, message) => {
+  writeLog(String(level || 'INFO'), String(component || 'widget'), String(message || ''));
+});
 
 ipcMain.handle('audio:transcribe', async (event, pcmBuffer, languageHint) => {
   const win = BrowserWindow.fromWebContents(event.sender);
@@ -1084,7 +1150,7 @@ ipcMain.handle('audio:transcribe', async (event, pcmBuffer, languageHint) => {
     const text = await transcribeAudio(win, pcm, languageHint || null);
     return { ok: true, text };
   } catch (err) {
-    console.warn('[widget] whisper transcription failed:', err);
+    log.error('mic', `audio:transcribe IPC failed: ${err && err.stack ? err.stack : err}`);
     return { ok: false, error: String(err) };
   }
 });

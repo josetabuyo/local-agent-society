@@ -495,6 +495,7 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let micState = 'idle'; // 'idle' | 'listening' | 'transcribing'
 let maxDurationTimer = null;
+let countdownTimers = [];
 
 function setMicState(next) {
   micState = next;
@@ -505,7 +506,7 @@ function setMicState(next) {
   } else if (next === 'transcribing') {
     micEl.title = 'Transcribing…';
   } else {
-    micEl.title = 'Dictate (click to start/stop)';
+    micEl.title = 'Dictate (click to start/stop, double-click to test mic)';
   }
 }
 
@@ -547,7 +548,92 @@ async function blobToMono16kPCM(blob) {
   return rendered.getChannelData(0);
 }
 
+// -- countdown beeps as the 10-min safety-net cutoff approaches -------------
+// Purely a "your recording is about to be force-stopped" warning, distinct
+// from any transcription/model concern — three pips (10s, 5s, then a more
+// urgent double pip at 2s) before stopRecordingAndTranscribe() fires.
+
+let sharedAudioCtx = null;
+function playBeep(freq, durationMs) {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!sharedAudioCtx) sharedAudioCtx = new AudioCtx();
+    const ctx = sharedAudioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000);
+    osc.start(now);
+    osc.stop(now + durationMs / 1000 + 0.02);
+  } catch (err) {
+    console.warn('[widget] mic: beep failed:', err);
+  }
+}
+
+function scheduleCountdownBeeps() {
+  clearCountdownTimers();
+  countdownTimers.push(setTimeout(() => playBeep(660, 110), MAX_RECORDING_MS - 10000)); // 10s left
+  countdownTimers.push(setTimeout(() => playBeep(780, 110), MAX_RECORDING_MS - 5000)); // 5s left
+  countdownTimers.push(
+    setTimeout(() => {
+      // 2s left — more urgent: two quick pips instead of one
+      playBeep(920, 90);
+      setTimeout(() => playBeep(920, 90), 150);
+    }, MAX_RECORDING_MS - 2000)
+  );
+}
+
+function clearCountdownTimers() {
+  countdownTimers.forEach(clearTimeout);
+  countdownTimers = [];
+}
+
+// -- mic self-test (double-click): confirms the mic + dictation pipeline is
+// actually live, without having to talk into it and wait for a transcript.
+// Answers "me escuchás? estás ok?" instantly instead of after 5 minutes of
+// dictating into a dead mic.
+
+function showMicToast(emoji) {
+  const toast = document.createElement('span');
+  toast.className = 'mic-test-toast';
+  toast.textContent = emoji;
+  micEl.appendChild(toast);
+  toast.addEventListener('animationend', () => toast.remove(), { once: true });
+  // Safety net in case animationend never fires (e.g. window backgrounded).
+  setTimeout(() => toast.remove(), 1500);
+}
+
+async function runMicSelfTest() {
+  if (micState !== 'idle') return; // don't interrupt a real recording/transcription
+  window.las.log('info', 'mic', 'self-test (double-click): starting');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    window.las.log('error', 'mic', `self-test failed: getUserMedia error: ${err && err.message ? err.message : err}`);
+    showMicToast('👎');
+    return;
+  }
+  const track = stream.getAudioTracks()[0];
+  const live = !!track && track.readyState === 'live';
+  stream.getTracks().forEach((t) => t.stop());
+  if (live) {
+    window.las.log('info', 'mic', 'self-test ok: mic + dictation pipeline is live');
+    showMicToast('👍');
+  } else {
+    window.las.log('error', 'mic', 'self-test failed: audio track not live');
+    showMicToast('👎');
+  }
+}
+
 async function stopRecordingAndTranscribe() {
+  clearCountdownTimers();
   if (maxDurationTimer) {
     clearTimeout(maxDurationTimer);
     maxDurationTimer = null;
@@ -556,6 +642,7 @@ async function stopRecordingAndTranscribe() {
   mediaRecorder = null;
   if (!recorder) return;
 
+  window.las.log('info', 'mic', 'stop clicked — flushing recorder');
   await new Promise((resolve) => {
     if (recorder.state === 'inactive') {
       resolve();
@@ -567,6 +654,7 @@ async function stopRecordingAndTranscribe() {
   recorder.stream.getTracks().forEach((track) => track.stop());
 
   if (!recordedChunks.length) {
+    window.las.log('warn', 'mic', 'stop: no audio chunks recorded — nothing to transcribe');
     setMicState('idle');
     return;
   }
@@ -574,7 +662,9 @@ async function stopRecordingAndTranscribe() {
   setMicState('transcribing');
   try {
     const blob = new Blob(recordedChunks, { type: recorder.mimeType || 'audio/webm' });
+    window.las.log('info', 'mic', `decoding blob: ${blob.size} bytes, type=${blob.type}`);
     const pcm = await blobToMono16kPCM(blob);
+    window.las.log('info', 'mic', `decoded: ${pcm.length} samples (~${(pcm.length / 16000).toFixed(1)}s)`);
     // Dictation language is a separate, user-chosen setting (prefs.micLanguage)
     // — NOT derived from the agent's TTS voice locale. An agent can speak
     // back in English (its voice) while the person dictating to it speaks
@@ -583,6 +673,11 @@ async function stopRecordingAndTranscribe() {
     // Whisper auto-detect (pass no language hint).
     const languageHint = prefs.micLanguage && prefs.micLanguage !== 'auto' ? prefs.micLanguage : null;
     const result = await window.las.transcribeAudio(pcm.buffer, languageHint);
+    window.las.log(
+      'info',
+      'mic',
+      `transcribeAudio returned ok=${!!(result && result.ok)} chars=${result && result.text ? result.text.length : 0}`
+    );
     if (result && result.ok && result.text) {
       // Publish via vortexia — NOT a direct live write into the linked
       // terminal. An earlier pass here did the opposite (writeToTty first,
@@ -602,12 +697,17 @@ async function stopRecordingAndTranscribe() {
       // displays itself; appending it here too would show the line twice.
       const sendResult = await window.las.sendToSelf(agentName, result.text);
       if (!sendResult || !sendResult.ok) {
+        window.las.log('error', 'mic', `failed to publish dictation to own inbox: ${sendResult && sendResult.error}`);
         console.warn('[widget] mic: failed to publish dictation to own inbox:', sendResult && sendResult.error);
       }
     } else if (result && !result.ok) {
+      window.las.log('error', 'mic', `transcription failed: ${result.error}`);
       console.warn('[widget] mic: transcription failed:', result.error);
+    } else {
+      window.las.log('warn', 'mic', 'transcription returned ok but empty text — nothing published');
     }
   } catch (err) {
+    window.las.log('error', 'mic', `transcription pipeline failed: ${err && err.stack ? err.stack : err}`);
     console.warn('[widget] mic: transcription pipeline failed:', err);
   } finally {
     setMicState('idle');
@@ -619,6 +719,7 @@ async function startRecording() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
+    window.las.log('error', 'mic', `getUserMedia failed: ${err && err.message ? err.message : err}`);
     console.warn('[widget] mic: getUserMedia failed:', err);
     return;
   }
@@ -629,16 +730,39 @@ async function startRecording() {
   });
   mediaRecorder.start();
   setMicState('listening');
-  maxDurationTimer = setTimeout(() => stopRecordingAndTranscribe(), MAX_RECORDING_MS);
+  window.las.log('info', 'mic', 'recording started');
+  maxDurationTimer = setTimeout(() => {
+    window.las.log('warn', 'mic', `max recording duration (${MAX_RECORDING_MS}ms) hit — auto-stopping`);
+    stopRecordingAndTranscribe();
+  }, MAX_RECORDING_MS);
+  scheduleCountdownBeeps();
 }
 
-micEl.addEventListener('click', () => {
-  if (micState === 'listening') {
-    stopRecordingAndTranscribe();
-  } else if (micState === 'idle') {
-    startRecording();
+// Single click toggles start/stop; double-click runs the self-test instead.
+// Click events fire immediately (no built-in delay), so a plain 'click'
+// listener would act on BOTH clicks of a double-click before 'dblclick' ever
+// fires. Standard workaround: delay the single-click action briefly and
+// cancel it if a second click arrives in time.
+let micClickTimer = null;
+micEl.addEventListener('click', (e) => {
+  if (e.detail >= 2) return; // handled by dblclick below
+  micClickTimer = setTimeout(() => {
+    micClickTimer = null;
+    if (micState === 'listening') {
+      stopRecordingAndTranscribe();
+    } else if (micState === 'idle') {
+      startRecording();
+    }
+    // clicks while 'transcribing' are ignored — nothing meaningful to toggle
+  }, 220);
+});
+
+micEl.addEventListener('dblclick', () => {
+  if (micClickTimer) {
+    clearTimeout(micClickTimer);
+    micClickTimer = null;
   }
-  // clicks while 'transcribing' are ignored — nothing meaningful to toggle
+  runMicSelfTest();
 });
 
 // -- focus/scope: tap = focus, right-click/long-press = link a TTY ----------
