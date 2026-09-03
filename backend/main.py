@@ -114,10 +114,15 @@ SPEAK_TOPIC = "las/speak"
 
 def _vortexia_mqtt_port() -> int:
     ports = load_json(PORTS_FILE, {})
-    for info in ports.values():
-        if info.get("app") == "vortexia-mqtt":
-            return info.get("port", vx.DEFAULT_PORT)
-    return vx.DEFAULT_PORT
+    candidates = [info for info in ports.values() if info.get("app") == "vortexia-mqtt"]
+    if not candidates:
+        return vx.DEFAULT_PORT
+    # Claims accumulate rather than get cleaned up on restart (see claim_port's
+    # supersede logic below, added after this could already be stale data) —
+    # picking the most recently registered one is the best defense against a
+    # dead entry from an old vortexia process shadowing the live one.
+    latest = max(candidates, key=lambda info: info.get("registered_at", ""))
+    return latest.get("port", vx.DEFAULT_PORT)
 
 
 def _vortexia_publish(topic: str, envelope: dict, retain: bool = False) -> bool:
@@ -447,6 +452,19 @@ def claim_port(req: PortClaimRequest):
                     break
             if chosen is None:
                 raise HTTPException(status_code=503, detail="No free ports available in range")
+
+        # A re-claim from the same app+local_agent supersedes its earlier
+        # claim(s) — without this, a service that restarts onto a new port
+        # (e.g. vortexia finding its old port occupied) leaves its dead old
+        # entry in the registry forever, and any lookup that isn't careful
+        # about picking the most recent one keeps targeting the dead port.
+        stale = [
+            port for port, info in ports.items()
+            if info.get("app") == req.app and info.get("local_agent") == req.local_agent
+            and port != str(chosen)
+        ]
+        for port in stale:
+            del ports[port]
 
         ports[str(chosen)] = {
             "port": chosen,

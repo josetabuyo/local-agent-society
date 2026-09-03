@@ -266,7 +266,13 @@ def listen(name):
     """
     name = resolve_agent_name(name)
     ports = api.get("/ports") or {}
-    mqtt_port = next((info.get("port") for info in ports.values() if info.get("app") == "vortexia-mqtt"), None)
+    # Pick the most recently registered vortexia-mqtt claim, not just the
+    # first one found — stale claims from a previous vortexia process can
+    # otherwise shadow the live one (see backend/main.py's _vortexia_mqtt_port).
+    candidates = [info for info in ports.values() if info.get("app") == "vortexia-mqtt"]
+    mqtt_port = None
+    if candidates:
+        mqtt_port = max(candidates, key=lambda info: info.get("registered_at", "")).get("port")
     if mqtt_port is None:
         click.echo("vortexia unreachable — is `vortexia start` running?", err=True)
         sys.exit(1)

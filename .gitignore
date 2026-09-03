@@ -20,6 +20,11 @@ widget/Local Agent Society.app/
 
 # Agent instance config
 .agent.json
+.las-agent.json
+
+# Local-only maintainer skill — this agent's role as LAS's developer,
+# not something any other agent in the society needs
+.claude/skills/las-maintainer/
 
 # Python build artifacts
 __pycache__/
