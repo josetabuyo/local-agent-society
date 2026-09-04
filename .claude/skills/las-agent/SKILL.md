@@ -1,140 +1,153 @@
 ---
 name: las-agent
-description: Integración con la CLI "las" del Local Agent Society — leer .agent.json, usar TTS con las speak, gestionar puertos, y contexto completo de la sociedad (quiénes son, qué corren, issues conocidos).
+description: Integration with the Local Agent Society "las" CLI — read .las-agent.json, use TTS via las speak, manage ports, and full society context (who's who, what's running, known issues).
 allowed-tools: Bash(las:*) Bash(cat:*)
 ---
 
-# /las-agent — Integración con la CLI de Local Agent Society
+# /las-agent — Local Agent Society CLI integration
 
-Activa este skill al inicio de una sesión para habilitar TTS, lectura de agente local y seguridad de puertos vía la CLI `las`.
+Activate this skill at the start of a session to enable TTS, local-agent config reading, and port safety via the `las` CLI.
 
 ---
 
-## 1. Verificar agente LAS en el directorio actual
+## 1. Check for a LAS agent in the current directory
 
 ```bash
-cat .agent.json 2>/dev/null
+cat .las-agent.json 2>/dev/null || cat .agent.json 2>/dev/null
 ```
 
-- **Si existe:** leer `name`, `voice` y `locale`. Todos los anuncios TTS de esta sesión deben usar:
+`.agent.json` is the legacy filename — it still works as a read fallback for agents not yet migrated (see `scripts/migrate-agent-json.py`), but any new file is created as `.las-agent.json`.
+
+- **If it exists:** read `name`, `voice`, and `locale`. Every TTS announcement in this session must use:
   ```bash
-  las speak "<texto>" --name <nombre_agente>
+  las speak "<text>" --name <agent_name>
   ```
-  Nunca llamar directamente a la cola HTTP (`POST /queue/speak`). Solo el modelo de entrada (protagonista) habla — los sub-agentes Haiku y Opus son siempre silenciosos.
-- **Si no existe:** sin integración LAS esta sesión. Comportamiento estándar.
+  Never call the HTTP queue directly (`POST /queue/speak`). Only the top-level model (the protagonist) speaks — Haiku and Opus sub-agents are always silent.
+- **If it doesn't exist:** no LAS integration this session. Standard behavior.
 
-### Registro de presencia y mensajes pendientes (vortexia)
+### Presence registration and pending messages (vortexia)
 
-Si `.agent.json` existe, ejecutar esto una sola vez al cargar el skill:
+If the agent config file exists, run this once when the skill loads:
 
 ```bash
-las agent register            # publica presencia "online" (retained) en vortexia
-las agent poll --timeout 2    # drena el inbox de vortexia y muestra mensajes pendientes
+las agent register            # publishes "online" presence (retained) to vortexia
+las agent poll --timeout 2    # drains the vortexia inbox and shows pending messages
 ```
 
-`las agent poll` reemplaza la vieja inyección directa en la terminal: los mensajes de otros agentes ya no llegan solos, hay que pedirlos. Si `poll` devuelve mensajes pendientes, tratarlos como si acabaran de llegar — mencionarlos al usuario o actuar según corresponda antes de continuar con la tarea. Si vortexia no está corriendo, ambos comandos fallan sin romper la sesión (fail soft); simplemente no habrá mensajes.
+`las agent poll` replaces the old direct terminal injection: messages from other agents no longer arrive on their own — they have to be requested. If `poll` returns pending messages, treat them as if they'd just arrived — mention them to the user or act on them as appropriate before continuing with the task. If vortexia isn't running, both commands fail without breaking the session (fail-soft); there just won't be any messages.
 
-### Escucha en vivo (obligatorio, no opcional)
+### Live listening (mandatory, not optional)
 
-Además del poll inicial, dejar corriendo un escucha en vivo para el resto de la sesión — esto es lo que permite que un dictado desde el widget (o un `las agent inject` de otro agente) llegue a esta sesión apenas se manda, sin depender de que alguien pida un poll manual. Es parte estándar de cómo arranca cualquier sesión con `.agent.json`, no algo puntual para una conversación en particular.
+Beyond the initial poll, keep a live listener running for the rest of the session — this is what lets a widget dictation (or another agent's `las agent inject`) reach this session as soon as it's sent, without depending on someone requesting a manual poll. This is a standard part of how any session with an agent config starts, not something specific to one particular conversation.
 
-Con la tool `Monitor` (si está disponible en este entorno):
+**Purge duplicates BEFORE starting your own** (mandatory): a `las agent listen <name>` from a previous session (closed, or surviving a `/clear`) may still be alive in the background — the process doesn't die on its own. If a new Monitor is started without killing the old one first, you end up with two (or more) listeners on the same inbox, every message duplicates notifications, and a later mis-targeted `kill` can take out the wrong listener. Before every `Monitor` of this kind:
+
+```bash
+pkill -f "las agent listen <agent_name>" 2>/dev/null; sleep 0.3
+```
+
+Always run this, whether or not a previous listener exists (fail-soft: if there isn't one, `pkill` is a no-op). Only after this, start the new `Monitor` — so only the current session's listener remains.
+
+With the `Monitor` tool (if available in this environment):
 
 ```
 Monitor({
-  description: "Dictado en vivo de <nombre_agente> (las agent listen)",
-  command: "las agent listen <nombre_agente>",
+  description: "Live dictation for <agent_name> (las agent listen)",
+  command: "las agent listen <agent_name>",
   persistent: true,
   timeout_ms: 3600000,
 })
 ```
 
-`las agent listen` se queda conectado a vortexia y emite una línea JSON por mensaje apenas llega — cada línea genera una notificación de Monitor en esta sesión. Consume el mensaje al recibirlo (limpia el retained flag), así que mientras el listener esté activo, la entrega en vivo reemplaza al poll — un `las agent poll` posterior no va a volver a ver el mismo mensaje.
+`las agent listen` stays connected to vortexia and emits one JSON line per message as soon as it arrives — each line generates a Monitor notification in this session. It consumes the message on receipt (clears the retained flag), so while the listener is active, live delivery replaces polling — a later `las agent poll` won't see the same message again.
 
-Si `Monitor` no está disponible en este entorno, no bloquear el arranque de la sesión por esto — seguir solo con el poll inicial y avisar al usuario que la entrega en vivo no está activa en esta sesión.
+If `Monitor` isn't available in this environment, don't block session startup on this — proceed with just the initial poll and tell the user live delivery isn't active this session.
 
-### Idioma del TTS — obligatorio hacer match con la voz
+### TTS language — must match the voice
 
-El motor TTS solo suena natural cuando el texto está en el idioma de la voz. **Nunca mezclar idiomas.**
+The TTS engine only sounds natural when the text is in the voice's language. **Never mix languages.**
 
-| Voces                                                | Idioma del texto |
+| Voices                                                | Text language |
 |------------------------------------------------------|-----------------|
-| Samantha, Daniel, Moira, Karen, Tessa, Rishi, Flo, Sandy, Shelley, Reed, Eddy, Zoe, Nicky, Evan (y variantes `en-*`) | **Inglés** |
-| Paulina, Mónica (y variantes `es-*`)                 | **Español**     |
+| Samantha, Daniel, Moira, Karen, Tessa, Rishi, Flo, Sandy, Shelley, Reed, Eddy, Zoe, Nicky, Evan (and `en-*` variants) | **English** |
+| Paulina, Mónica (and `es-*` variants)                 | **Spanish**     |
 
-**Cómo determinar el idioma en la sesión:**
+**How to determine the session's language:**
 
-1. Si `.agent.json` tiene `"locale"`: usar ese locale (`en-*` → inglés, `es-*` → español).
-2. Si no hay `locale`, derivar de `voice` con la tabla anterior.
-3. Por defecto si ninguno está disponible: **inglés**.
+1. If the agent config has `"locale"`: use that locale (`en-*` → English, `es-*` → Spanish).
+2. If there's no `locale`, derive it from `voice` using the table above.
+3. Default if neither is available: **English**.
 
-**Regla de oro:** el texto que pases a `las speak` siempre debe estar en el idioma que corresponde a la voz del agente. Si la voz es Samantha, habla en inglés. Si es Paulina, habla en español. Aunque el usuario te escriba en otro idioma, el TTS va en el idioma de la voz.
+**Golden rule:** the text passed to `las speak` must always be in the language that matches the agent's voice. If the voice is Samantha, speak in English. If it's Paulina, speak in Spanish. Even if the user writes to you in another language, TTS output stays in the voice's language.
 
-### Reporte de cierre — resumen breve al final de cada respuesta (obligatorio)
+### Closing report — brief summary at the end of every response (mandatory)
 
-Ya no existe el hook global de `Stop` (`~/.claude/hooks/announce-here.sh`) que anunciaba un genérico "Here! `<Nombre>`" sin contenido real — fue removido de `~/.claude/settings.json`. Esa responsabilidad pasa a esta sesión: **antes de devolver el control al usuario, hablar un resumen breve de lo que se acaba de hacer.** Esto es lo que deja, en el historial de mensajes del widget, un registro útil de lo que el agente fue haciendo — no solo "está vivo", sino "hizo esto".
+The global `Stop` hook (`~/.claude/hooks/announce-here.sh`) that announced a generic "Here! `<Name>`" with no real content no longer exists — it was removed from `~/.claude/settings.json`. That responsibility now belongs to this session: **before handing control back to the user, speak a brief summary of what was just done.** This is what leaves a useful record in the widget's message history of what the agent has been doing — not just "it's alive," but "it did this."
 
-**Formato (plantilla con slot, no un texto fijo):**
+**Format (a template with a slot, not fixed text):**
 
 ```
-"<verbo de reporte>: <resumen>. <NombreAgente>."
+"<report verb>: <summary>. <AgentName>."
 ```
 
-- `<verbo de reporte>` es `"Reporting"` en inglés / `"Reportando"` en español, según el idioma de la voz (ver tabla arriba).
-- `<resumen>` es UNA frase de lo que se acaba de hacer, en el idioma de la voz, truncada a `report_max_chars` caracteres.
-  - Leer `report_max_chars` de `.agent.json`. **Si el campo no existe, usar 40 por defecto.**
-  - **Fallback duro** (nunca dejar el slot vacío): si no hay nada sustancial que resumir — turno de solo charla, pregunta sin acción, etc. — usar `"done"` (inglés) / `"listo"` (español) como `<resumen>`.
-- `<NombreAgente>` es el `name` de `.agent.json`.
+- `<report verb>` is `"Reporting"` in English / `"Reportando"` in Spanish, matching the voice's language (see table above).
+- `<summary>` is ONE sentence describing what was just done, in the voice's language, aiming for roughly `response_length_hint` characters as a **soft target — not a hard truncation**.
+  - Read `response_length_hint` from the agent config. **If the field doesn't exist, use 40 as the default.**
+  - This governs only what THIS agent chooses to say in its own summary/acknowledge lines — never cut the sentence to fit the number after the fact. Compose it to roughly that length; if it runs a little over, that's fine.
+  - **Hard fallback** (never leave the slot empty): if there's nothing substantial to summarize — a chat-only turn, a question with no action, etc. — use `"done"` (English) / `"listo"` (Spanish) as `<summary>`.
+- `<AgentName>` is the `name` from the agent config.
+
+Text the agent RECEIVES — mic dictation, messages from other agents — must never be shortened or truncated for any reason other than the mic's own practical recording cap (10 minutes; see `widget-electron/renderer/widget.js`'s `MAX_RECORDING_MS`). `response_length_hint` only shapes what this agent chooses to say, never what it hears.
 
 ```bash
-# inglés, voz Samantha, report_max_chars: 40
+# English, Samantha voice, response_length_hint: 40
 las speak "Reporting: widget chat bubbles done. LocalAgentSociety." --name LocalAgentSociety
 
-# español, voz Paulina
+# Spanish, Paulina voice
 las speak "Reportando: base de datos migrada. Robotics." --name Robotics
 ```
 
 ---
 
-## 2. Sin artefactos de sesión — nunca
+## 2. No session artifacts — ever
 
-No crear ninguno de los siguientes, sin importar la complejidad:
-- Carpetas `session/`, `inbox/`, `outbox/`
-- Archivos de log, `.txt` u otros para comunicación entre agentes
-- Archivos de estado para rastrear progreso de la conversación
+Never create any of the following, regardless of complexity:
+- `session/`, `inbox/`, `outbox/` folders
+- Log files, `.txt` or other files for inter-agent communication
+- State files to track conversation progress
 
-Toda la comunicación entre agentes ocurre vía el valor de retorno de la herramienta `Agent`, en memoria dentro de la conversación.
+All inter-agent communication happens via the `Agent` tool's return value, in-memory within the conversation.
 
 ---
 
-## 3. Seguridad de puertos LAS (antes de arrancar cualquier servidor)
+## 3. LAS port safety (before starting any server)
 
-Siempre ejecutar estos pasos antes de iniciar cualquier servidor HTTP o servicio:
+Always run these steps before starting any HTTP server or service:
 
 ```bash
-# 1. Verificar conflictos
+# 1. Check for conflicts
 las ports audit
 
-# 2. Obtener un puerto libre
+# 2. Get a free port
 las ports free
 
-# 3. Reclamarlo
-las ports claim "<descripción>" --port <PUERTO>
+# 3. Claim it
+las ports claim "<description>" --port <PORT>
 ```
 
-Nunca hardcodear un puerto que no esté en el registro LAS. Si un puerto está tomado por otro agente LAS, inyectar un mensaje y esperar:
+Never hardcode a port that isn't in the LAS registry. If a port is taken by another LAS agent, inject a message and wait:
 
 ```bash
-las agent inject <OtroAgente> "Port <PUERTO> is needed — can you release it?" --from <EsteAgente>
+las agent inject <OtherAgent> "Port <PORT> is needed — can you release it?" --from <ThisAgent>
 ```
 
 ---
 
-## 4. Sociedad — quiénes somos
+## 4. Society — who we are
 
-> **MANTENER ACTUALIZADO:** esta tabla vive en el repo de `local-agent-society`. Cada vez que se agrega, elimina o modifica un agente, actualizar aquí también.
+> **KEEP UP TO DATE:** this table lives in the `local-agent-society` repo. Whenever an agent is added, removed, or modified, update it here too.
 
-| Agente | Voz | Path | Stack | Puertos |
+| Agent | Voice | Path | Stack | Ports |
 |--------|-----|------|-------|---------|
 | LocalAgentSociety | Samantha (EN) | `local-agent-society` | — | 8700 |
 | Garantido | Daniel (EN) | `Garantido` | Next.js 16 + Turbopack | 8765, 8010, 9001 |
@@ -144,45 +157,105 @@ las agent inject <OtroAgente> "Port <PUERTO> is needed — can you release it?" 
 | HomeControl | Shelley (EN) | `home-control` | — | — |
 | Wavi | Flo (EN) | `wavi` | Chrome headless (WhatsApp automation) | 9200–9233 |
 | Minis App Acces | Sandy (EN) | `Ctrol_Acc_Mv2026` | — | — |
-| System | Reed (EN) | `System` | Monitor de infraestructura | — |
+| System | Reed (EN) | `System` | Infrastructure monitor | — |
 | Teli | Rishi (EN) | `teli` | Telegram automation | — |
 | Robotics | Paulina (ES) | `Robotics` | — | — |
 | LocalModels | Eddy (EN) | `local-models` | Ollama + gemma4:e4b, API :11434 | 9002 |
 | Luganense | Jorge (ES) | `Luganense` | Next.js | 9003 |
 
-### Comunicación entre agentes (vía vortexia)
+### Inter-agent communication (via vortexia)
 
-La mensajería entre agentes va sobre **vortexia** (broker MQTT local, proyecto hermano — ver `vortexia/PROTOCOL.md`), no inyección de terminal. `las agent inject` publica en el inbox de vortexia del destinatario; no escribe nada en su terminal.
+Inter-agent messaging goes over **vortexia** (a local MQTT broker, sibling project — see `vortexia/PROTOCOL.md`), not terminal injection. `las agent inject` publishes to the recipient's vortexia inbox; it doesn't write anything to their terminal.
 
 ```bash
-# Enviar mensaje al inbox de vortexia de otro agente
-las agent inject <NombreAgente> "<mensaje>" --from <EsteAgente>
+# Send a message to another agent's vortexia inbox
+las agent inject <AgentName> "<message>" --from <ThisAgent>
 
-# Drenar mi propio inbox de vortexia (mensajes pendientes)
-las agent poll [<MiNombre>] --timeout 2
+# Drain my own vortexia inbox (pending messages)
+las agent poll [<MyName>] --timeout 2
 
-# Anunciar presencia online en vortexia (ya se hace al inicio del skill)
-las agent register [<MiNombre>]
+# Announce online presence to vortexia (already done at skill startup)
+las agent register [<MyName>]
 
-# Hablar por TTS como este agente
-las speak "<texto en idioma de la voz>" --name <NombreAgente>
+# Speak via TTS as this agent
+las speak "<text in the voice's language>" --name <AgentName>
 
-# Traer la ventana de otro agente al frente
-las agent focus <NombreAgente>
+# Bring another agent's window to the front
+las agent focus <AgentName>
 
-# Estado completo de la sociedad
+# Full society status
 las status
 ```
 
-La entrega **no está garantizada**: vortexia no retiene mensajes de inbox, así que el destinatario solo los ve si algo está haciendo poll en ese momento (típicamente, el skill `/las-agent` al inicio de su próxima sesión). No hay cola en disco ni reintento automático.
+Delivery is retained (see §"Presence registration and pending messages" above): a message sent while the recipient isn't polling still survives for their next `poll` or `listen`. It's a single-slot mailbox, not a queue — only the most recent unread message per agent is kept, so a second inject before the first is read overwrites it.
 
-### Issues conocidos
+### Hitting a bug in Local Agent Society itself — fix it, don't just wait for someone else
 
-**Rosetta / Node x86_64** — Pulpo y NeuroFlow tienen `node_modules` instalados con Node Intel (`~/.nvm/versions/node/v20.20.2` es x86_64). El `@esbuild/darwin-x64` corre bajo Rosetta. Fix pendiente:
+`las`, the backend, the widget, and vortexia are shared infrastructure — the
+same code every agent in the society depends on. This is a brotherhood of
+agents (una hermandad): if you hit something broken there (widget doesn't
+open/respond, TTS silent, a port conflict that won't resolve, `las agent
+inject`/`poll` failing outright, a message arriving truncated or garbled),
+you're in the best position to fix it — you have the repro right in front of
+you. Don't stop at filing a report and waiting. The repo lives at an
+absolute path any session can reach regardless of its own working directory:
+
+```
+/Users/josetabuyo/Development/local-agent-society
+```
+
+Treat it the way you'd treat a library your own project depends on — a
+broken dependency, you go patch it:
+
+1. Read the relevant code, make the fix, in that repo.
+2. Run the tests that cover it before touching anything running — Python:
+   `PYTHONPATH=. /Users/josetabuyo/Development/local-agent-society/backend/.venv/bin/pytest tests/<relevant>.py -q`
+   (the system Python has no pytest); widget-electron:
+   `node widget-electron/test/test_widget_electron.js`.
+3. If the fix needs the running system to pick it up: `widget-electron/`
+   changes need `npm run build` first (`las start` never rebuilds it), then
+   `las stop && las start` to reload the backend and widget. **This is a
+   shared-infrastructure restart — every agent's widget and backend
+   connection blips for a few seconds.** Announce it before doing it (one
+   line is enough) — this is a heads-up, not a permission request; José is
+   already behind whatever bug report brought you here, since it's his own
+   society. He only needs an actual check-in before something that reaches
+   further than this machine — a `git push`, publishing a new release, that
+   kind of thing.
+4. Commit your fix, scoped to just what you touched — this repo routinely
+   has other unrelated in-progress work sitting in the tree; leave it alone.
+5. Tell **LocalAgentSociety** (the agent running from that repo itself)
+   what you found and fixed, so there's a record and nobody duplicates the
+   work:
+   ```bash
+   las agent inject LocalAgentSociety "BUG: <what broke> — fixed: <what you changed>" --from <YourAgentName>
+   ```
+
+If you can't fix it yourself (no time, out of your depth, needs a call only
+José can make), file it the same way, `BUG:` prefix, with a real repro
+("clicked the mic, dictated ~2 minutes, nothing showed up in my session
+afterward" beats "doesn't work") — that's the fallback, not the default.
+Either way this only reaches LocalAgentSociety if a session is actually
+running there; if `las agent inject` reports vortexia unreachable, or
+nothing comes back after a while, mention it to José directly too.
+
+**Before assuming vortexia/las lost or mangled a message:** check the
+Monitor notification's `<task-id>` and call `TaskOutput(task_id,
+block=false)` to read the raw underlying output. A notification that looks
+cut off (ending mid-sentence, sometimes with a literal `(truncated)`) is
+almost always the Claude Code harness shortening the notification *summary*
+shown in chat — not data loss. Verified 2026-09-04 end-to-end (a 3000-char
+message round-tripped byte-exact through vortexia and `las agent listen`'s
+raw stdout); don't burn time chasing a payload-size bug in this codebase
+before ruling that out first.
+
+### Known issues
+
+**Rosetta / Node x86_64** — Pulpo and NeuroFlow have `node_modules` installed with Intel Node (`~/.nvm/versions/node/v20.20.2` is x86_64). `@esbuild/darwin-x64` runs under Rosetta. Pending fix:
 ```bash
 arch -arm64 nvm install 20 && nvm use 20 && rm -rf node_modules && npm install
 ```
 
-**Wavi Chrome renderers** — Wavi corre múltiples instancias de Chrome headless para WhatsApp. CPU alta de renderers con `--user-data-dir=.../wavi/data/sessions/` es normal, no es una amenaza.
+**Wavi Chrome renderers** — Wavi runs multiple headless Chrome instances for WhatsApp. High renderer CPU with `--user-data-dir=.../wavi/data/sessions/` is normal, not a threat.
 
-**playwright-mcp zombies** — Cada terminal Claude puede acumular procesos `node playwright-mcp --browser chromium`. Son seguros de matar.
+**playwright-mcp zombies** — Each Claude terminal can accumulate `node playwright-mcp --browser chromium` processes. Safe to kill.

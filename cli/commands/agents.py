@@ -9,6 +9,7 @@ import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
 from cli.commands._agent_common import infer_locale, resolve_agent_name
+from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
 
 
 @click.group()
@@ -45,19 +46,20 @@ def agents_list(inactive_only, active_only):
 @click.option("--dir", "target_dir", default=None,
               help="Directory for the agent (default: current directory).")
 def new(name, voice, target_dir):
-    """Create a new agent: writes .agent.json, registers with backend, launches widget."""
+    """Create a new agent: writes .las-agent.json, registers with backend, launches widget."""
     cwd = Path(target_dir).resolve() if target_dir else Path.cwd()
 
     # Ensure target dir exists
     cwd.mkdir(parents=True, exist_ok=True)
 
-    # Guard: don't overwrite an existing agent
-    agent_file = cwd / ".agent.json"
-    if agent_file.exists():
-        existing = json.loads(agent_file.read_text()).get("name", "?")
-        click.echo(f"Error: {agent_file} already exists (agent '{existing}'). "
+    # Guard: don't overwrite an existing agent (new or legacy filename)
+    existing_file = agent_config_path(cwd)
+    if existing_file:
+        existing = json.loads(existing_file.read_text()).get("name", "?")
+        click.echo(f"Error: {existing_file} already exists (agent '{existing}'). "
                    "Use `las agent rename` or delete it first.")
         raise SystemExit(1)
+    agent_file = cwd / AGENT_CONFIG_FILENAME
 
     # Pick voice
     if voice:
@@ -69,14 +71,24 @@ def new(name, voice, target_dir):
     # Resolve locale from voice
     locale = infer_locale(chosen_voice)
 
-    # Write .agent.json
+    # Write .las-agent.json
     agent_data = {
         "name": name,
         "voice": chosen_voice,
         "locale": locale,
         "pronunciation": name,
         "created": str(datetime.date.today()),
-        "report_max_chars": 40,
+        # A soft target for the LENGTH of THIS agent's own spoken
+        # summary/acknowledge responses (report/closing lines) — never a hard
+        # truncation, and never applied to text the agent RECEIVES (mic
+        # dictation, other agents' messages). Named response_length_hint,
+        # not *_limit or *_max, precisely so it reads as a suggestion.
+        "response_length_hint": 40,
+        # Empty by design — filled in over time, and meant to eventually back
+        # a vortexia intent-filter broadcast (who this agent is, what it
+        # offers, what it needs).
+        "short_description": "",
+        "long_description": "",
     }
     try:
         agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
@@ -108,7 +120,7 @@ def new(name, voice, target_dir):
 @agent.command("restore")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def restore(name):
-    """Restore .agent.json from backend registry (use if accidentally deleted)."""
+    """Restore .las-agent.json from backend registry (use if accidentally deleted)."""
     cwd = Path.cwd()
     agents = api.get("/agents")
     if not agents:
@@ -127,7 +139,7 @@ def restore(name):
             raise SystemExit(1)
         name = info.get("name") or next(k for k, v in agents.items() if v is info)
 
-    target = cwd / ".agent.json"
+    target = cwd / AGENT_CONFIG_FILENAME
     voice = info.get("voice", "Samantha")
     data = {
         "name": name,
@@ -141,15 +153,15 @@ def restore(name):
     except OSError as exc:
         click.echo(f"Error: could not write {target}: {exc}")
         raise SystemExit(1)
-    click.echo(f"Restored .agent.json for '{name}' (voice: {data['voice']}).")
+    click.echo(f"Restored {AGENT_CONFIG_FILENAME} for '{name}' (voice: {data['voice']}).")
 
 
 @agent.command("sync")
 def sync():
-    """Sync .agent.json in the current directory to the backend registry."""
-    p = Path.cwd() / ".agent.json"
-    if not p.exists():
-        click.echo("Error: no .agent.json in current directory.")
+    """Sync the agent config in the current directory to the backend registry."""
+    p = agent_config_path(Path.cwd())
+    if not p:
+        click.echo(f"Error: no {AGENT_CONFIG_FILENAME} in current directory.")
         raise SystemExit(1)
     d = json.loads(p.read_text())
     payload = {
@@ -312,8 +324,8 @@ def listen(name):
 @click.argument("new_name")
 @click.option("--pronunciation", default=None, help="Override pronunciation (defaults to new name).")
 def rename(old_name, new_name, pronunciation):
-    """Rename an agent in the backend registry and update .agent.json."""
-    cwd_agent_file = Path.cwd() / ".agent.json"
+    """Rename an agent in the backend registry and update its agent config."""
+    cwd_agent_file = agent_config_path(Path.cwd())
 
     old_name = resolve_agent_name(old_name)
 
@@ -323,7 +335,18 @@ def rename(old_name, new_name, pronunciation):
     })
     click.echo(f"Renamed '{old_name}' → '{new_name}' in backend registry.")
 
-    if cwd_agent_file.exists():
+    # Tell a running widget-electron app so an already-open window for
+    # old_name follows the rename instead of going stale — see
+    # widget-electron/main.js's handleProtocolUrl for the 'rename' action.
+    # No-op (fire-and-forget, same as the other `open localagentsociety://`
+    # calls in this file) if no window is open for old_name or the app isn't
+    # running at all.
+    subprocess.run(
+        ["open", f"localagentsociety://{quote(old_name, safe='')}?action=rename&to={quote(new_name, safe='')}"],
+        check=False,
+    )
+
+    if cwd_agent_file:
         try:
             d = json.loads(cwd_agent_file.read_text())
             if d.get("name") == old_name:
@@ -334,10 +357,15 @@ def rename(old_name, new_name, pronunciation):
                     d["pronunciation"] = pronunciation
                 elif d.get("pronunciation") == old_name:
                     d["pronunciation"] = new_name
-                cwd_agent_file.write_text(json.dumps(d, indent=2, ensure_ascii=False))
-                click.echo(f"Updated .agent.json (name, pronunciation).")
+                # Opportunistically migrate the filename to the current
+                # convention while we're already rewriting the file.
+                new_path = cwd_agent_file.with_name(AGENT_CONFIG_FILENAME)
+                new_path.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+                if new_path != cwd_agent_file:
+                    cwd_agent_file.unlink()
+                click.echo(f"Updated {AGENT_CONFIG_FILENAME} (name, pronunciation).")
         except Exception as exc:
-            click.echo(f"Warning: could not update .agent.json — {exc}")
+            click.echo(f"Warning: could not update agent config — {exc}")
 
 
 @agent.command("clean")
