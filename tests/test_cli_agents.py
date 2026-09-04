@@ -35,8 +35,8 @@ def test_agent_new_propagates_backend_failure(monkeypatch, tmp_path):
     assert result.exit_code != 0
     assert isinstance(result.exception, SystemExit)
 
-    # It must not have gotten far enough to write a bogus .agent.json either.
-    assert not (tmp_path / "agentdir" / ".agent.json").exists()
+    # It must not have gotten far enough to write a bogus .las-agent.json either.
+    assert not (tmp_path / "agentdir" / ".las-agent.json").exists()
 
 
 def test_widgets_all_skips_inactive_agents(monkeypatch):

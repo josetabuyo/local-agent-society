@@ -14,19 +14,27 @@ Example: agent `Garantido` → pronunciation `Ga-ran-ti-do` (slowed spelling hel
 
 ## Steps
 
-### 1. Read .agent.json
-```bash
-python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name'), d.get('voice','Samantha'), d.get('pronunciation',''))"
-```
-If file does not exist: tell user no agent is baptized here.
-
-### 2. Update pronunciation field
+### 1. Read the agent config
+`.las-agent.json` is the current filename; `.agent.json` is read as a fallback for agents not yet migrated (see `scripts/migrate-agent-json.py`).
 ```bash
 python3 -c "
-import json
-d = json.load(open('.agent.json'))
+import json, os
+p = '.las-agent.json' if os.path.exists('.las-agent.json') else '.agent.json'
+d = json.load(open(p))
+print(d.get('name'), d.get('voice','Samantha'), d.get('pronunciation',''))
+"
+```
+If neither file exists: tell user no agent is baptized here.
+
+### 2. Update pronunciation field
+Write back to whichever filename was read in step 1.
+```bash
+python3 -c "
+import json, os
+p = '.las-agent.json' if os.path.exists('.las-agent.json') else '.agent.json'
+d = json.load(open(p))
 d['pronunciation'] = 'PRONUNCIATION_TEXT'
-open('.agent.json','w').write(json.dumps(d,indent=2,ensure_ascii=False))
+open(p,'w').write(json.dumps(d,indent=2,ensure_ascii=False))
 print('Updated')
 "
 ```

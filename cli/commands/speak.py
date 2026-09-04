@@ -2,11 +2,12 @@ import json
 from pathlib import Path
 import click
 from cli import api
+from cli.path_utils import agent_config_path
 
 
 def _agent_json():
-    p = Path.cwd() / ".agent.json"
-    if p.exists():
+    p = agent_config_path(Path.cwd())
+    if p:
         try:
             return json.loads(p.read_text())
         except Exception:
@@ -16,8 +17,8 @@ def _agent_json():
 
 @click.command()
 @click.argument("text")
-@click.option("--voice", default=None, help="TTS voice (default: from .agent.json or Samantha)")
-@click.option("--name", default=None, help="Speaker label (default: from .agent.json or CLI)")
+@click.option("--voice", default=None, help="TTS voice (default: from agent config or Samantha)")
+@click.option("--name", default=None, help="Speaker label (default: from agent config or CLI)")
 def speak(text, voice, name):
     """Enqueue a TTS message."""
     agent = _agent_json()

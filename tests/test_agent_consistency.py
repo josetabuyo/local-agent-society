@@ -39,12 +39,13 @@ def test_inject_does_not_use_system_events_key_code():
 
 
 def test_registered_agents_have_agent_json():
-    """Each registered agent must have a .agent.json at its declared project path."""
+    """Each registered agent must have a .las-agent.json (or legacy .agent.json) at its declared project path."""
     missing = [
         name for name, info in _agents().items()
-        if not (Path(info.get("path", "")) / ".agent.json").exists()
+        if not (Path(info.get("path", "")) / ".las-agent.json").exists()
+        and not (Path(info.get("path", "")) / ".agent.json").exists()
     ]
-    assert not missing, f"Missing .agent.json for: {', '.join(missing)}"
+    assert not missing, f"Missing agent config for: {', '.join(missing)}"
 
 
 def test_install_sh_purges_legacy_watcher_plists():

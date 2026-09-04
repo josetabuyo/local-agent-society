@@ -11,11 +11,17 @@ allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
 
 ## Steps
 
-### 1. Read current .agent.json
+### 1. Read the current agent config
+`.las-agent.json` is the current filename; `.agent.json` is read as a fallback for agents not yet migrated (see `scripts/migrate-agent-json.py`).
 ```bash
-python3 -c "import json; d=json.load(open('.agent.json')); print(d.get('name'), d.get('voice','Samantha'))"
+python3 -c "
+import json, os
+p = '.las-agent.json' if os.path.exists('.las-agent.json') else '.agent.json'
+d = json.load(open(p))
+print(d.get('name'), d.get('voice','Samantha'))
+"
 ```
-If file does not exist, tell the user this directory has no agent (run `las agent new NAME` first).
+If neither file exists, tell the user this directory has no agent (run `las agent new NAME` first).
 
 ### 2. Determine new voice
 - If `$1` provided: use it as VOICE
@@ -36,14 +42,16 @@ say -v "VOICE" "Hola, soy AGENT"
 say -v "VOICE" "Hello, I'm AGENT"
 ```
 
-### 5. Update .agent.json — set voice and locale
+### 5. Update the agent config — set voice and locale
+Write back to whichever filename was read in step 1.
 ```bash
 python3 -c "
-import json
-d = json.load(open('.agent.json'))
+import json, os
+p = '.las-agent.json' if os.path.exists('.las-agent.json') else '.agent.json'
+d = json.load(open(p))
 d['voice'] = 'VOICE'
 d['locale'] = 'LANG'
-open('.agent.json','w').write(json.dumps(d,indent=2,ensure_ascii=False))
+open(p,'w').write(json.dumps(d,indent=2,ensure_ascii=False))
 print('Updated')
 "
 ```

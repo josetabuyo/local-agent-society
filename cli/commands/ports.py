@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 from cli import api
+from cli.path_utils import agent_config_path
 
 DEFAULT_PORT_RANGE_START = 9000
 DEFAULT_PORT_RANGE_END = 9999
@@ -48,9 +49,9 @@ def ports_free(start, end):
 @click.option("--end",   default=DEFAULT_PORT_RANGE_END, help=f"Range end for auto-assign (default {DEFAULT_PORT_RANGE_END})")
 def ports_claim(app, port, start, end):
     """Atomically claim a port (checks + registers in one step). Prints the port."""
-    agent_json = Path.cwd() / ".agent.json"
+    agent_json = agent_config_path(Path.cwd())
     agent_name = "CLI"
-    if agent_json.exists():
+    if agent_json:
         try:
             agent_name = json.loads(agent_json.read_text()).get("name", "CLI")
         except Exception:

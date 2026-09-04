@@ -46,7 +46,7 @@ In any project directory, run:
 las agent new MyProject
 ```
 
-The command writes `.agent.json`, registers the agent with the backend, assigns a unique voice (with its language), and opens the widget.
+The command writes `.las-agent.json`, registers the agent with the backend, assigns a unique voice (with its language), and opens the widget.
 
 ---
 
@@ -66,10 +66,10 @@ las completion [--shell zsh|bash|fish] [--install]  # set up shell tab completio
 ### Agents
 ```
 las agents                              # list all registered agents
-las agent new NAME [--voice V] [--dir D]  # write .agent.json, register, launch widget
-las agent sync                          # sync .agent.json → backend
-las agent restore [NAME]                # recover .agent.json from backend
-las agent rename [OLD] NEW [--pronunciation P]  # rename in backend + update .agent.json
+las agent new NAME [--voice V] [--dir D]  # write .las-agent.json, register, launch widget
+las agent sync                          # sync .las-agent.json → backend
+las agent restore [NAME]                # recover .las-agent.json from backend
+las agent rename [OLD] NEW [--pronunciation P]  # rename in backend + update .las-agent.json
 las agent focus [NAME]                  # bring the agent's iTerm2 window to the front
 las agent inject NAME "msg"             # send message to another agent's terminal
 las agent inject NAME "msg" --from Me   # with sender label
@@ -87,7 +87,7 @@ las widget [NAME]                       # reopen one agent's floating widget (ne
 las widgets                             # reopen every registered agent's widget
 las link [--agent NAME] [--tty PATH]    # link the current (or given) terminal to a widget
 ```
-`NAME` is optional on most `agent` subcommands — it defaults to the agent registered for the current directory (via `.agent.json` or a path match in the backend registry).
+`NAME` is optional on most `agent` subcommands — it defaults to the agent registered for the current directory (via `.las-agent.json` or a path match in the backend registry).
 
 `las agent focus` also acts as the wake-up path: if an agent has no live terminal session, is marked inactive, and has `wake-enable`d, it opens a new iTerm2 window running `claude --dangerously-skip-permissions` in the agent's directory and marks it active again — instead of just reporting "not found".
 
@@ -109,7 +109,7 @@ las ports audit                         # cross-check registry against `lsof` �
 
 ### TTS Queue
 ```
-las speak "Hello"                       # enqueue TTS (uses agent voice + name from .agent.json)
+las speak "Hello"                       # enqueue TTS (uses agent voice + name from .las-agent.json)
 las queue ls                            # show pending items
 las queue clear                         # clear all pending messages
 ```
@@ -129,9 +129,9 @@ Agents share resources and follow a civility contract:
 1. **Voice queue** — always via `POST /queue/speak` or `las speak`, never `say` directly; the queue prevents collisions
 2. **Voice language** — each TTS voice has a fixed language; English voices speak English text, Spanish voices speak Spanish text — never mix them
 3. **Ports** — always reserved via `las ports claim` or `POST /ports/claim` before starting any server
-4. **Voices** — unique per agent; declared in `.agent.json` with a `locale` field (e.g. `en-US`, `es-MX`)
+4. **Voices** — unique per agent; declared in `.las-agent.json` with a `locale` field (e.g. `en-US`, `es-MX`)
 5. **Messages** — sent via `las agent inject NAME "msg"` or `POST /agents/{name}/inject`, delivered over **vortexia** (a sibling MQTT broker, see `vortexia/PROTOCOL.md`) rather than terminal injection. Not retained — the recipient only receives it if their `/las-agent` skill happens to be polling their vortexia inbox at that moment (it does so once, at the start of each session, via `las agent poll`). No live terminal, no on-disk queue; retry or wait for them to start a session.
-6. **Response language** — agents respond in the language of their TTS voice (`locale` field in `.agent.json`)
+6. **Response language** — agents respond in the language of their TTS voice (`locale` field in `.las-agent.json`)
 
 ---
 

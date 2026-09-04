@@ -12,7 +12,7 @@ A system that turns Claude Code sessions into a coordinated society of agents.
 
 ## Concepts
 
-- **Agent** — a named identity tied to a project directory (e.g. `System`, `Garantido`), declared in that directory's `.agent.json`
+- **Agent** — a named identity tied to a project directory (e.g. `System`, `Garantido`), declared in that directory's `.las-agent.json`
 - **Voice** — each agent has one unique TTS voice with a fixed language
 - **Widget** — an always-on-top floating tray window showing the agent name on every Space
 - **Inject** — send a message to another agent via `las agent inject` or `POST /agents/{name}/inject`, delivered over vortexia (`las/agent/{name}/inbox`), not a live terminal. Not retained — the recipient sees it only if polling (`las agent poll`), which the `/las-agent` skill does once at the start of each session
@@ -34,7 +34,7 @@ Open a terminal in any project folder:
 las agent new MyProject
 ```
 
-That's it. The command handles the rest: it writes `.agent.json`, registers the agent with the backend, assigns a voice, and opens the widget.
+That's it. The command handles the rest: it writes `.las-agent.json`, registers the agent with the backend, assigns a voice, and opens the widget.
 
 Once registered, key day-to-day commands are `las agent inject NAME "msg"` (send NAME a message over vortexia), `las agent poll` (drain your own vortexia inbox), `las widget [NAME]` (reopen a widget), and `las ports claim APP` (safely grab a port before starting a server).
 

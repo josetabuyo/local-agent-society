@@ -145,10 +145,10 @@ PLIST
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
-# ── Create .agent.json if not present ────────────────────────────────────────
-if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
+# ── Create .las-agent.json if not present ─────────────────────────────────────
+if [ ! -f "$INSTALL_DIR/.las-agent.json" ] && [ ! -f "$INSTALL_DIR/.agent.json" ]; then
     TODAY=$(date '+%Y-%m-%d')
-    cat > "$INSTALL_DIR/.agent.json" <<JSON
+    cat > "$INSTALL_DIR/.las-agent.json" <<JSON
 {
   "name": "$FAMILY",
   "voice": "Samantha",
@@ -156,7 +156,9 @@ if [ ! -f "$INSTALL_DIR/.agent.json" ]; then
   "backend_url": "http://localhost:8700",
   "frontend_url": "http://localhost:8700/widget/$FAMILY",
   "created": "$TODAY",
-  "report_max_chars": 40
+  "response_length_hint": 40,
+  "short_description": "",
+  "long_description": ""
 }
 JSON
 fi

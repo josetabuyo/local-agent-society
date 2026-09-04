@@ -1,4 +1,4 @@
-"""Tests for find_nearest_agent_dir: up-then-down .agent.json search."""
+"""Tests for find_nearest_agent_dir: up-then-down agent-config search."""
 import json
 import sys
 from pathlib import Path
@@ -12,8 +12,15 @@ from cli.path_utils import find_nearest_agent_dir as _find_nearest_agent_dir
 
 def write_agent(directory: Path, name: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / ".agent.json").write_text(json.dumps({"name": name}))
+    (directory / ".las-agent.json").write_text(json.dumps({"name": name}))
     return directory
+
+
+def test_finds_legacy_agent_json(tmp_path):
+    """.agent.json (pre-rename) is still discoverable when .las-agent.json is absent."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".agent.json").write_text(json.dumps({"name": "Legacy"}))
+    assert _find_nearest_agent_dir(str(tmp_path)) == str(tmp_path)
 
 
 # ── walk-up cases ─────────────────────────────────────────────────────────────

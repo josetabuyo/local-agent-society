@@ -10,22 +10,24 @@ from pathlib import Path
 import click
 
 from cli import api
-from cli.path_utils import find_nearest_agent_dir
+from cli.path_utils import agent_config_path, find_nearest_agent_dir
 
 
 def _agent_name_from_cwd():
-    """Best-effort lookup of the agent name for the current directory's .agent.json."""
+    """Best-effort lookup of the agent name for the current directory's agent config."""
     agent_dir = find_nearest_agent_dir(Path.cwd())
     if agent_dir:
-        try:
-            return json.loads((Path(agent_dir) / ".agent.json").read_text()).get("name")
-        except Exception:
-            pass
+        config = agent_config_path(agent_dir)
+        if config:
+            try:
+                return json.loads(config.read_text()).get("name")
+            except Exception:
+                pass
     return None
 
 
 def resolve_agent_name(name, *, err: bool = False) -> str:
-    """Return `name` if given, else infer it from .agent.json in the cwd.
+    """Return `name` if given, else infer it from the agent config in the cwd.
 
     On failure, echoes the standard error message (matching prior per-command
     behavior) and raises SystemExit(1).
@@ -35,7 +37,7 @@ def resolve_agent_name(name, *, err: bool = False) -> str:
     resolved = _agent_name_from_cwd()
     if resolved:
         return resolved
-    click.echo("Error: no agent name given and no .agent.json in current directory.", err=err)
+    click.echo("Error: no agent name given and no agent config in current directory.", err=err)
     raise SystemExit(1)
 
 

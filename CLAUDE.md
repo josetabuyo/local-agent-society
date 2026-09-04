@@ -40,7 +40,7 @@ curl -s http://localhost:8700/ports | python3 -c "import sys,json; p=json.load(s
 ```
 
 ### 3. Voices — unique per agent, speak in the voice's language
-Each agent has its voice in `.agent.json`. Never use another agent's voice.
+Each agent has its voice in `.las-agent.json` (`.agent.json` is the legacy filename, still read as a fallback for agents not yet migrated). Never use another agent's voice.
 
 **Critical:** the TTS voice has a fixed language — `say -v Samantha` only sounds correct with English text; `say -v Paulina` only sounds correct with Spanish text. Always speak text in the language of the voice, never mix them.
 
@@ -99,7 +99,7 @@ curl -s -X POST http://localhost:8700/ports/claim \
 Skipping this check can break other agents' production apps on this machine. Never hardcode a port.
 
 ### 7. Language — respond in the agent's configured locale
-Read `.agent.json`:
+Read `.las-agent.json` (`.agent.json` as a fallback for agents not yet migrated):
 - `"locale": "en-US"` (or any `en-*`), or voice is one of the English voices → respond in **English**
 - `"locale": "es-MX"` / `"es-ES"` (or any `es-*`), or voice is Paulina/Mónica → respond in **Spanish**
 - No locale field: derive from voice name (see rule 3). Default: **English**

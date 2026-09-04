@@ -1,7 +1,7 @@
 """
 Tests for cli/commands/_agent_common.py — the shared helpers extracted out of
 cli/commands/agents.py (resolve_agent_name, infer_locale), plus regression
-coverage for the OSError-wrapped .agent.json writes in `agent new`/`agent
+coverage for the OSError-wrapped .las-agent.json writes in `agent new`/`agent
 restore`.
 """
 import json
@@ -28,14 +28,21 @@ def test_resolve_agent_name_returns_explicit_name_without_touching_cwd(monkeypat
 
 
 def test_resolve_agent_name_falls_back_to_cwd(monkeypatch, tmp_path):
-    """With no explicit name, it resolves from .agent.json in the cwd."""
-    (tmp_path / ".agent.json").write_text(json.dumps({"name": "cwd-agent"}))
+    """With no explicit name, it resolves from .las-agent.json in the cwd."""
+    (tmp_path / ".las-agent.json").write_text(json.dumps({"name": "cwd-agent"}))
     monkeypatch.chdir(tmp_path)
     assert _agent_common.resolve_agent_name(None) == "cwd-agent"
 
 
+def test_resolve_agent_name_falls_back_to_legacy_agent_json(monkeypatch, tmp_path):
+    """.agent.json (pre-rename) is still read when .las-agent.json is absent."""
+    (tmp_path / ".agent.json").write_text(json.dumps({"name": "legacy-agent"}))
+    monkeypatch.chdir(tmp_path)
+    assert _agent_common.resolve_agent_name(None) == "legacy-agent"
+
+
 def test_resolve_agent_name_errors_when_no_name_and_no_agent_json(monkeypatch, tmp_path):
-    """Neither an explicit name nor a discoverable .agent.json -> SystemExit(1)."""
+    """Neither an explicit name nor a discoverable agent config -> SystemExit(1)."""
     monkeypatch.setattr(_agent_common, "_agent_name_from_cwd", lambda: None)
     with pytest.raises(SystemExit) as excinfo:
         _agent_common.resolve_agent_name(None)
@@ -47,7 +54,7 @@ def test_resolve_agent_name_echoes_error_message(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         _agent_common.resolve_agent_name(None)
     captured = capsys.readouterr()
-    assert "no agent name given and no .agent.json" in captured.out
+    assert "no agent name given and no agent config" in captured.out
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +84,7 @@ def test_infer_locale_defaults_to_en_us_when_lang_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_agent_new_reports_clear_error_on_write_failure(monkeypatch, tmp_path):
-    """If writing .agent.json raises OSError, `agent new` must exit(1) with a clear message."""
+    """If writing .las-agent.json raises OSError, `agent new` must exit(1) with a clear message."""
     monkeypatch.setattr(agents_mod.api, "get", lambda path: {"voice": "Samantha"})
 
     def boom(self, *a, **kw):
@@ -97,7 +104,7 @@ def test_agent_new_reports_clear_error_on_write_failure(monkeypatch, tmp_path):
 
 
 def test_agent_restore_reports_clear_error_on_write_failure(monkeypatch, tmp_path):
-    """If writing .agent.json raises OSError, `agent restore` must exit(1) with a clear message."""
+    """If writing .las-agent.json raises OSError, `agent restore` must exit(1) with a clear message."""
     monkeypatch.setattr(
         agents_mod.api,
         "get",

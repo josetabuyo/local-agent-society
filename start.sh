@@ -38,4 +38,4 @@ else
 fi
 
 echo ""
-echo "Ready. Open Claude Code in any directory with .agent.json."
+echo "Ready. Open Claude Code in any directory with .las-agent.json."
