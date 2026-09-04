@@ -97,7 +97,12 @@ html, body {
   flex: 1;
   overflow-y: auto;
   font-size: 11px;
-  color: #222;
+  /* --log-text is computed in widget.js's applyPrefsToDom from the widget's
+   * own color's luminance (dark bg -> light text, light bg -> dark text) —
+   * no fixed plate behind the log; the widget stays as see-through as the
+   * opacity slider says. See --bubble-tint/--bubble-border below for how
+   * individual bubbles get a legibility floor instead. */
+  color: var(--log-text, #222);
   -webkit-app-region: no-drag;
 }
 
@@ -148,9 +153,33 @@ html, body {
   );
 }
 
+/*
+ * Three distinct, non-overlapping bubble kinds — deliberately never sharing a
+ * look, so it's never ambiguous which one a line is: mic dictation (this
+ * user, right side), this agent's own voice/local widget (left side, robot
+ * glyph, no name — it's always the same speaker), and messages received from
+ * OTHER agents (left side, `from` name shown — the only kind that needs one).
+ *
+ * All three bubbles share --bubble-tint/--bubble-border (set in widget.js's
+ * applyPrefsToDom from the widget color's luminance) instead of a fixed
+ * black-on-white tint, so they stay legible whether the chosen widget color
+ * is light or dark — the same two degrees of freedom (color, opacity) the
+ * rest of the widget already uses, no separate opaque plate.
+ */
 .log .entry {
   padding: 2px 0;
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  border-top: 1px solid rgba(127, 127, 127, 0.18);
+}
+
+.log .entry .bubble {
+  position: relative;
+  display: inline-block;
+  max-width: 75%;
+  padding: 4px 8px;
+  border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.25));
+  border-radius: 12px;
+  background: var(--bubble-tint, rgba(0, 0, 0, 0.05));
+  word-wrap: break-word;
 }
 
 .log .entry .from {
@@ -161,33 +190,27 @@ html, body {
   content: "\1F50A ";
 }
 
-/* Agent's own voice: no bubble, no border, left-aligned — a robot glyph is
- * the only marker, no name label. */
-.log .entry.agent-msg {
+/* This agent's own voice: left-aligned bubble, robot glyph, no name label —
+ * it's always the same speaker so a label would be redundant. */
+.log .entry.local-msg {
   border-top: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
 }
 
-.log .entry.agent-msg .agent-icon {
-  margin-right: 4px;
+.log .entry.local-msg .agent-icon {
+  flex-shrink: 0;
+  line-height: 1.6;
 }
 
-/* Human dictation into this agent: a comic-style speech bubble on the right —
- * no name, no icon, just the bubble with a small tail pointing at its corner. */
+/* Human dictation into this agent (the mic bubble): right side, no name, no
+ * icon, just the bubble with a small tail pointing at its corner. */
 .log .entry.user-msg {
   display: flex;
   justify-content: flex-end;
   border-top: none;
   padding-right: 6px;
-}
-
-.log .entry.user-msg .bubble {
-  position: relative;
-  max-width: 75%;
-  padding: 4px 8px;
-  border: 1px solid rgba(0, 0, 0, 0.25);
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.05);
-  word-wrap: break-word;
 }
 
 /* Tail: a small rotated square clipped to a triangle, border+fill matched to
@@ -199,10 +222,20 @@ html, body {
   bottom: 3px;
   width: 10px;
   height: 10px;
-  background: rgba(0, 0, 0, 0.05);
-  border-right: 1px solid rgba(0, 0, 0, 0.25);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  background: var(--bubble-tint, rgba(0, 0, 0, 0.05));
+  border-right: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.25));
+  border-bottom: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.25));
   clip-path: polygon(0 0, 100% 100%, 0 100%);
+}
+
+/* Messages received from OTHER agents (via vortexia inject): left side, the
+ * only bubble kind that shows a `from` name — everything else here is
+ * either this agent (no label needed) or the user (no label needed). */
+.log .entry.external-msg {
+  border-top: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 /*

@@ -149,6 +149,25 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+/**
+ * WCAG relative luminance of a '#rrggbb' color, 0 (black) .. 1 (white).
+ * Used to pick dark-on-light vs light-on-dark log/bubble text instead of a
+ * fixed color — the widget's background is user-configurable (any hue,
+ * light or dark), so a hardcoded text color reads fine against some choices
+ * and unreadable against others.
+ */
+function relativeLuminance(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const toLinear = (c) => {
+    c /= 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const r = toLinear((n >> 16) & 255);
+  const g = toLinear((n >> 8) & 255);
+  const b = toLinear(n & 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
 function applyPrefsToDom() {
   // Set on the root, not widgetEl: #settings/#commands/#commandEdit/#ttyPicker
   // are siblings of #widget in the DOM (not descendants), so a CSS custom
@@ -164,6 +183,19 @@ function applyPrefsToDom() {
   document.documentElement.style.setProperty('--widget-bg', hexToRgba(prefs.color, prefs.opacity));
   document.documentElement.style.setProperty('--text-fill', hexToRgba('#141414', prefs.opacity));
   document.documentElement.style.setProperty('--btn-fill', `rgba(0, 0, 0, ${(0.16 * prefs.opacity).toFixed(3)})`);
+
+  // Log/bubble contrast: dark widget color -> light text on a light-tinted
+  // bubble, light widget color -> dark text on a dark-tinted bubble — same
+  // two degrees of freedom as the rest of the widget (the chosen color and
+  // opacity), no fixed opaque plate that would defeat the transparency the
+  // opacity slider is there to control. The tint alpha is NOT multiplied by
+  // prefs.opacity — like the button/name outlines, bubbles need a legibility
+  // floor that survives even a very transparent widget.
+  const isDarkBg = relativeLuminance(prefs.color) < 0.5;
+  document.documentElement.style.setProperty('--log-text', isDarkBg ? 'rgba(245, 245, 245, 0.95)' : 'rgba(20, 20, 20, 0.92)');
+  document.documentElement.style.setProperty('--bubble-tint', isDarkBg ? 'rgba(255, 255, 255, 0.14)' : 'rgba(0, 0, 0, 0.06)');
+  document.documentElement.style.setProperty('--bubble-border', isDarkBg ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.25)');
+
   colorEl.value = prefs.color;
   opacityEl.value = String(prefs.opacity);
   alwaysOnTopEl.checked = !!prefs.alwaysOnTop;
@@ -299,19 +331,23 @@ window.addEventListener('resize', () => fitNameToBox());
 
 // ── message log ─────────────────────────────────────────────────────────────
 
+// Three distinct, non-overlapping bubble kinds — none of them merge into
+// another (per explicit request: mic dictation must never read as this
+// agent's own voice, and an external agent's message must never read as
+// either): mic dictation (right, "user-msg"), this agent's own voice/local
+// widget (left, "local-msg"), and messages received from OTHER agents (left,
+// "external-msg", the only one that shows a `from` name).
 function appendLogEntry(envelope, { speak } = {}) {
   const row = document.createElement('div');
   // A dictated message is a self-send: {from: agentName, to: agentName,
   // source: 'human'} — see main.js's vortexia:send handler. That's the
   // person dictating TO the agent's inbox, not the agent talking to itself,
-  // so it renders as a chat bubble on the right (the "user" side).
+  // so it renders as a chat bubble on the right (the "user"/mic side).
   const isOwnDictation = envelope.source === 'human' && envelope.from === agentName && envelope.to === agentName;
   // This agent's own voice output (TTS speak events off the queue) arrives
   // as {from: "queue", to: agentName, kind: "speak"} — see backend/main.py's
   // tts_drainer, which hardcodes from:"queue" rather than the agent's own
-  // name. So detect it by kind/the `speak` flag, not by `from`. No bubble,
-  // no name label — a robot glyph is enough since it's always this widget's
-  // own agent talking.
+  // name. Detect it by kind/the `speak` flag, not by `from`.
   const isOwnVoice = !isOwnDictation && (speak || envelope.kind === 'speak');
 
   if (isOwnDictation) {
@@ -321,19 +357,25 @@ function appendLogEntry(envelope, { speak } = {}) {
     bubble.textContent = envelope.text || '';
     row.appendChild(bubble);
   } else if (isOwnVoice) {
-    row.className = 'entry agent-msg' + (speak ? ' speak' : '');
+    row.className = 'entry local-msg' + (speak ? ' speak' : '');
     const icon = document.createElement('span');
     icon.className = 'agent-icon';
     icon.textContent = speak ? '🔊' : '🤖';
     row.appendChild(icon);
-    row.appendChild(document.createTextNode(envelope.text || ''));
+    const bubble = document.createElement('span');
+    bubble.className = 'bubble';
+    bubble.textContent = envelope.text || '';
+    row.appendChild(bubble);
   } else {
-    row.className = 'entry' + (speak ? ' speak' : '');
+    row.className = 'entry external-msg' + (speak ? ' speak' : '');
     const from = document.createElement('span');
     from.className = 'from';
     from.textContent = envelope.from || '?';
     row.appendChild(from);
-    row.appendChild(document.createTextNode(': ' + (envelope.text || '')));
+    const bubble = document.createElement('span');
+    bubble.className = 'bubble';
+    bubble.textContent = envelope.text || '';
+    row.appendChild(bubble);
   }
   logEl.appendChild(row);
   logEl.scrollTop = logEl.scrollHeight;

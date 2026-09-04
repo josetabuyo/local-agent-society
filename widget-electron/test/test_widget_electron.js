@@ -607,6 +607,30 @@ test('closeWidget destroys the existing window and does NOT recreate one', () =>
   assert.doesNotMatch(body, /createWidgetWindow/, 'closeWidget must not reopen the widget — that would defeat "put it away"');
 });
 
+// ── `las agent rename` (an open widget window must follow the rename) ──────
+
+test('handleProtocolUrl routes action=rename with a `to` param to renameWidget, distinct from close/reopen/open', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function handleProtocolUrl(rawUrl) {');
+  assert.match(body, /action === 'rename'/);
+  assert.match(body, /renameWidget\(name,\s*to\)/);
+});
+
+test('renameWidget destroys the old-name window and creates one under the new name', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function renameWidget(oldName, newName) {');
+  assert.match(body, /windows\.get\(oldName\)/, 'must look up the window under the OLD name');
+  assert.match(body, /\.destroy\(\)/);
+  assert.match(body, /windows\.delete\(oldName\)/, 'must not leave a stale map entry under the old name');
+  assert.match(body, /createWidgetWindow\(newName/, 'must open the replacement window under the NEW name');
+});
+
+test('renameWidget is a no-op when no window is open under the old name', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'function renameWidget(oldName, newName) {');
+  assert.match(body, /if \(!existing \|\| existing\.isDestroyed\(\)\) return;/, 'a rename with nothing open for oldName must not create a window either — that\'s openWidget\'s job, not rename\'s');
+});
+
 test('agent:deactivate calls the backend inactive endpoint and destroys the calling window', () => {
   const src = readSrc('main.js');
   const body = extractFunctionBody(src, "ipcMain.handle('agent:deactivate', async (event, name) => {");
@@ -688,7 +712,7 @@ test('restore-after-visible delay is a single named constant, easy to retune to 
 
 // ── inactive agents must NOT come back on a bulk/auto open ──────────────────
 // `las start`'s plain launch (no args) hits the "open everything" branch;
-// only a deliberate single-agent open (explicit --agent=/cwd .agent.json, or
+// only a deliberate single-agent open (explicit --agent=/cwd .las-agent.json, or
 // `las widget NAME`/wake-via-vortexia — neither goes through this branch)
 // should ever open an inactive widget.
 

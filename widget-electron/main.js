@@ -95,7 +95,7 @@ const log = {
  * this app reads the same registry as `cli/commands/agents.py` /
  * `backend/main.py`'s `/agents` endpoint, and can also be told explicitly
  * via `--agent=<name>` (used by `las widget <name>`-equivalent launches) or
- * by pointing it at a working directory containing `.agent.json`.
+ * by pointing it at a working directory containing `.las-agent.json`.
  *
  * Resolved BEFORE app.whenReady()/requestSingleInstanceLock() because the
  * single-instance lock is scoped by userData path (see below): without a
@@ -109,12 +109,16 @@ function resolveInitialAgentNames(argv) {
 
   const cwdFlag = argv.find((a) => a.startsWith('--cwd='));
   const dir = cwdFlag ? cwdFlag.slice('--cwd='.length) : process.cwd();
-  try {
-    const raw = fs.readFileSync(path.join(dir, '.agent.json'), 'utf8');
-    const json = JSON.parse(raw);
-    if (json && json.name) return [json.name];
-  } catch {
-    // fall through
+  // ".las-agent.json" is the current convention; ".agent.json" is read as a
+  // fallback for agents not yet migrated (see scripts/migrate-agent-json.py).
+  for (const filename of ['.las-agent.json', '.agent.json']) {
+    try {
+      const raw = fs.readFileSync(path.join(dir, filename), 'utf8');
+      const json = JSON.parse(raw);
+      if (json && json.name) return [json.name];
+    } catch {
+      // try next filename
+    }
   }
   return null; // signal "open everything known to the registry"
 }
@@ -210,6 +214,9 @@ function handleProtocolUrl(rawUrl) {
     reopenWidget(name);
   } else if (action === 'close') {
     closeWidget(name);
+  } else if (action === 'rename') {
+    const to = parsed.searchParams.get('to');
+    if (to) renameWidget(name, to);
   } else {
     openWidget(name);
   }
@@ -258,6 +265,26 @@ function reopenWidget(name) {
     windows.delete(name);
   }
   return createWidgetWindow(name, { forgetPosition: true });
+}
+
+/**
+ * Follow a rename: destroy the window open under `oldName` (if any) and
+ * open a fresh one under `newName`. `las agent rename` only ever patched
+ * the backend registry and the agent's own config file — a widget window
+ * already open under the old name kept running unchanged, so a later
+ * `las widget` under the new name opened a SECOND, overlapping window
+ * instead of updating the first (reported by DataLake).
+ *
+ * No-op if nothing is open for oldName: a rename with no widget currently
+ * open has nothing to migrate — the next `las widget` under the new name
+ * opens cleanly on its own, same as any first-time open.
+ */
+function renameWidget(oldName, newName) {
+  const existing = windows.get(oldName);
+  if (!existing || existing.isDestroyed()) return;
+  existing.destroy();
+  windows.delete(oldName);
+  createWidgetWindow(newName, { forgetPosition: true });
 }
 
 /**
@@ -1112,7 +1139,12 @@ async function transcribeAudio(win, pcmFloat32, languageHint) {
   });
   send({ state: 'transcribing' });
 
-  const options = { task: 'transcribe' };
+  // Whisper's encoder only sees 30s per forward pass; without chunking, any
+  // dictation longer than that gets silently truncated instead of erroring
+  // (confirmed by the user — dictated bubbles were cutting off). chunk_length_s
+  // + stride_length_s makes transformers.js split long-form audio into
+  // overlapping 30s windows and stitch the results back together.
+  const options = { task: 'transcribe', chunk_length_s: 30, stride_length_s: 5 };
   if (languageHint) options.language = languageHint;
   let output;
   try {
@@ -1270,7 +1302,7 @@ app.whenReady().then(async () => {
 
   const explicit = resolveInitialAgentNames(process.argv);
   if (explicit) {
-    // A specific agent was named (via --agent=/cwd .agent.json) — deliberate,
+    // A specific agent was named (via --agent=/cwd .las-agent.json) — deliberate,
     // opens even if inactive, same as `las widget NAME` from that agent's own
     // folder.
     for (const name of explicit) openWidget(name);
