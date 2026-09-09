@@ -149,6 +149,18 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+/** '#rrggbb' + 0..1 alpha, darkened by `amount` (0..1) -> 'rgba(r, g, b, a)'.
+ * Used for the local-msg accent tail: a hue tied to the widget's own color
+ * (unlike the neutral --bubble-tint), but a shade darker so it reads as an
+ * accent on top of the same-hued bubble rather than disappearing into it. */
+function darkenHexToRgba(hex, alpha, amount) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const r = Math.round(((n >> 16) & 255) * (1 - amount));
+  const g = Math.round(((n >> 8) & 255) * (1 - amount));
+  const b = Math.round((n & 255) * (1 - amount));
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 /**
  * WCAG relative luminance of a '#rrggbb' color, 0 (black) .. 1 (white).
  * Used to pick dark-on-light vs light-on-dark log/bubble text instead of a
@@ -195,6 +207,11 @@ function applyPrefsToDom() {
   document.documentElement.style.setProperty('--log-text', isDarkBg ? 'rgba(245, 245, 245, 0.95)' : 'rgba(20, 20, 20, 0.92)');
   document.documentElement.style.setProperty('--bubble-tint', isDarkBg ? 'rgba(255, 255, 255, 0.14)' : 'rgba(0, 0, 0, 0.06)');
   document.documentElement.style.setProperty('--bubble-border', isDarkBg ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.25)');
+
+  // Local-msg accent tail: tied to the widget's OWN color (not the neutral
+  // black/white --bubble-tint), a shade darker so the little top-center peak
+  // reads as "this came from the title above" rather than blending in.
+  document.documentElement.style.setProperty('--local-accent', darkenHexToRgba(prefs.color, 0.9, 0.25));
 
   colorEl.value = prefs.color;
   opacityEl.value = String(prefs.opacity);
@@ -331,12 +348,28 @@ window.addEventListener('resize', () => fitNameToBox());
 
 // ── message log ─────────────────────────────────────────────────────────────
 
+// Cache of other agents' widget colors (for the external-msg name chip) —
+// keyed by agent name, populated lazily via window.las.getPrefs(fromName).
+// Same electron-store all widgets share (see main.js's getPrefs), so this is
+// just avoiding a repeat IPC round-trip per message from the same sender.
+const agentColorCache = new Map();
+async function getAgentColor(name) {
+  if (agentColorCache.has(name)) return agentColorCache.get(name);
+  const p = await window.las.getPrefs(name).catch(() => null);
+  const color = (p && p.color) || '#90c060';
+  agentColorCache.set(name, color);
+  return color;
+}
+
 // Three distinct, non-overlapping bubble kinds — none of them merge into
 // another (per explicit request: mic dictation must never read as this
 // agent's own voice, and an external agent's message must never read as
-// either): mic dictation (right, "user-msg"), this agent's own voice/local
-// widget (left, "local-msg"), and messages received from OTHER agents (left,
-// "external-msg", the only one that shows a `from` name).
+// either): mic dictation (right, "user-msg", "mic" description), this
+// agent's own voice/local widget (small margins both sides, "local-msg", no
+// name — a centered accent tail says "the title itself is speaking"
+// instead), and messages received from OTHER agents (left, "external-msg",
+// always showing the sender's name as a color-chip pill, tinted with THAT
+// agent's own widget color — the same color you'd see on their widget).
 function appendLogEntry(envelope, { speak } = {}) {
   const row = document.createElement('div');
   // A dictated message is a self-send: {from: agentName, to: agentName,
@@ -356,26 +389,33 @@ function appendLogEntry(envelope, { speak } = {}) {
     bubble.className = 'bubble';
     bubble.textContent = envelope.text || '';
     row.appendChild(bubble);
+    const desc = document.createElement('span');
+    desc.className = 'desc';
+    desc.textContent = 'mic';
+    row.appendChild(desc);
   } else if (isOwnVoice) {
     row.className = 'entry local-msg' + (speak ? ' speak' : '');
-    const icon = document.createElement('span');
-    icon.className = 'agent-icon';
-    icon.textContent = speak ? '🔊' : '🤖';
-    row.appendChild(icon);
     const bubble = document.createElement('span');
     bubble.className = 'bubble';
     bubble.textContent = envelope.text || '';
     row.appendChild(bubble);
   } else {
     row.className = 'entry external-msg' + (speak ? ' speak' : '');
-    const from = document.createElement('span');
-    from.className = 'from';
-    from.textContent = envelope.from || '?';
-    row.appendChild(from);
     const bubble = document.createElement('span');
     bubble.className = 'bubble';
     bubble.textContent = envelope.text || '';
     row.appendChild(bubble);
+    const chip = document.createElement('span');
+    chip.className = 'from-chip';
+    chip.textContent = envelope.from || '?';
+    row.appendChild(chip);
+    // Color-fetch is async; the chip renders immediately with a neutral
+    // fallback tint and is upgraded in place once the sender's own widget
+    // color resolves — never blocks/delays the message itself appearing.
+    getAgentColor(envelope.from).then((color) => {
+      chip.style.background = hexToRgba(color, 0.32);
+      chip.style.borderColor = hexToRgba(color, 0.7);
+    });
   }
   logEl.appendChild(row);
   logEl.scrollTop = logEl.scrollHeight;
@@ -590,10 +630,11 @@ async function blobToMono16kPCM(blob) {
   return rendered.getChannelData(0);
 }
 
-// -- countdown beeps as the 10-min safety-net cutoff approaches -------------
-// Purely a "your recording is about to be force-stopped" warning, distinct
-// from any transcription/model concern — three pips (10s, 5s, then a more
-// urgent double pip at 2s) before stopRecordingAndTranscribe() fires.
+// -- countdown beeps across the MAX_RECORDING_MS safety-net window ----------
+// Purely a "how much time is left before this gets force-stopped" awareness
+// aid, distinct from any transcription/model concern — a calm low pip at the
+// halfway point, then rising urgency as the cutoff nears (10s, then 5s)
+// before stopRecordingAndTranscribe() fires.
 
 let sharedAudioCtx = null;
 function playBeep(freq, durationMs) {
@@ -620,15 +661,9 @@ function playBeep(freq, durationMs) {
 
 function scheduleCountdownBeeps() {
   clearCountdownTimers();
+  countdownTimers.push(setTimeout(() => playBeep(440, 110), MAX_RECORDING_MS / 2)); // halfway
   countdownTimers.push(setTimeout(() => playBeep(660, 110), MAX_RECORDING_MS - 10000)); // 10s left
   countdownTimers.push(setTimeout(() => playBeep(780, 110), MAX_RECORDING_MS - 5000)); // 5s left
-  countdownTimers.push(
-    setTimeout(() => {
-      // 2s left — more urgent: two quick pips instead of one
-      playBeep(920, 90);
-      setTimeout(() => playBeep(920, 90), 150);
-    }, MAX_RECORDING_MS - 2000)
-  );
 }
 
 function clearCountdownTimers() {
@@ -640,6 +675,21 @@ function clearCountdownTimers() {
 // actually live, without having to talk into it and wait for a transcript.
 // Answers "me escuchás? estás ok?" instantly instead of after 5 minutes of
 // dictating into a dead mic.
+//
+// A real end-to-end test, not just a canned reply: the thumbs-up only proves
+// getUserMedia (mic capture) works — it says nothing about whether a live
+// Claude Code session is actually attached and listening on the other end.
+// An earlier version spoke a hardcoded "OK" back through the TTS queue
+// on success, which gave false confidence even with no session running at
+// all. Instead, this publishes a real self-dictation ping into the agent's
+// OWN vortexia inbox (window.las.sendToSelf — the exact same path a real
+// mic dictation uses), and relies on the `las-agent` skill's mandatory live
+// listener (see CLAUDE.md / the skill's "Escucha en vivo" section) to
+// recognize the sentinel text and have the actual attached LLM session
+// speak "OK" back. If nothing replies, that itself is the useful signal —
+// there is no live console attached, exactly the gap a hardcoded reply used
+// to paper over.
+const MIC_SELFTEST_PING = '[las-mic-selftest] reply with just "OK" to confirm this session is listening.';
 
 function showMicToast(emoji) {
   const toast = document.createElement('span');
@@ -666,8 +716,17 @@ async function runMicSelfTest() {
   const live = !!track && track.readyState === 'live';
   stream.getTracks().forEach((t) => t.stop());
   if (live) {
-    window.las.log('info', 'mic', 'self-test ok: mic + dictation pipeline is live');
+    window.las.log('info', 'mic', 'self-test ok: mic capture is live — pinging own inbox for a real session to answer');
     showMicToast('👍');
+    // Fire-and-forget: the thumbs-up already reflects mic capture, which is
+    // synchronous and known now. Whether a live session answers "OK" is
+    // separate, asynchronous proof the user sees directly in the log as an
+    // ordinary reply bubble — not something this function waits on.
+    window.las.sendToSelf(agentName, MIC_SELFTEST_PING).then((result) => {
+      if (!result || !result.ok) {
+        window.las.log('warn', 'mic', `self-test ping failed to publish: ${result && result.error}`);
+      }
+    });
   } else {
     window.las.log('error', 'mic', 'self-test failed: audio track not live');
     showMicToast('👎');

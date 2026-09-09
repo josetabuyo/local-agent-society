@@ -301,22 +301,37 @@ test('mic recording has a max-duration safety net so a forgotten click-to-stop d
   assert.match(src, /maxDurationTimer = setTimeout\(\(\) => \{[\s\S]*?stopRecordingAndTranscribe\(\);[\s\S]*?\}, MAX_RECORDING_MS\);/);
 });
 
-test('mic recording schedules countdown beeps (10s/5s/2s) before the max-duration cutoff, cleared on manual stop', () => {
+test('mic recording schedules countdown beeps (halfway/10s/5s) before the max-duration cutoff, cleared on manual stop', () => {
   const src = readSrc('renderer', 'widget.js');
   assert.match(src, /scheduleCountdownBeeps/);
+  assert.match(src, /MAX_RECORDING_MS \/ 2/);
   assert.match(src, /MAX_RECORDING_MS - 10000/);
   assert.match(src, /MAX_RECORDING_MS - 5000/);
-  assert.match(src, /MAX_RECORDING_MS - 2000/);
+  assert.doesNotMatch(src, /MAX_RECORDING_MS - 2000/);
   const stopBody = extractFunctionBody(src, 'async function stopRecordingAndTranscribe() {');
   assert.match(stopBody, /clearCountdownTimers\(\)/);
 });
 
-test('double-clicking the mic runs a self-test (not a real recording) and shows a floating toast', () => {
+test('double-clicking the mic runs a self-test (not a real recording), shows a floating toast, and on success pings its OWN inbox via sendToSelf (not a hardcoded TTS reply)', () => {
   const src = readSrc('renderer', 'widget.js');
   assert.match(src, /micEl\.addEventListener\('dblclick', \(\) => \{/);
   const testBody = extractFunctionBody(src, 'async function runMicSelfTest() {');
   assert.match(testBody, /getUserMedia/);
-  assert.match(testBody, /showMicToast/);
+  assert.match(testBody, /showMicToast\('👍'\)/);
+  assert.match(testBody, /window\.las\.sendToSelf\(agentName, MIC_SELFTEST_PING\)/);
+  assert.doesNotMatch(src, /speakSelfTestOk/, 'the old hardcoded-TTS self-test path must be fully removed');
+});
+
+test('the mic self-test ping is a recognizable sentinel string a live session can pattern-match on to reply "OK"', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /const MIC_SELFTEST_PING = '\[las-mic-selftest\]/);
+});
+
+test('preload/main.js no longer expose the old speak-selftest-ok IPC channel (replaced by a real inbox ping)', () => {
+  const preloadSrc = readSrc('preload.js');
+  const mainSrc = readSrc('main.js');
+  assert.doesNotMatch(preloadSrc, /speak-selftest-ok/);
+  assert.doesNotMatch(mainSrc, /speak-selftest-ok/);
 });
 
 test('main.js vortexia:send handler resolves the sending agent from the window map (reuses the existing per-window VortexiaClient)', () => {
@@ -453,6 +468,67 @@ test('index.html exposes a dictation-language picker defaulting to Spanish', () 
   const html = readSrc('renderer', 'index.html');
   assert.match(html, /id="micLanguage"/);
   assert.match(html, /<option value="es">/);
+});
+
+test('user-msg (mic dictation) bubble always carries a "mic" description', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const appendLogEntryIdx = src.indexOf('function appendLogEntry(envelope, { speak } = {}) {');
+  const nextFnIdx = src.indexOf('\nfunction ', appendLogEntryIdx + 1);
+  const body = src.slice(appendLogEntryIdx, nextFnIdx === -1 ? undefined : nextFnIdx);
+  assert.match(body, /desc\.className = 'desc'/);
+  assert.match(body, /desc\.textContent = 'mic'/);
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.log \.entry\.user-msg \.desc \{/);
+});
+
+test('local-msg (this agent\'s own voice) has a centered gradient accent segment on the bubble\'s TOP edge, half its width, no icon', () => {
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.log \.entry\.local-msg \.bubble::before \{[^}]*width:\s*50%/s);
+  assert.match(css, /\.log \.entry\.local-msg \.bubble::before \{[^}]*left:\s*25%/s);
+  assert.match(css, /\.log \.entry\.local-msg \.bubble::before \{[^}]*linear-gradient\(to right, transparent/s);
+  assert.match(css, /\.log \.entry\.local-msg \.bubble \{[^}]*max-width:\s*92%/s);
+  assert.doesNotMatch(css, /agent-icon/);
+  const jsSrc = readSrc('renderer', 'widget.js');
+  assert.doesNotMatch(jsSrc, /agent-icon/);
+});
+
+test('local-msg accent segment color is tied to the widget\'s own color (--local-accent), not the neutral --bubble-tint', () => {
+  const jsSrc = readSrc('renderer', 'widget.js');
+  assert.match(jsSrc, /--local-accent['"]?,\s*darkenHexToRgba\(prefs\.color/);
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.log \.entry\.local-msg \.bubble::before \{[^}]*var\(--local-accent/s);
+});
+
+test('log entries have breathing room between bubbles (margin-bottom on .entry)', () => {
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.log \.entry \{[^}]*margin-bottom:\s*6px/s);
+});
+
+test('external-msg always renders a name chip tinted with the SENDER\'s own widget color (not this widget\'s), fetched via getPrefs', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const appendLogEntryIdx = src.indexOf('function appendLogEntry(envelope, { speak } = {}) {');
+  const nextFnIdx = src.indexOf('\nfunction ', appendLogEntryIdx + 1);
+  const body = src.slice(appendLogEntryIdx, nextFnIdx === -1 ? undefined : nextFnIdx);
+  assert.match(body, /chip\.className = 'from-chip'/);
+  assert.match(body, /chip\.textContent = envelope\.from/);
+  assert.match(body, /getAgentColor\(envelope\.from\)/);
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.log \.entry\.external-msg \.from-chip \{/);
+});
+
+test('user-msg and external-msg bubbles have no triangular tail — instead a square corner (pointing at their desc/chip) plus a radial gradient anchored there', () => {
+  const css = readSrc('renderer', 'widget.css');
+  assert.doesNotMatch(css, /clip-path:\s*polygon/, 'no more triangle clip-path tails');
+  assert.match(css, /\.log \.entry\.user-msg \.bubble \{[^}]*border-radius:\s*12px 12px 0 12px/s);
+  assert.match(css, /\.log \.entry\.external-msg \.bubble \{[^}]*border-radius:\s*12px 12px 12px 0/s);
+  assert.match(css, /\.log \.entry\.user-msg \.bubble::after \{[^}]*radial-gradient\(circle at 100% 100%/s);
+  assert.match(css, /\.log \.entry\.external-msg \.bubble::after \{[^}]*radial-gradient\(circle at 0% 100%/s);
+});
+
+test('external-msg name chip has a square top-left corner matching the bubble\'s square corner, sharing the same left inset (no extra margin)', () => {
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.log \.entry\.external-msg \.from-chip \{[^}]*border-radius:\s*0 999px 999px 999px/s);
+  assert.doesNotMatch(css, /\.log \.entry\.external-msg \.from-chip \{[^}]*margin-left/s);
 });
 
 test('own dictation (self-send: from===to===agentName, source==="human") is labeled as the user, not the agent\'s own name', () => {

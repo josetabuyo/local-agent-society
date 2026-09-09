@@ -155,10 +155,21 @@ html, body {
 
 /*
  * Three distinct, non-overlapping bubble kinds — deliberately never sharing a
- * look, so it's never ambiguous which one a line is: mic dictation (this
- * user, right side), this agent's own voice/local widget (left side, robot
- * glyph, no name — it's always the same speaker), and messages received from
- * OTHER agents (left side, `from` name shown — the only kind that needs one).
+ * look, so it's never ambiguous which one a line is:
+ *
+ *   - user-msg: mic dictation. Right-aligned (asymmetric margin — the bubble
+ *     rests against the right edge, leaving the bulk of the width free on
+ *     the left), tail pointing right, "mic" description under the bubble on
+ *     the right (next to the tail).
+ *   - local-msg: this agent's own voice/widget. Small margins on BOTH sides
+ *     (neither edge-hugging like the other two) and no name label — instead
+ *     a small darker accent tail sits centered on the bubble's TOP edge,
+ *     reading as "the title above is speaking" rather than a side-pointing
+ *     tail to a name.
+ *   - external-msg: messages from OTHER agents (vortexia). Left-aligned,
+ *     tail pointing left, ALWAYS shows the sender's name — as a color-chip
+ *     pill tucked just under the bubble near the tail, tinted with THAT
+ *     agent's own widget color (the same color you'd see on their widget).
  *
  * All three bubbles share --bubble-tint/--bubble-border (set in widget.js's
  * applyPrefsToDom from the widget color's luminance) instead of a fixed
@@ -168,6 +179,7 @@ html, body {
  */
 .log .entry {
   padding: 2px 0;
+  margin-bottom: 6px;
   border-top: 1px solid rgba(127, 127, 127, 0.18);
 }
 
@@ -182,60 +194,128 @@ html, body {
   word-wrap: break-word;
 }
 
-.log .entry .from {
-  font-weight: 600;
-}
-
-.log .entry.speak .from::before {
-  content: "\1F50A ";
-}
-
-/* This agent's own voice: left-aligned bubble, robot glyph, no name label —
- * it's always the same speaker so a label would be redundant. */
+/* This agent's own voice: small margins on both sides (never edge-flush, so
+ * it never reads as either the left-hugging external kind or the
+ * right-hugging user kind) — no name label, no icon, it's always the same
+ * speaker. Wider max-width than the other two kinds (set on .bubble below)
+ * since it isn't sharing the row with a name/description/tail-side margin. */
 .log .entry.local-msg {
   border-top: none;
   display: flex;
-  align-items: flex-start;
-  gap: 4px;
+  justify-content: center;
+  padding: 0 6px;
 }
 
-.log .entry.local-msg .agent-icon {
-  flex-shrink: 0;
-  line-height: 1.6;
+.log .entry.local-msg .bubble {
+  max-width: 92%;
 }
 
-/* Human dictation into this agent (the mic bubble): right side, no name, no
- * icon, just the bubble with a small tail pointing at its corner. */
+/* Accent segment: a soft, centered bar on the bubble's TOP edge (not a
+ * pointed tail, not a side corner, unlike user/external) — half the width
+ * of the bubble's top edge, with a gradient that peaks in the middle and
+ * fades out at both ends, tinted with --local-accent (a darkened shade of
+ * the widget's own color, set in widget.js's applyPrefsToDom). Reads as a
+ * subtle "this is the title speaking" marker, deliberately quieter than an
+ * actual tail/pico. */
+.log .entry.local-msg .bubble::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: 25%;
+  width: 50%;
+  height: 3px;
+  background: linear-gradient(to right, transparent, var(--local-accent, rgba(0, 0, 0, 0.3)), transparent);
+  border-radius: 2px;
+}
+
+/* Human dictation into this agent (the mic bubble): right side, asymmetric
+ * margin (bubble rests on the right, most of the width stays free on the
+ * left), tail pointing right, "mic" description right-aligned under the
+ * bubble next to the tail. */
 .log .entry.user-msg {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   border-top: none;
   padding-right: 6px;
+  gap: 2px;
 }
 
-/* Tail: a small rotated square clipped to a triangle, border+fill matched to
- * the bubble, tucked behind its edge so the seam disappears. */
+/* Pointer: no triangle tail — one corner of the bubble (the one nearest the
+ * desc label below it) goes square instead of rounded, and a soft radial
+ * gradient anchored at that exact corner bleeds outward along its two
+ * adjacent edges. That square corner + its glow together read as the arrow,
+ * quieter and more modern than a literal pico. */
+.log .entry.user-msg .bubble {
+  border-radius: 12px 12px 0 12px;
+}
+
 .log .entry.user-msg .bubble::after {
   content: "";
   position: absolute;
-  right: -5px;
-  bottom: 3px;
-  width: 10px;
-  height: 10px;
-  background: var(--bubble-tint, rgba(0, 0, 0, 0.05));
-  border-right: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.25));
-  border-bottom: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.25));
-  clip-path: polygon(0 0, 100% 100%, 0 100%);
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  background: radial-gradient(circle at 100% 100%, var(--bubble-border, rgba(0, 0, 0, 0.35)) 0%, transparent 70%);
+  pointer-events: none;
 }
 
-/* Messages received from OTHER agents (via vortexia inject): left side, the
- * only bubble kind that shows a `from` name — everything else here is
- * either this agent (no label needed) or the user (no label needed). */
+.log .entry.user-msg .desc {
+  font-size: 9px;
+  opacity: 0.65;
+  margin-right: 6px;
+}
+
+/* Messages received from OTHER agents (via vortexia inject): left side,
+ * ALWAYS a name chip — stacked below the bubble (not beside it), with only
+ * a small inset so the two read as one unit. */
 .log .entry.external-msg {
   border-top: none;
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: 2px;
+  padding-left: 6px;
+}
+
+/* Pointer: mirror of user-msg's — square bottom-LEFT corner (instead of
+ * bottom-right) plus a radial gradient anchored there. */
+.log .entry.external-msg .bubble {
+  border-radius: 12px 12px 12px 0;
+}
+
+.log .entry.external-msg .bubble::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  background: radial-gradient(circle at 0% 100%, var(--bubble-border, rgba(0, 0, 0, 0.35)) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* Name chip/pill: tinted with the SENDER's own widget color (set inline by
+ * widget.js once resolved via getPrefs — same alpha budget as the neutral
+ * --bubble-tint/--bubble-border, just hued instead of black/white), so it
+ * reads as "that agent's color" rather than a generic label. Its top-left
+ * corner goes square too, at the same left inset as the bubble's own square
+ * corner above it (both are direct children of the same flex column with
+ * align-items: flex-start, so they share that x-offset for free) — the two
+ * square corners line up, reading as one connected shape. */
+.log .entry.external-msg .from-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 0 999px 999px 999px;
+  font-size: 9px;
+  font-weight: 600;
+  background: var(--bubble-tint, rgba(0, 0, 0, 0.06));
+  border: 1px solid var(--bubble-border, rgba(0, 0, 0, 0.25));
+}
+
+.log .entry.speak .from-chip::before {
+  content: "\1F50A ";
 }
 
 /*
