@@ -464,11 +464,42 @@ function speak(text) {
   window.speechSynthesis.speak(utter);
 }
 
+// Set by runMicSelfTest() while it's waiting for the live session's "OK"
+// reply — see the mic self-test section below. Routed through this shared
+// handler (rather than a fresh window.las.onVortexiaMessage() registration
+// per self-test) because preload.js exposes no removeListener: registering
+// a new one on every double-click would leak an ipcRenderer listener per
+// self-test, never cleaned up.
+let pendingMicSelfTestResolve = null;
+
 window.las.onVortexiaMessage((envelope) => {
   console.log('[widget] received', JSON.stringify(envelope));
+  if (envelope && envelope.kind === 'mic-selftest-pong') {
+    // Silent, mechanical confirmation published directly by `las agent
+    // listen` itself (cli/commands/agents.py) — proves the mic -> vortexia
+    // -> a live terminal-side listener pipe works, independent of whether
+    // an LLM session is attached. Deliberately NOT spoken and NOT shown as
+    // a chat bubble — an audible/visible "OK" here would misrepresent mere
+    // plumbing as a real reply. The audible "OK" below (kind: 'speak') is
+    // the separate, optional confirmation that an LLM actually answered.
+    if (pendingMicSelfTestResolve && envelope.to === agentName) {
+      pendingMicSelfTestResolve(true);
+      pendingMicSelfTestResolve = null;
+    }
+    return;
+  }
   if (envelope && envelope.kind === 'speak') {
     appendLogEntry(envelope, { speak: true });
     speak(envelope.text || '');
+    if (
+      pendingMicSelfTestResolve &&
+      envelope.to === agentName &&
+      typeof envelope.text === 'string' &&
+      envelope.text.trim().toLowerCase() === 'ok'
+    ) {
+      pendingMicSelfTestResolve(true);
+      pendingMicSelfTestResolve = null;
+    }
   } else if (envelope) {
     appendLogEntry(envelope);
   }
@@ -676,20 +707,60 @@ function clearCountdownTimers() {
 // Answers "me escuchás? estás ok?" instantly instead of after 5 minutes of
 // dictating into a dead mic.
 //
-// A real end-to-end test, not just a canned reply: the thumbs-up only proves
-// getUserMedia (mic capture) works — it says nothing about whether a live
-// Claude Code session is actually attached and listening on the other end.
-// An earlier version spoke a hardcoded "OK" back through the TTS queue
-// on success, which gave false confidence even with no session running at
-// all. Instead, this publishes a real self-dictation ping into the agent's
-// OWN vortexia inbox (window.las.sendToSelf — the exact same path a real
-// mic dictation uses), and relies on the `las-agent` skill's mandatory live
-// listener (see CLAUDE.md / the skill's "Escucha en vivo" section) to
-// recognize the sentinel text and have the actual attached LLM session
-// speak "OK" back. If nothing replies, that itself is the useful signal —
-// there is no live console attached, exactly the gap a hardcoded reply used
-// to paper over.
+// A real end-to-end test, not just a canned reply: getUserMedia (mic
+// capture) succeeding only gets a neutral 🎙️ toast — it says nothing about
+// whether a live Claude Code session is actually attached and listening on
+// the other end. An earlier version spoke a hardcoded "OK" back through the
+// TTS queue on success, which gave false confidence even with no session
+// running at all; a later version fixed the canned reply but still flashed
+// 👍 immediately on mic capture alone, before any reply could possibly have
+// arrived, which was the same false-positive under a different name. This
+// version publishes a real self-dictation ping into the agent's OWN
+// vortexia inbox (window.las.sendToSelf — the exact same path a real mic
+// dictation uses), then actually WAITS (see waitForMicSelfTestReply, up to
+// MIC_SELFTEST_REPLY_TIMEOUT_MS) for a reply before showing 👍 or 👎. Two
+// independent, layered confirmations can satisfy that wait:
+//   1. `las agent listen` (cli/commands/agents.py) answers the sentinel
+//      itself, silently and mechanically, the instant it's received — a
+//      'mic-selftest-pong' envelope, no TTS, no LLM involved. This alone
+//      proves the mic -> vortexia -> a live terminal-side listener pipe is
+//      intact, which is the whole point of a *self*-test: it should not
+//      require an LLM to be paying attention just to prove the plumbing
+//      works.
+//   2. The `las-agent` skill (see CLAUDE.md / its "Escucha en vivo"
+//      section) separately tells an attached LLM session to also speak
+//      "OK" back out loud on seeing this same sentinel — optional, audible
+//      backup coverage on top of #1, not required for 👍.
+// If neither arrives in time, that itself is the useful signal — nothing
+// at all is listening — and the UI now actually shows 👎 for it instead of
+// a thumbs-up regardless.
 const MIC_SELFTEST_PING = '[las-mic-selftest] reply with just "OK" to confirm this session is listening.';
+const MIC_SELFTEST_REPLY_TIMEOUT_MS = 8000;
+
+// Resolves true if a live session's "OK" comes back in time, false on
+// timeout. See pendingMicSelfTestResolve above for how the reply is caught.
+// micSelfTestGeneration guards against a double-click fired again while a
+// prior self-test is still waiting (micState alone doesn't block this,
+// since self-test never leaves 'idle'): without it, the first call's own
+// timeout would null out the second call's still-pending resolver.
+let micSelfTestGeneration = 0;
+function waitForMicSelfTestReply(timeoutMs) {
+  const generation = ++micSelfTestGeneration;
+  return new Promise((resolve) => {
+    let settled = false;
+    pendingMicSelfTestResolve = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (micSelfTestGeneration === generation) pendingMicSelfTestResolve = null;
+      resolve(false);
+    }, timeoutMs);
+  });
+}
 
 function showMicToast(emoji) {
   const toast = document.createElement('span');
@@ -717,16 +788,29 @@ async function runMicSelfTest() {
   stream.getTracks().forEach((t) => t.stop());
   if (live) {
     window.las.log('info', 'mic', 'self-test ok: mic capture is live — pinging own inbox for a real session to answer');
-    showMicToast('👍');
-    // Fire-and-forget: the thumbs-up already reflects mic capture, which is
-    // synchronous and known now. Whether a live session answers "OK" is
-    // separate, asynchronous proof the user sees directly in the log as an
-    // ordinary reply bubble — not something this function waits on.
-    window.las.sendToSelf(agentName, MIC_SELFTEST_PING).then((result) => {
-      if (!result || !result.ok) {
-        window.las.log('warn', 'mic', `self-test ping failed to publish: ${result && result.error}`);
-      }
-    });
+    // Capture-only feedback, distinct from the round-trip verdict below —
+    // this alone used to be shown as 👍, which is exactly the false
+    // positive this test exists to catch: mic capture working says nothing
+    // about whether a live session is attached to answer.
+    showMicToast('🎙️');
+    const sendResult = await window.las.sendToSelf(agentName, MIC_SELFTEST_PING);
+    if (!sendResult || !sendResult.ok) {
+      window.las.log('warn', 'mic', `self-test ping failed to publish: ${sendResult && sendResult.error}`);
+      showMicToast('👎');
+      return;
+    }
+    const replied = await waitForMicSelfTestReply(MIC_SELFTEST_REPLY_TIMEOUT_MS);
+    if (replied) {
+      window.las.log('info', 'mic', 'self-test ok: a live session replied "OK" — round trip confirmed');
+      showMicToast('👍');
+    } else {
+      window.las.log(
+        'warn',
+        'mic',
+        `self-test: mic capture works but no live session answered within ${MIC_SELFTEST_REPLY_TIMEOUT_MS}ms — is a Claude Code session running the las-agent live listener for this agent?`
+      );
+      showMicToast('👎');
+    }
   } else {
     window.las.log('error', 'mic', 'self-test failed: audio track not live');
     showMicToast('👎');

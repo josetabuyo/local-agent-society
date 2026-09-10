@@ -327,6 +327,46 @@ test('the mic self-test ping is a recognizable sentinel string a live session ca
   assert.match(src, /const MIC_SELFTEST_PING = '\[las-mic-selftest\]/);
 });
 
+test('mic self-test waits for the actual "OK" reply before showing thumbs-up — mic capture alone only gets a neutral toast, not 👍', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const testBody = extractFunctionBody(src, 'async function runMicSelfTest() {');
+  // The success path must publish the ping, await a reply, and only THEN
+  // show 👍 — not flash 👍 synchronously off of mic capture succeeding.
+  assert.match(testBody, /showMicToast\('🎙️'\)/, 'capture-only feedback must not be the thumbs-up emoji');
+  assert.match(testBody, /await window\.las\.sendToSelf\(agentName, MIC_SELFTEST_PING\)/);
+  assert.match(testBody, /await waitForMicSelfTestReply\(MIC_SELFTEST_REPLY_TIMEOUT_MS\)/);
+  // showMicToast('👍') must appear strictly after the await for the reply,
+  // not before it (guards against reintroducing the old fire-and-forget bug).
+  const sendIdx = testBody.indexOf('await window.las.sendToSelf(agentName, MIC_SELFTEST_PING)');
+  const thumbsUpIdx = testBody.indexOf("showMicToast('👍')");
+  assert.ok(sendIdx >= 0 && thumbsUpIdx >= 0 && thumbsUpIdx > sendIdx);
+});
+
+test('mic self-test shows thumbs-down (not thumbs-up) when no live session replies within the timeout', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const testBody = extractFunctionBody(src, 'async function runMicSelfTest() {');
+  assert.match(testBody, /if \(replied\) \{[\s\S]*?showMicToast\('👍'\);[\s\S]*?\} else \{[\s\S]*?showMicToast\('👎'\);/);
+});
+
+test('a mic-selftest-pong envelope resolves the pending self-test silently — no speak(), no appendLogEntry, no TTS — distinct from the audible "OK" speak-kind path', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const handlerBody = extractFunctionBody(src, "window.las.onVortexiaMessage((envelope) => {");
+  const pongMatch = handlerBody.match(/if \(envelope && envelope\.kind === 'mic-selftest-pong'\) \{([\s\S]*?)\n  \}\n  if \(envelope && envelope\.kind === 'speak'\)/);
+  assert.ok(pongMatch, 'mic-selftest-pong branch must come before the speak-kind branch');
+  const pongBranch = pongMatch[1];
+  assert.doesNotMatch(pongBranch, /speak\(/, 'the silent mechanical pong must never trigger TTS');
+  assert.doesNotMatch(pongBranch, /appendLogEntry/, 'the silent mechanical pong must not show a chat bubble');
+  assert.match(pongBranch, /pendingMicSelfTestResolve\(true\)/);
+});
+
+test('waitForMicSelfTestReply resolves via a live-session "OK" speak-envelope reply, and stale timeouts from an overlapping earlier call cannot swallow a still-pending resolver', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /let pendingMicSelfTestResolve = null;/);
+  assert.match(src, /envelope\.text\.trim\(\)\.toLowerCase\(\) === 'ok'/);
+  const waitBody = extractFunctionBody(src, 'function waitForMicSelfTestReply(timeoutMs) {');
+  assert.match(waitBody, /micSelfTestGeneration/, 'must guard against an overlapping earlier self-test\'s timeout nulling a newer pending resolver');
+});
+
 test('preload/main.js no longer expose the old speak-selftest-ok IPC channel (replaced by a real inbox ping)', () => {
   const preloadSrc = readSrc('preload.js');
   const mainSrc = readSrc('main.js');

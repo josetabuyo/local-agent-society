@@ -7,6 +7,10 @@ catch that SystemExit around the locale lookup and silently fall back to
 "en-US", so the command reported success (exit code 0) even though the
 backend call actually failed. This test asserts the failure now propagates.
 """
+import json
+import sys
+import types
+
 from click.testing import CliRunner
 
 from cli.commands import agents as agents_mod
@@ -82,3 +86,96 @@ def test_agent_listen_exits_cleanly_when_vortexia_unreachable(monkeypatch):
 
     assert result.exit_code != 0
     assert "vortexia unreachable" in result.output.lower()
+
+
+def test_agent_listen_mechanically_and_silently_answers_the_mic_selftest_ping_without_any_llm(monkeypatch):
+    """`las agent listen` must answer the mic self-test sentinel the instant
+    it arrives, entirely on its own, with a SILENT direct MQTT pong — never
+    /queue/speak (that would make plumbing-only confirmation sound like a
+    real LLM reply, since /queue/speak is audible). This is what lets the
+    widget's double-click self-test confirm the mic -> vortexia -> a live
+    terminal-side listener pipe is intact without depending on whether an
+    LLM session is attached and chooses to react (see widget.js's
+    MIC_SELFTEST_PING / runMicSelfTest / the 'mic-selftest-pong' kind check,
+    and this command's docstring).
+    """
+    MIC_SELFTEST_PING = '[las-mic-selftest] reply with just "OK" to confirm this session is listening.'
+
+    def fake_get(path):
+        if path == "/ports":
+            return {"9012": {"app": "vortexia-mqtt", "port": 9012, "registered_at": "2026-01-01T00:00:00"}}
+        return {}
+
+    monkeypatch.setattr(agents_mod.api, "get", fake_get)
+
+    posted = []
+    monkeypatch.setattr(agents_mod.api, "post", lambda path, payload: posted.append((path, payload)))
+
+    class FakeMessage:
+        def __init__(self, text):
+            self.payload = json.dumps({"from": "testagent", "to": "testagent", "text": text}).encode()
+
+    created_clients = []
+
+    class FakeMQTTClient:
+        def __init__(self, *a, **k):
+            self.on_connect = None
+            self.on_message = None
+            self.published = []
+            created_clients.append(self)
+
+        def subscribe(self, *a, **k):
+            pass
+
+        def publish(self, *a, payload=None, **k):
+            self.published.append({"args": a, "payload": payload, "kwargs": k})
+
+        def connect(self, *a, **k):
+            pass
+
+        def loop_forever(self):
+            # Simulate one real dictation (must NOT trigger any pong) and
+            # one self-test ping (must trigger exactly one silent pong).
+            self.on_message(self, None, FakeMessage("hola, alguien ahí?"))
+            self.on_message(self, None, FakeMessage(MIC_SELFTEST_PING))
+
+    # Fake out the whole paho.mqtt.client chain, parent packages included —
+    # vortexia_client.py (imported by `listen`) does its own top-level
+    # `import paho.mqtt.client`, which needs "paho" and "paho.mqtt" present
+    # in sys.modules too, not just the leaf submodule, or Python's import
+    # machinery raises ModuleNotFoundError before ever reaching our fake.
+    fake_paho_client_module = types.SimpleNamespace(
+        Client=FakeMQTTClient,
+        MQTTv311="MQTTv311",
+    )
+    fake_paho_mqtt_pkg = types.ModuleType("paho.mqtt")
+    fake_paho_mqtt_pkg.client = fake_paho_client_module
+    fake_paho_pkg = types.ModuleType("paho")
+    fake_paho_pkg.mqtt = fake_paho_mqtt_pkg
+    monkeypatch.setitem(sys.modules, "paho", fake_paho_pkg)
+    monkeypatch.setitem(sys.modules, "paho.mqtt", fake_paho_mqtt_pkg)
+    monkeypatch.setitem(sys.modules, "paho.mqtt.client", fake_paho_client_module)
+
+    runner = CliRunner()
+    result = runner.invoke(agents_mod.listen, ["testagent"])
+
+    assert result.exit_code == 0
+    # Never speaks the mechanical confirmation out loud.
+    assert not [p for p in posted if p[0] == "/queue/speak"]
+
+    # Inspect what got published on the MQTT topic: exactly one pong, not
+    # retained, carrying kind "mic-selftest-pong".
+    pongs = []
+    for call in created_clients[-1].published:
+        payload = call["payload"]
+        if not payload:
+            continue
+        envelope = json.loads(payload)
+        if envelope.get("kind") == "mic-selftest-pong":
+            pongs.append((envelope, call["kwargs"]))
+
+    assert len(pongs) == 1, f"expected exactly one silent pong, got {pongs}"
+    envelope, kwargs = pongs[0]
+    assert envelope["to"] == "testagent"
+    assert envelope["text"] == "OK"
+    assert kwargs.get("retain") is False

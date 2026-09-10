@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote
 import click
@@ -275,6 +276,21 @@ def listen(name):
     Each message is consumed on receipt (its retained flag is cleared, same
     as `las agent poll` does) — while `listen` is running, it IS the live
     delivery path, so a later `poll` won't see the same message again.
+
+    Mechanically (and silently — no TTS) answers the mic self-test sentinel
+    (see widget.js's MIC_SELFTEST_PING and runMicSelfTest) the instant it
+    arrives, by publishing a "mic-selftest-pong" envelope straight back on
+    this same inbox topic — no LLM session needs to notice or act for the
+    double-click self-test to succeed. This is deliberately decoupled: the
+    widget's self-test only needs to know the mic → vortexia → a live
+    terminal-side listener pipe is intact, which this process alone already
+    proves just by being connected and running; it says nothing about
+    whether an actual Claude Code session is attached and paying attention,
+    so it must not speak out loud as if a real reply happened. Whether an
+    LLM is attached and chooses to also answer with an audible "OK" (see the
+    `las-agent` skill's "Ping de self-test" section) is a separate, optional
+    layer — the widget reacts to whichever confirmation (silent pong or
+    spoken "OK") arrives first.
     """
     name = resolve_agent_name(name)
     ports = api.get("/ports") or {}
@@ -299,6 +315,11 @@ def listen(name):
     topic = vx.inbox_topic(name)
     client = mqtt.Client(client_id=f"las-listen-{name}-{os.getpid()}", protocol=mqtt.MQTTv311)
 
+    # Must match widget.js's MIC_SELFTEST_PING exactly — no shared module
+    # between the JS renderer and this CLI, so this is a deliberate literal
+    # duplication (same as the las-agent skill's own copy of this string).
+    MIC_SELFTEST_PING = '[las-mic-selftest] reply with just "OK" to confirm this session is listening.'
+
     def on_connect(c, userdata, flags, rc):
         c.subscribe(topic, qos=1)
 
@@ -312,6 +333,22 @@ def listen(name):
         # Consume: clear the retained flag so a later `poll` doesn't see
         # this same message again — this listener IS the delivery.
         c.publish(topic, payload=None, qos=1, retain=True)
+        if envelope.get("text") == MIC_SELFTEST_PING:
+            # Silent, direct MQTT pong — deliberately NOT /queue/speak. This
+            # confirms only that the plumbing (mic -> vortexia -> a live
+            # `listen` process) works; not retained, since a stale "yes I was
+            # here" from minutes ago would be a false confirmation of "right
+            # now". See widget.js's onVortexiaMessage for the matching kind
+            # check (no TTS, no chat bubble).
+            pong = {
+                "from": name,
+                "to": name,
+                "source": "system",
+                "kind": "mic-selftest-pong",
+                "text": "OK",
+                "ts": int(time.time() * 1000),
+            }
+            c.publish(topic, payload=json.dumps(pong), qos=1, retain=False)
 
     client.on_connect = on_connect
     client.on_message = on_message
