@@ -1225,15 +1225,38 @@ async function connectVortexia(name, win) {
     win.webContents.send('vortexia:message', envelope, topic);
   });
 
+  // The underlying MQTT client never retries on its own (see client.js's
+  // reconnectPeriod: 0) — if vortexia restarts (its own crash-restart
+  // supervisor, or a manual bounce) the port it claims from the registry
+  // can change, so this connection just goes dead in silence: no more
+  // messages, no more mic-self-test pong, with the UI still showing
+  // connected. Without this, the only fix was quitting and relaunching the
+  // whole app. On 'close', drop the stale client and retry connectVortexia
+  // (which re-resolves the current port) after a short delay.
+  client.on('close', () => {
+    if (vortexiaClients.get(name) !== client) return; // already superseded
+    vortexiaClients.delete(name);
+    if (!win.isDestroyed()) {
+      win.webContents.send('vortexia:status', { connected: false, error: 'connection closed' });
+    }
+    setTimeout(() => {
+      if (!win.isDestroyed()) connectVortexia(name, win);
+    }, 3000);
+  });
+
   try {
     await client.register(name);
     if (!win.isDestroyed()) {
       win.webContents.send('vortexia:status', { connected: true });
     }
   } catch (err) {
+    vortexiaClients.delete(name);
     if (!win.isDestroyed()) {
       win.webContents.send('vortexia:status', { connected: false, error: String(err) });
     }
+    setTimeout(() => {
+      if (!win.isDestroyed()) connectVortexia(name, win);
+    }, 3000);
   }
 }
 

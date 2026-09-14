@@ -23,6 +23,7 @@ from datetime import datetime
 import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
+from logging_config import logger
 
 app = FastAPI(title="Local Agent Society", version="1.0.0")
 
@@ -149,7 +150,7 @@ def _vortexia_publish(topic: str, envelope: dict, retain: bool = False) -> bool:
         )
         return True
     except Exception as exc:
-        print(f"[vortexia] publish to {topic!r} failed (is vortexia running?): {exc}", flush=True)
+        logger.warning(f"[vortexia] publish to {topic!r} failed (is vortexia running?): {exc}")
         return False
 
 
@@ -169,7 +170,7 @@ def _vortexia_set_presence_online(name: str) -> bool:
         )
         return True
     except Exception as exc:
-        print(f"[vortexia] presence publish for {name!r} failed (is vortexia running?): {exc}", flush=True)
+        logger.warning(f"[vortexia] presence publish for {name!r} failed (is vortexia running?): {exc}")
         return False
 
 
@@ -178,7 +179,7 @@ def _vortexia_poll_inbox(name: str, timeout: float = 2.0) -> list[dict]:
     try:
         return vx.poll_inbox(name, host="localhost", port=_vortexia_mqtt_port(), timeout=timeout)
     except Exception as exc:
-        print(f"[vortexia] poll_inbox for {name!r} failed (is vortexia running?): {exc}", flush=True)
+        logger.warning(f"[vortexia] poll_inbox for {name!r} failed (is vortexia running?): {exc}")
         return []
 
 

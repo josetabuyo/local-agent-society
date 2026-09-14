@@ -1,7 +1,12 @@
 #!/bin/bash
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PID_FILE="$SCRIPT_DIR/backend.pid"
-LOG_FILE="$SCRIPT_DIR/backend.log"
+mkdir -p "$SCRIPT_DIR/logs"
+# App-level diagnostics (e.g. vortexia connection issues) go through
+# logging_config.py into logs/backend.log with daily rotation, 7-day
+# retention. This raw stdout/stderr capture is only for output emitted
+# before that's initialized, or a hard crash on the way down.
+LOG_FILE="$SCRIPT_DIR/logs/launchd.out.log"
 PORT=8700
 
 if lsof -ti tcp:$PORT > /dev/null 2>&1; then

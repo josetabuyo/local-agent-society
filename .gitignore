@@ -3,6 +3,7 @@ backend/data/
 backend/*.log
 backend/*.pid
 backend/launchd.log
+backend/logs/
 backend/__pycache__/
 backend/.venv/
 

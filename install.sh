@@ -118,6 +118,11 @@ if [ -d ~/.claude/skills/new-local-agent ]; then
 fi
 
 # ── Register launchd agent (backend) ─────────────────────────────────────────
+# Starts the backend at login and restarts it on crash. See serve.sh for the
+# foreground runner and backend/logging_config.py for the daily-rotating
+# app-level log (logs/backend.log, 7-day retention) — StandardOutPath below
+# only catches output from before that initializes, or a hard crash.
+mkdir -p "$INSTALL_DIR/backend/logs"
 PLIST=~/Library/LaunchAgents/com.localagent.system.plist
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -136,14 +141,32 @@ cat > "$PLIST" <<PLIST
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
     <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>StandardOutPath</key><string>$INSTALL_DIR/backend/launchd.log</string>
-    <key>StandardErrorPath</key><string>$INSTALL_DIR/backend/launchd.log</string>
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key><false/>
+    </dict>
+    <key>ThrottleInterval</key><integer>10</integer>
+    <key>StandardOutPath</key><string>$INSTALL_DIR/backend/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key><string>$INSTALL_DIR/backend/logs/launchd.err.log</string>
 </dict>
 </plist>
 PLIST
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
+
+# ── Register launchd agent (vortexia) ─────────────────────────────────────────
+# vortexia is a sibling repo (../vortexia relative to this one) that carries
+# its own installer — see vortexia/scripts/install-service.sh and
+# vortexia/src/logger.js for the same daily-rotation/7-day-retention contract.
+VORTEXIA_DIR="$( cd "$INSTALL_DIR/.." && pwd )/vortexia"
+if [ -f "$VORTEXIA_DIR/scripts/install-service.sh" ]; then
+    echo "[ +1b] Registering launchd agent (vortexia)..."
+    bash "$VORTEXIA_DIR/scripts/install-service.sh"
+else
+    echo "[ +1b] vortexia not found at $VORTEXIA_DIR — skipping its launchd service."
+    echo "        Clone it as a sibling of this repo, then run:"
+    echo "        vortexia/scripts/install-service.sh"
+fi
 
 # ── Create .las-agent.json if not present ─────────────────────────────────────
 if [ ! -f "$INSTALL_DIR/.las-agent.json" ] && [ ! -f "$INSTALL_DIR/.agent.json" ]; then
