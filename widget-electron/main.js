@@ -176,10 +176,17 @@ if (process.defaultApp) {
   app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
 }
 
-// macOS delivers the URL via 'open-url'
+// macOS delivers the URL via 'open-url', often immediately on cold launch —
+// before 'ready' fires. handleProtocolUrl -> reopenWidget -> createWidgetWindow
+// calls screen.getPrimaryDisplay(), and Electron's screen module throws if
+// used before 'ready', so defer until the app is actually ready.
 app.on('open-url', (event, url) => {
   event.preventDefault();
-  handleProtocolUrl(url);
+  if (app.isReady()) {
+    handleProtocolUrl(url);
+  } else {
+    app.whenReady().then(() => handleProtocolUrl(url));
+  }
 });
 
 /**
