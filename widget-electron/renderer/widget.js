@@ -7,6 +7,22 @@
 
 const agentName = window.las.getAgentName() || 'Agent';
 
+// Paint the real widget color on the very first frame instead of a flash
+// of widget.css's placeholder green: main.js already knows this window's
+// saved color/opacity synchronously (electron-store) before it even calls
+// loadFile, so it passes them in the URL query string alongside `agent` —
+// applyColorVars (defined below) is called with them immediately, ahead of
+// the async window.las.getPrefs() round-trip in init() that used to be the
+// only thing setting these CSS vars.
+{
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialColor = initialParams.get('color');
+  const initialOpacity = initialParams.get('opacity');
+  if (initialColor && initialOpacity !== null) {
+    applyColorVars(initialColor, Number(initialOpacity));
+  }
+}
+
 const nameEl = document.getElementById('name');
 const logEl = document.getElementById('log');
 const widgetEl = document.getElementById('widget');
@@ -180,30 +196,40 @@ function relativeLuminance(hex) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function applyPrefsToDom() {
-  // Set on the root, not widgetEl: #settings/#commands/#commandEdit/#ttyPicker
-  // are siblings of #widget in the DOM (not descendants), so a CSS custom
-  // property set on widgetEl's own inline style wouldn't inherit into them —
-  // :root is the shared ancestor all of them do inherit from.
-  //
+/**
+ * Sets just the color-derived CSS custom properties on :root — the subset
+ * that determines the widget's visible background/text/bubble tint. Split
+ * out from applyPrefsToDom so it can also run synchronously at script
+ * start (see the top of this file), from color/opacity handed in via the
+ * URL query string, before the async window.las.getPrefs() round-trip
+ * resolves — otherwise the window briefly paints widget.css's fallback
+ * --widget-bg (a placeholder green) and only switches to the real color
+ * once that IPC call returns, which reads as a startup flash/glitch.
+ *
+ * Set on the root, not widgetEl: #settings/#commands/#commandEdit/
+ * #ttyPicker are siblings of #widget in the DOM (not descendants), so a
+ * CSS custom property set on widgetEl's own inline style wouldn't inherit
+ * into them — :root is the shared ancestor all of them do inherit from.
+ */
+function applyColorVars(color, opacity) {
   // --widget-bg bakes the opacity into the background color's alpha channel
   // instead of the old `opacity` CSS property on .widget: that property faded
   // EVERYTHING including text/buttons, which is why a very transparent widget
   // used to make the agent name unreadable too. Now only fills fade with the
   // opacity slider — the crisp outline (text-stroke on the name, border on
   // the face buttons) stays fully opaque regardless, so both stay legible.
-  document.documentElement.style.setProperty('--widget-bg', hexToRgba(prefs.color, prefs.opacity));
-  document.documentElement.style.setProperty('--text-fill', hexToRgba('#141414', prefs.opacity));
-  document.documentElement.style.setProperty('--btn-fill', `rgba(0, 0, 0, ${(0.16 * prefs.opacity).toFixed(3)})`);
+  document.documentElement.style.setProperty('--widget-bg', hexToRgba(color, opacity));
+  document.documentElement.style.setProperty('--text-fill', hexToRgba('#141414', opacity));
+  document.documentElement.style.setProperty('--btn-fill', `rgba(0, 0, 0, ${(0.16 * opacity).toFixed(3)})`);
 
   // Log/bubble contrast: dark widget color -> light text on a light-tinted
   // bubble, light widget color -> dark text on a dark-tinted bubble — same
   // two degrees of freedom as the rest of the widget (the chosen color and
   // opacity), no fixed opaque plate that would defeat the transparency the
   // opacity slider is there to control. The tint alpha is NOT multiplied by
-  // prefs.opacity — like the button/name outlines, bubbles need a legibility
+  // opacity — like the button/name outlines, bubbles need a legibility
   // floor that survives even a very transparent widget.
-  const isDarkBg = relativeLuminance(prefs.color) < 0.5;
+  const isDarkBg = relativeLuminance(color) < 0.5;
   document.documentElement.style.setProperty('--log-text', isDarkBg ? 'rgba(245, 245, 245, 0.95)' : 'rgba(20, 20, 20, 0.92)');
   document.documentElement.style.setProperty('--bubble-tint', isDarkBg ? 'rgba(255, 255, 255, 0.14)' : 'rgba(0, 0, 0, 0.06)');
   document.documentElement.style.setProperty('--bubble-border', isDarkBg ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.25)');
@@ -211,7 +237,11 @@ function applyPrefsToDom() {
   // Local-msg accent tail: tied to the widget's OWN color (not the neutral
   // black/white --bubble-tint), a shade darker so the little top-center peak
   // reads as "this came from the title above" rather than blending in.
-  document.documentElement.style.setProperty('--local-accent', darkenHexToRgba(prefs.color, 0.9, 0.25));
+  document.documentElement.style.setProperty('--local-accent', darkenHexToRgba(color, 0.9, 0.25));
+}
+
+function applyPrefsToDom() {
+  applyColorVars(prefs.color, prefs.opacity);
 
   colorEl.value = prefs.color;
   opacityEl.value = String(prefs.opacity);

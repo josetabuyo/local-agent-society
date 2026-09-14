@@ -399,8 +399,13 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
     win.setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: false });
   }
 
+  // color/opacity ride along in the query string so widget.js can paint
+  // the real widget color on its very first frame instead of a flash of
+  // widget.css's placeholder green while waiting on the async
+  // window.las.getPrefs() IPC round-trip (see widget.js's initialParams
+  // block, right below where agentName is read).
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
-    query: { agent: name },
+    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity) },
   });
 
   // Space (macOS virtual desktop) memory: a window is only ever placed on
