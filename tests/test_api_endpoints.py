@@ -291,7 +291,7 @@ def test_inject_publishes_envelope_to_vortexia(client, app_module, monkeypatch):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"ok": True, "injected": True, "queued": False, "via": "vortexia"}
+    assert body == {"ok": True, "injected": True, "queued": False, "via": "vortexia", "federated": False}
 
     assert published["topic"] == app_module.vx.inbox_topic("Opal")
     envelope = published["envelope"]

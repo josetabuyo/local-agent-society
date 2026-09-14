@@ -218,6 +218,49 @@ def inject(name, message, from_agent):
     click.echo(f"{name}: {status}")
 
 
+@agent.command("send")
+@click.argument("message")
+@click.option("--to", default=None, help="Exact agent name, optionally \"Name@env\" for a specific environment (cross-machine)")
+@click.option("--scope", default=None, help="Free-text scope/intent instead of an exact name — broadcasts to whoever matches, possibly more than one agent")
+@click.option("--from", "from_agent", default=None, help="Sender name shown to the recipient(s)")
+def send(message, to, scope, from_agent):
+    """Generic send: point-to-point (--to) or scope broadcast (--scope), local or cross-machine.
+
+    Replaces `inject`'s exact-name-only, single-machine model with one
+    primitive that also reaches another environment (a different Mac,
+    federated via vortexia — see vortexia/docs/federation-poc.md):
+
+    \b
+      las agent send --to System "..."            # local, or federated if not found locally
+      las agent send --to "System@uy-mac" "..."    # explicit, disambiguates a name collision
+      las agent send --scope "facturacion, pagos" "..."   # broadcast; 0, 1, or several may reply
+
+    `inject` still works unchanged for existing scripts/skills — this is
+    the new generic entry point going forward, not a replacement in place.
+    """
+    if bool(to) == bool(scope):
+        raise click.UsageError("exactly one of --to or --scope is required")
+
+    payload = {"message": message, "source": "agent" if from_agent else "external"}
+    if from_agent:
+        payload["from_agent"] = from_agent
+    if to:
+        payload["to"] = to
+    else:
+        payload["scope"] = scope
+
+    result = api.post("/agents/send", payload)
+    injected = result.get("injected", False)
+    mode = result.get("mode", "?")
+    federated = result.get("federated", False)
+    target = to or f'scope "{scope}"'
+    if injected:
+        status = f"sent via vortexia ({mode}{', federated' if federated else ''})"
+    else:
+        status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
+    click.echo(f"{target}: {status}")
+
+
 @agent.command("register")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def register(name):

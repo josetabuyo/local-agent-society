@@ -283,6 +283,17 @@ class InjectRequest(BaseModel):
     # unaffected since pydantic ignores unknown fields by default.
 
 
+class SendRequest(BaseModel):
+    """Generic point-to-point OR scope-broadcast send — see send_message().
+    Exactly one of `to`/`scope` must be set; pydantic doesn't express an
+    XOR directly, so send_message() itself enforces it."""
+    message:     str = Field(max_length=10000)
+    to:          Optional[str] = None   # exact id, optionally "name@env"
+    scope:       Optional[str] = None   # free-text scope/intent for broadcast
+    source:      str           = "agent"
+    from_agent:  Optional[str] = None
+
+
 class TerminalRequest(BaseModel):
     model:    str            = "Default"
     model_id: Optional[str] = None        # claude --model flag value
@@ -875,46 +886,106 @@ def write_to_tty(name: str, body: TtyWriteRequest):
     return {"ok": True, "written": written, "ttys_found": len(ttys)}
 
 
+def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str) -> dict:
+    """Single delivery path for both /agents/send and the legacy
+    /agents/{name}/inject — one implementation, two request shapes on top
+    of it (DRY: this used to be duplicated between the two endpoints).
+
+    Exactly one of `to` (point-to-point) or `scope` (broadcast, possibly
+    multiple agents respond — see FederationBridge._onLocalMessage's
+    pickTargets in vortexia/src/federation/bridge.js) must be given; the
+    caller validates that, not this function.
+
+    - `to="Name"` — local registry lookup first (unqualified names only;
+      "Name@env" always skips straight to federation, since a local
+      registry entry can't be qualified). Falls back to a federation-direct
+      publish (kind=federation-direct) to this environment's own gateway
+      inbox when not found locally, or when explicitly qualified with
+      "Name@env" to disambiguate a collision (two environments with an
+      agent of the same name) — see resolveDirectoryName in
+      vortexia/src/federation/directory.js.
+    - `scope="free text"` — always goes through the gateway as a
+      federation-intent envelope; there's no local-only equivalent of
+      scope/embedding-based matching outside the bridge, so this mode
+      requires VORTEXIA_ENV_NAME regardless of whether the eventual
+      match(es) turn out to be local or remote. Zero, one, or several
+      agents may reply — each reply is just a normal message back to the
+      sender, no separate fan-in mechanism.
+
+    Delivery is fire-and-forget in every case: a federation-direct send to
+    an unresolvable name comes back as an async `federation-direct-error`
+    reply to the sender, not a synchronous failure here — this can't tell
+    "wrong name" apart from "right name, recipient just hasn't polled yet"
+    any more than a local send ever could.
+
+    Federation-direct/intent publishes are non-retained (unlike the local
+    case): the gateway is a live, always-connected process supervised by
+    launchd, not a session that polls later (see
+    docs/adr/0002-service-persistence-and-logging.md) — and unlike
+    `las agent listen`/poll_inbox, nothing on the bridge side clears a
+    retained flag on receipt, so a retained publish here would replay into
+    the bridge on every vortexia restart.
+
+    Returns {ok, injected, mode: "direct"|"scope", federated}. Raises
+    HTTPException on a configuration error (no `to`/`scope` resolution
+    possible without federation).
+    """
+    ts = int(time.time() * 1000)
+    env_name = os.environ.get("VORTEXIA_ENV_NAME")
+
+    if scope:
+        if not env_name:
+            raise HTTPException(status_code=400, detail="scope broadcast requires federation to be configured (VORTEXIA_ENV_NAME)")
+        envelope = {"from": sender, "intent": scope, "text": message, "kind": "federation-intent", "ts": ts}
+        delivered = _vortexia_publish(vx.inbox_topic(f"{env_name}-gateway"), envelope, retain=False)
+        return {"ok": True, "injected": delivered, "mode": "scope", "federated": True}
+
+    registry = load_json(REGISTRY_FILE, {})
+    if "@" not in to and to in registry:
+        envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts}
+        delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=True)
+
+        # ── structured inject log (local delivery only — a federated `to`
+        # has no local registry entry, so no session/ dir to log into) ──
+        path = registry.get(to, {}).get("path", "")
+        log_path = Path(path) / "session" / "inject.log"
+        if log_path.parent.exists():
+            ts_full = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            preview = message[:60].replace("\n", " ") + ("…" if len(message) > 60 else "")
+            status  = "OK" if delivered else "FAIL(vortexia unreachable)"
+            with open(log_path, "a") as f:
+                f.write(f"[{ts_full}] name={to} source={source} from={sender} via=vortexia status={status} msg={preview!r}\n")
+
+        return {"ok": True, "injected": delivered, "mode": "direct", "federated": False}
+
+    if not env_name:
+        raise HTTPException(status_code=404, detail="Agent not found (and federation not configured on this machine)")
+    envelope = {"from": sender, "to": to, "source": source, "text": message, "kind": "federation-direct", "ts": ts}
+    delivered = _vortexia_publish(vx.inbox_topic(f"{env_name}-gateway"), envelope, retain=False)
+    return {"ok": True, "injected": delivered, "mode": "direct", "federated": True}
+
+
+@app.post("/agents/send")
+def send_message(body: SendRequest):
+    """Generic send: point-to-point (`to`) or scope broadcast (`scope`),
+    local or cross-machine — see _route_send for the routing rules. This
+    is the primitive `las agent send` calls; /agents/{name}/inject below
+    is a thin backward-compatible wrapper over the same logic."""
+    if bool(body.to) == bool(body.scope):
+        raise HTTPException(status_code=422, detail="exactly one of `to` or `scope` must be set")
+    sender = body.from_agent or body.source or "external"
+    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender)
+
+
 @app.post("/agents/{name}/inject")
 def inject_message(name: str, body: InjectRequest):
-    """Send a message to `name` over vortexia (las/agent/<name>/inbox).
-
-    No terminal, no TTY, no AppleScript — this used to type directly into
-    the agent's live iTerm2 session; now it publishes an envelope to
-    vortexia and returns once the publish succeeds (or fails soft if
-    vortexia isn't running). The recipient only actually sees it if their
-    `/las-agent` skill happens to be polling at that moment (see
-    GET /agents/{name}/vortexia/poll) — messages aren't retained, matching
-    vortexia's own documented delivery semantics.
-    """
-    registry = load_json(REGISTRY_FILE, {})
-    if name not in registry:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
+    """Send a message to `name` over vortexia. Kept for existing callers
+    (every agent's las-agent skill still says `las agent inject`) — thin
+    wrapper over the same _route_send logic /agents/send uses, reshaped to
+    inject's original response fields for backward compatibility."""
     sender = body.from_agent or body.source or "external"
-    envelope = {
-        "from": sender,
-        "to": name,
-        "source": body.source,
-        "text": body.message,
-        "ts": int(time.time() * 1000),
-    }
-    delivered = _vortexia_publish(vx.inbox_topic(name), envelope, retain=True)
-
-    # ── structured inject log ──────────────────────────────────────────────────
-    path = registry[name].get("path", "")
-    log_path = Path(path) / "session" / "inject.log"
-    if log_path.parent.exists():
-        ts_full = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        preview = body.message[:60].replace("\n", " ") + ("…" if len(body.message) > 60 else "")
-        status  = "OK" if delivered else "FAIL(vortexia unreachable)"
-        with open(log_path, "a") as f:
-            f.write(
-                f"[{ts_full}] name={name} source={body.source} from={sender} "
-                f"via=vortexia status={status} msg={preview!r}\n"
-            )
-
-    return {"ok": True, "injected": delivered, "queued": False, "via": "vortexia"}
+    result = _route_send(to=name, scope=None, message=body.message, source=body.source, sender=sender)
+    return {"ok": True, "injected": result["injected"], "queued": False, "via": "vortexia", "federated": result["federated"]}
 
 
 @app.post("/agents/{name}/vortexia/register")

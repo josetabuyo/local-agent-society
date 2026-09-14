@@ -25,7 +25,9 @@ fi
 "$VENV/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
 
 cd "$SCRIPT_DIR"
-PYTHONPATH="$SCRIPT_DIR/.." nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
+# Keep in sync with serve.sh's VORTEXIA_ENV_NAME — see backend/main.py's
+# inject_message federation fallback.
+PYTHONPATH="$SCRIPT_DIR/.." VORTEXIA_ENV_NAME="ba-mac" nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 sleep 2
 
