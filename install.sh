@@ -33,7 +33,11 @@ fi
 echo "[ 2/5 ] Installing Python dependencies..."
 VENV="$INSTALL_DIR/backend/.venv"
 python3 -m venv "$VENV"
-"$VENV/bin/pip" install -q fastapi "uvicorn[standard]"
+# requirements.txt, not a hand-picked subset — a fresh venv missing
+# paho-mqtt crashes on `import vortexia_client` the moment the backend
+# tries to talk to vortexia (found this bug the same way serve.sh had it,
+# fixed there earlier; this was install.sh's own separate copy of it).
+"$VENV/bin/pip" install -q -r "$INSTALL_DIR/backend/requirements.txt"
 
 # ── 3. Install skills ─────────────────────────────────────────────────────────
 echo "[ 3/5 ] Installing skills..."
@@ -154,18 +158,35 @@ PLIST
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
-# ── Register launchd agent (vortexia) ─────────────────────────────────────────
-# vortexia is a sibling repo (../vortexia relative to this one) that carries
-# its own installer — see vortexia/scripts/install-service.sh and
-# vortexia/src/logger.js for the same daily-rotation/7-day-retention contract.
+# ── vortexia (dependency, not agent-business code) ─────────────────────────────
+# vortexia is inter-agent messaging infrastructure this project depends on,
+# not something owned by any one agent — it lives in its own sibling repo
+# (../vortexia) with its own team maintaining it, the same relationship any
+# external dependency has to the code that uses it. The installer's job is to
+# make sure it's actually present and running, not just use it opportunistically
+# if someone happened to clone it first.
+VORTEXIA_REMOTE="https://github.com/haciendo/vortexia.git"
 VORTEXIA_DIR="$( cd "$INSTALL_DIR/.." && pwd )/vortexia"
-if [ -f "$VORTEXIA_DIR/scripts/install-service.sh" ]; then
-    echo "[ +1b] Registering launchd agent (vortexia)..."
-    bash "$VORTEXIA_DIR/scripts/install-service.sh"
+echo "[ +1b] Resolving vortexia dependency..."
+if [ ! -d "$VORTEXIA_DIR" ]; then
+    echo "         not found at $VORTEXIA_DIR — cloning $VORTEXIA_REMOTE"
+    git clone -q "$VORTEXIA_REMOTE" "$VORTEXIA_DIR"
+fi
+if [ -d "$VORTEXIA_DIR" ]; then
+    if ! command -v node &>/dev/null; then
+        echo "         ⚠️  node not found — vortexia requires Node.js >=18. Install it, then re-run install.sh."
+    else
+        (cd "$VORTEXIA_DIR" && npm install --no-audit --no-fund -q)
+        echo "         vortexia dependencies installed"
+        if [ -f "$VORTEXIA_DIR/scripts/install-service.sh" ]; then
+            echo "         registering launchd agent (vortexia)..."
+            bash "$VORTEXIA_DIR/scripts/install-service.sh"
+        else
+            echo "         ⚠️  $VORTEXIA_DIR/scripts/install-service.sh not found — vortexia checkout looks incomplete/outdated."
+        fi
+    fi
 else
-    echo "[ +1b] vortexia not found at $VORTEXIA_DIR — skipping its launchd service."
-    echo "        Clone it as a sibling of this repo, then run:"
-    echo "        vortexia/scripts/install-service.sh"
+    echo "         ⚠️  could not obtain vortexia at $VORTEXIA_DIR — inter-agent messaging (las agent inject/send, TTS queue) will not work until this is resolved."
 fi
 
 # ── Create .las-agent.json if not present ─────────────────────────────────────
