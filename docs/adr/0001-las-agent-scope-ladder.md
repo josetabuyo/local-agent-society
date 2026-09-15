@@ -124,8 +124,8 @@ These are vortexia's concern, not LAS's — see
   ladders describe similar responsibilities, at increasing rung depth.
 - Treating a claimed port (from the `/ports` registry) as another queryable
   identity facet of an agent, in the same spirit as the scope ladder.
-- Cross-machine vortexia queue federation (a star topology connecting this
-  machine's broker to another machine's).
+- Cross-machine vortex-relay (a star topology connecting this machine's
+  broker to another machine's).
 - A numeric agent ID. One does not exist today (checked: no `id` field
   anywhere in `backend/main.py`'s agent registry) — this ADR is only about
   the *symbolic* (name + scope-ladder) side of identity, which is what a

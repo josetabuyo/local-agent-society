@@ -892,33 +892,33 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
     of it (DRY: this used to be duplicated between the two endpoints).
 
     Exactly one of `to` (point-to-point) or `scope` (broadcast, possibly
-    multiple agents respond — see FederationBridge._onLocalMessage's
-    pickTargets in vortexia/src/federation/bridge.js) must be given; the
+    multiple agents respond — see VortexRelayBridge._onLocalMessage's
+    pickTargets in vortexia/src/vortex-relay/bridge.js) must be given; the
     caller validates that, not this function.
 
     - `to="Name"` — local registry lookup first (unqualified names only;
-      "Name@env" always skips straight to federation, since a local
-      registry entry can't be qualified). Falls back to a federation-direct
-      publish (kind=federation-direct) to this environment's own gateway
+      "Name@env" always skips straight to vortex-relay, since a local
+      registry entry can't be qualified). Falls back to a vortex-relay-direct
+      publish (kind=vortex-relay-direct) to this environment's own gateway
       inbox when not found locally, or when explicitly qualified with
       "Name@env" to disambiguate a collision (two environments with an
       agent of the same name) — see resolveDirectoryName in
-      vortexia/src/federation/directory.js.
+      vortexia/src/vortex-relay/directory.js.
     - `scope="free text"` — always goes through the gateway as a
-      federation-intent envelope; there's no local-only equivalent of
+      vortex-relay-intent envelope; there's no local-only equivalent of
       scope/embedding-based matching outside the bridge, so this mode
       requires VORTEXIA_ENV_NAME regardless of whether the eventual
       match(es) turn out to be local or remote. Zero, one, or several
       agents may reply — each reply is just a normal message back to the
       sender, no separate fan-in mechanism.
 
-    Delivery is fire-and-forget in every case: a federation-direct send to
-    an unresolvable name comes back as an async `federation-direct-error`
+    Delivery is fire-and-forget in every case: a vortex-relay-direct send to
+    an unresolvable name comes back as an async `vortex-relay-direct-error`
     reply to the sender, not a synchronous failure here — this can't tell
     "wrong name" apart from "right name, recipient just hasn't polled yet"
     any more than a local send ever could.
 
-    Federation-direct/intent publishes are non-retained (unlike the local
+    Vortex-relay-direct/intent publishes are non-retained (unlike the local
     case): the gateway is a live, always-connected process supervised by
     launchd, not a session that polls later (see
     docs/adr/0002-service-persistence-and-logging.md) — and unlike
@@ -926,26 +926,26 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
     retained flag on receipt, so a retained publish here would replay into
     the bridge on every vortexia restart.
 
-    Returns {ok, injected, mode: "direct"|"scope", federated}. Raises
+    Returns {ok, injected, mode: "direct"|"scope", relayed}. Raises
     HTTPException on a configuration error (no `to`/`scope` resolution
-    possible without federation).
+    possible without vortex-relay).
     """
     ts = int(time.time() * 1000)
     env_name = os.environ.get("VORTEXIA_ENV_NAME")
 
     if scope:
         if not env_name:
-            raise HTTPException(status_code=400, detail="scope broadcast requires federation to be configured (VORTEXIA_ENV_NAME)")
-        envelope = {"from": sender, "intent": scope, "text": message, "kind": "federation-intent", "ts": ts}
+            raise HTTPException(status_code=400, detail="scope broadcast requires vortex-relay to be configured (VORTEXIA_ENV_NAME)")
+        envelope = {"from": sender, "intent": scope, "text": message, "kind": "vortex-relay-intent", "ts": ts}
         delivered = _vortexia_publish(vx.inbox_topic(f"{env_name}-gateway"), envelope, retain=False)
-        return {"ok": True, "injected": delivered, "mode": "scope", "federated": True}
+        return {"ok": True, "injected": delivered, "mode": "scope", "relayed": True}
 
     registry = load_json(REGISTRY_FILE, {})
     if "@" not in to and to in registry:
         envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts}
         delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=True)
 
-        # ── structured inject log (local delivery only — a federated `to`
+        # ── structured inject log (local delivery only — a vortex-relayed `to`
         # has no local registry entry, so no session/ dir to log into) ──
         path = registry.get(to, {}).get("path", "")
         log_path = Path(path) / "session" / "inject.log"
@@ -956,13 +956,13 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
             with open(log_path, "a") as f:
                 f.write(f"[{ts_full}] name={to} source={source} from={sender} via=vortexia status={status} msg={preview!r}\n")
 
-        return {"ok": True, "injected": delivered, "mode": "direct", "federated": False}
+        return {"ok": True, "injected": delivered, "mode": "direct", "relayed": False}
 
     if not env_name:
-        raise HTTPException(status_code=404, detail="Agent not found (and federation not configured on this machine)")
-    envelope = {"from": sender, "to": to, "source": source, "text": message, "kind": "federation-direct", "ts": ts}
+        raise HTTPException(status_code=404, detail="Agent not found (and vortex-relay not configured on this machine)")
+    envelope = {"from": sender, "to": to, "source": source, "text": message, "kind": "vortex-relay-direct", "ts": ts}
     delivered = _vortexia_publish(vx.inbox_topic(f"{env_name}-gateway"), envelope, retain=False)
-    return {"ok": True, "injected": delivered, "mode": "direct", "federated": True}
+    return {"ok": True, "injected": delivered, "mode": "direct", "relayed": True}
 
 
 @app.post("/agents/send")
@@ -985,7 +985,10 @@ def inject_message(name: str, body: InjectRequest):
     inject's original response fields for backward compatibility."""
     sender = body.from_agent or body.source or "external"
     result = _route_send(to=name, scope=None, message=body.message, source=body.source, sender=sender)
-    return {"ok": True, "injected": result["injected"], "queued": False, "via": "vortexia", "federated": result["federated"]}
+    # inject's own response shape keeps the "federated" field name for
+    # backward compatibility with existing callers — only _route_send's
+    # internal field was renamed to "relayed".
+    return {"ok": True, "injected": result["injected"], "queued": False, "via": "vortexia", "federated": result["relayed"]}
 
 
 @app.post("/agents/{name}/vortexia/register")

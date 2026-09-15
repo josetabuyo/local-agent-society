@@ -228,10 +228,10 @@ def send(message, to, scope, from_agent):
 
     Replaces `inject`'s exact-name-only, single-machine model with one
     primitive that also reaches another environment (a different Mac,
-    federated via vortexia — see vortexia/docs/federation-poc.md):
+    via vortex-relay — see vortexia/docs/vortex-relay-poc.md):
 
     \b
-      las agent send --to System "..."            # local, or federated if not found locally
+      las agent send --to System "..."            # local, or vortex-relayed if not found locally
       las agent send --to "System@uy-mac" "..."    # explicit, disambiguates a name collision
       las agent send --scope "facturacion, pagos" "..."   # broadcast; 0, 1, or several may reply
 
@@ -252,10 +252,10 @@ def send(message, to, scope, from_agent):
     result = api.post("/agents/send", payload)
     injected = result.get("injected", False)
     mode = result.get("mode", "?")
-    federated = result.get("federated", False)
+    relayed = result.get("relayed", False)
     target = to or f'scope "{scope}"'
     if injected:
-        status = f"sent via vortexia ({mode}{', federated' if federated else ''})"
+        status = f"sent via vortexia ({mode}{', vortex-relay' if relayed else ''})"
     else:
         status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
     click.echo(f"{target}: {status}")
