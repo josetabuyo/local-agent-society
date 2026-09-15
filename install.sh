@@ -171,6 +171,11 @@ echo "[ +1b] Resolving vortexia dependency..."
 if [ ! -d "$VORTEXIA_DIR" ]; then
     echo "         not found at $VORTEXIA_DIR — cloning $VORTEXIA_REMOTE"
     git clone -q "$VORTEXIA_REMOTE" "$VORTEXIA_DIR"
+elif [ -d "$VORTEXIA_DIR/.git" ]; then
+    # Already present — pull it too, same as update.sh pulling this repo.
+    # Skipping this is exactly how two machines ended up running different
+    # vortexia versions with an incompatible wire format for hours today.
+    (cd "$VORTEXIA_DIR" && git pull -q) || echo "         ⚠️  git pull failed in $VORTEXIA_DIR — leaving existing checkout as-is"
 fi
 if [ -d "$VORTEXIA_DIR" ]; then
     if ! command -v node &>/dev/null; then
