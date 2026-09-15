@@ -16,10 +16,15 @@ cd "$SCRIPT_DIR"
 # launchd-triggered start crashed on import and the job never stayed up
 # (silently crash-looping under launchd's KeepAlive/ThrottleInterval).
 export PYTHONPATH="$SCRIPT_DIR/.."
-# This machine's federation identity (see backend/main.py's inject_message
-# federation fallback and vortexia/docs/federation-poc.md) — must match the
-# VORTEXIA_ENV_NAME vortexia itself is started with, and the other Mac's own
-# env name ("uy-mac") for cross-machine exact-name resolution to agree on
-# both sides. Confirmed with the System/Vortexia agents coordinating this.
-export VORTEXIA_ENV_NAME="ba-mac"
+# VORTEXIA_ENV_NAME (this machine's federation identity — see
+# backend/main.py's inject_message federation fallback) is deliberately
+# NOT set here: this script is a checked-in file shared by every clone of
+# this repo, so a hardcoded value here travels to every machine on the
+# next `git pull` — bit us for real (a second Mac inherited "ba-mac" from
+# this file verbatim, colliding with its own identity). It must come from
+# this machine's own launchd plist (~/Library/LaunchAgents/
+# com.localagent.system.plist's EnvironmentVariables — outside git, same
+# place vortexia's own env name/Gist/Nostr config lives) or the calling
+# shell's environment for a manual run; if neither sets it, federation is
+# simply off for this run, same as vortexia's own opt-in behavior.
 exec "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT

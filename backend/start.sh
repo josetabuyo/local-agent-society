@@ -25,9 +25,12 @@ fi
 "$VENV/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
 
 cd "$SCRIPT_DIR"
-# Keep in sync with serve.sh's VORTEXIA_ENV_NAME — see backend/main.py's
-# inject_message federation fallback.
-PYTHONPATH="$SCRIPT_DIR/.." VORTEXIA_ENV_NAME="ba-mac" nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
+# VORTEXIA_ENV_NAME intentionally not set here — see serve.sh's comment.
+# This is a checked-in, shared-across-clones file; hardcoding a per-machine
+# value here is exactly the bug that shipped "ba-mac" to a second Mac via
+# `git pull`. Federation is simply off for a manual `start.sh` run unless
+# the calling shell already has VORTEXIA_ENV_NAME exported.
+PYTHONPATH="$SCRIPT_DIR/.." nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 sleep 2
 
