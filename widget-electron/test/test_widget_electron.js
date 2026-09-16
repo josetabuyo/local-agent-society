@@ -804,6 +804,160 @@ test('fitNameToBox shrinks the compact font from COMPACT_START_SIZE down to fit,
   assert.match(body, /nameEl\.style\.whiteSpace = isSplit \? 'pre-line' : 'nowrap';/);
 });
 
+// ── hover reveal (cursor-depth-driven face) ─────────────────────────────────
+
+test('#name is the SAME element in both states — no second/decorative title element in the markup', () => {
+  const html = readSrc('renderer', 'index.html');
+  assert.doesNotMatch(html, /nameRest/);
+  assert.match(html, /<div id="name" class="name">/);
+});
+
+test('updateNameCenterOffset measures the actual rendered text width (canvas metrics), not #name\'s flex-stretched box width', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function updateNameCenterOffset(size, text) {');
+  assert.match(body, /measureTextWidth\(l, size\)/);
+  assert.match(body, /nameEl\.offsetLeft/);
+  assert.match(body, /nameEl\.offsetTop/);
+  assert.doesNotMatch(body, /doorEl/, 'centers on the widget\'s own box, not the topbar minus the door button');
+});
+
+test('updateNameCenterOffset writes --name-cx/--name-cy/--name-origin-x, and fitNameToBox calls it (except for the occlusion-expanded banner)', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const offsetBody = extractFunctionBody(src, 'function updateNameCenterOffset(size, text) {');
+  assert.match(offsetBody, /--name-cx/);
+  assert.match(offsetBody, /--name-cy/);
+  assert.match(offsetBody, /--name-origin-x/);
+  const fitBody = extractFunctionBody(src, 'function fitNameToBox() {');
+  assert.match(fitBody, /if \(!expanded\) updateNameCenterOffset\(size, text\);/);
+});
+
+test('#name itself carries the hover-reveal transform (translate to widget center + scale up at rest) — one element, not a crossfade', () => {
+  const css = readSrc('renderer', 'widget.css');
+  const idx = css.indexOf('.name {');
+  assert.notEqual(idx, -1);
+  const block = css.slice(idx, css.indexOf('\n}\n', idx));
+  assert.match(block, /transform-origin:\s*var\(--name-origin-x/);
+  assert.match(block, /translate\(calc\(\(1 - var\(--reveal\)\) \* var\(--name-cx/);
+  assert.match(block, /scale\(calc\(1 \+ \(1 - var\(--reveal\)\) \* 0\.15\)\)/);
+  assert.match(block, /transition:\s*transform var\(--reveal-speed\)/);
+});
+
+test('.door-corner, .log and .buttonbar fade in with --reveal (the icons/conversation, not the title)', () => {
+  const css = readSrc('renderer', 'widget.css');
+  for (const selector of ['.door-corner {', '.log {', '.buttonbar {']) {
+    const idx = css.indexOf(selector);
+    assert.notEqual(idx, -1, `missing ${selector}`);
+    const block = css.slice(idx, css.indexOf('}', idx));
+    assert.match(block, /opacity:\s*var\(--reveal\)/, `${selector} must fade in with --reveal`);
+    assert.match(block, /transition:[^;]*var\(--reveal-speed\)/, `${selector} must use the JS-controlled --reveal-speed, not a fixed duration`);
+  }
+});
+
+test('invisible/faded-out door, log and buttonbar are non-interactive below the reveal threshold', () => {
+  const css = readSrc('renderer', 'widget.css');
+  assert.match(css, /\.widget:not\(\.reveal-interactive\) \.door-corner,\s*\n\.widget:not\(\.reveal-interactive\) \.log,\s*\n\.widget:not\(\.reveal-interactive\) \.buttonbar \{\s*\n\s*pointer-events:\s*none;/);
+});
+
+test('revealMarginPx reads the widget\'s own padding live (the "icon margin from the border") instead of a hardcoded constant', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function revealMarginPx() {');
+  assert.match(body, /getComputedStyle\(widgetEl\)/);
+  assert.match(body, /paddingLeft/);
+  assert.match(body, /paddingTop/);
+});
+
+test('setReveal caps tracking to REVEAL_TRACK_MS (not 0s) so even a fast entrance still animates a little, and uses the longer REVEAL_SETTLE_MS otherwise', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /const REVEAL_TRACK_MS = 70;/);
+  // extractFunctionBody's brace counter can't be used here — the destructured
+  // default parameter `{ settle } = {}` contains braces of its own before the
+  // real function body starts, so this greps the body window directly.
+  const start = src.indexOf('function setReveal(value, { settle } = {}) {');
+  assert.notEqual(start, -1);
+  const body = src.slice(start, src.indexOf('setReveal(0);', start));
+  assert.match(body, /`\$\{settle \? REVEAL_SETTLE_MS : REVEAL_TRACK_MS\}ms`/);
+});
+
+test('mousemove only drives depth-tracking BEFORE the widget latches revealed — no live recomputation once inside', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const idx = src.indexOf("widgetEl.addEventListener('mousemove'");
+  assert.notEqual(idx, -1);
+  const body = src.slice(idx, src.indexOf('});', idx) + 3);
+  assert.match(body, /if \(revealed\) return;/, 'must bail out once latched, or hovering an icon near the border would recompute a shallow depth and collapse the face');
+  assert.match(body, /Math\.min\(x, rect\.width - x, y, rect\.height - y\)/);
+  assert.match(body, /trackEntrance\(depth \/ revealMarginPx\(\)\)/);
+});
+
+test('trackEntrance is a one-shot latch: --reveal follows depth only until it crosses 1, then "revealed" freezes it there for good', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function trackEntrance(depthRatio) {');
+  assert.match(body, /if \(revealed\) return;/);
+  assert.match(body, /revealed = true;/);
+  assert.match(body, /setReveal\(1, \{ settle: false \}\);/);
+  assert.match(body, /setReveal\(depthRatio, \{ settle: false \}\);/);
+});
+
+test('mouseleave does not reset immediately — it arms a debounced timer, so grazing the border does not collapse the face', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const idx = src.indexOf("widgetEl.addEventListener('mouseleave'");
+  assert.notEqual(idx, -1);
+  // The naive "first '});' after idx" landed inside setReveal(0, { settle:
+  // true }) — that call's own closing also happens to read "});" — so this
+  // anchors on the debounce's actual outer close instead.
+  const endMarker = '}, REVEAL_LEAVE_DEBOUNCE_MS);\n});';
+  const endIdx = src.indexOf(endMarker, idx);
+  assert.notEqual(endIdx, -1);
+  const body = src.slice(idx, endIdx + endMarker.length);
+  assert.match(body, /leaveTimer = setTimeout\(\(\) => \{/);
+  assert.match(body, /revealed = false;/);
+  assert.match(body, /setReveal\(0, \{ settle: true \}\)/);
+});
+
+test('mouseleave ignores resize drags — dragging #resizeHandle moves the window via IPC with enough lag that the cursor briefly reads as outside widgetEl, which is not the user actually leaving', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const idx = src.indexOf("widgetEl.addEventListener('mouseleave'");
+  assert.notEqual(idx, -1);
+  const body = src.slice(idx, src.indexOf('if (revealLocked()', idx) + 60);
+  assert.match(body, /if \(revealLocked\(\) \|\| resizing\) return;/);
+});
+
+test('mousemove and mouseenter cancel a pending leave — re-entering before the debounce fires keeps the widget revealed', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const mousemoveIdx = src.indexOf("widgetEl.addEventListener('mousemove'");
+  const mousemoveBody = src.slice(mousemoveIdx, src.indexOf('});', mousemoveIdx) + 3);
+  assert.match(mousemoveBody, /cancelPendingLeave\(\);/);
+
+  const mouseenterIdx = src.indexOf("widgetEl.addEventListener('mouseenter'");
+  assert.notEqual(mouseenterIdx, -1);
+  const mouseenterBody = src.slice(mouseenterIdx, src.indexOf('});', mouseenterIdx) + 3);
+  assert.match(mouseenterBody, /cancelPendingLeave\(\);/);
+
+  const cancelBody = extractFunctionBody(src, 'function cancelPendingLeave() {');
+  assert.match(cancelBody, /clearTimeout\(leaveTimer\)/);
+});
+
+test('reveal is locked (ignores mouse depth) while settings is open or the occlusion-expanded banner is active', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function revealLocked() {');
+  assert.match(body, /settingsOpen/);
+  assert.match(body, /occlusion-expanded/);
+});
+
+test('opening settings forces a fully revealed, settled face and keeps the "revealed" latch in sync', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function setSettingsOpen(open) {');
+  assert.match(body, /revealed = true;/);
+  assert.match(body, /setReveal\(1, \{ settle: true \}\);/);
+});
+
+test('occlusion-expanded overrides switch off the hover-reveal transform on .name entirely, per its own always-centered banner styling', () => {
+  const css = readSrc('renderer', 'widget.css');
+  const idx = css.indexOf('.widget.occlusion-expanded .name {');
+  assert.notEqual(idx, -1);
+  const block = css.slice(idx, css.indexOf('}', idx));
+  assert.match(block, /transform:\s*none/);
+});
+
 test('occlusion-expanded name fill is solid black with no text-stroke, per explicit request', () => {
   const src = readSrc('renderer', 'widget.css');
   const idx = src.indexOf('.widget.occlusion-expanded .name {');

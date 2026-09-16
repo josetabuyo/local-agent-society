@@ -145,9 +145,33 @@ function fitNameToBox() {
   nameEl.style.whiteSpace = isSplit ? 'pre-line' : 'nowrap';
   nameEl.style.lineHeight = isSplit ? '1.05' : '';
   nameEl.textContent = text;
+  // Occlusion-expanded's banner name is always centered via its own CSS
+  // (position untouched by --reveal, see widget.css's .occlusion-expanded
+  // .name override) — no need to compute a hover-reveal target for it.
+  if (!expanded) updateNameCenterOffset(size, text);
 }
 
 fitNameToBox();
+
+// Where the hover-resting name should land: the distance from #name's
+// normal (fully revealed) position to the widget's geometric center, plus
+// the local x-coordinate the "grow" scale should expand from. Measured off
+// the ACTUAL rendered text (via the same canvas metrics fitFontSizeAndSplit
+// uses), not #name's flex-stretched box width — the box fills the space
+// between the widget's left edge and the door button regardless of how
+// short the name is, so centering on the box instead of the glyphs would
+// leave the resting title visibly off-center. offsetLeft/offsetTop/
+// offsetHeight are layout-only (unaffected by the CSS transform this very
+// function feeds), so this stays correct however far along --reveal is.
+function updateNameCenterOffset(size, text) {
+  const lines = text.split('\n');
+  const textWidth = Math.max(...lines.map((l) => measureTextWidth(l, size)));
+  const cx = widgetEl.clientWidth / 2 - (nameEl.offsetLeft + textWidth / 2);
+  const cy = widgetEl.clientHeight / 2 - (nameEl.offsetTop + nameEl.offsetHeight / 2);
+  widgetEl.style.setProperty('--name-cx', `${cx}px`);
+  widgetEl.style.setProperty('--name-cy', `${cy}px`);
+  widgetEl.style.setProperty('--name-origin-x', `${textWidth / 2}px`);
+}
 
 // micLanguage defaults to Spanish, not auto-detect or the agent's TTS
 // locale — per explicit request: dictation should assume Spanish unless the
@@ -286,6 +310,12 @@ function setSettingsOpen(open) {
   widgetEl.classList.toggle('settings-open', open);
   gearEl.classList.toggle('active', open);
   window.las.setExpanded(open, SETTINGS_HEIGHT);
+  if (open) {
+    // Latch the "revealed" state too, so mousemove-driven entrance tracking
+    // doesn't undo this the moment settings closes and a mousemove fires.
+    revealed = true;
+    setReveal(1, { settle: true });
+  }
 }
 
 gearEl.addEventListener('click', () => setSettingsOpen(!settingsOpen));
@@ -375,6 +405,136 @@ window.las.onSystemResume(() => {
 });
 
 window.addEventListener('resize', () => fitNameToBox());
+
+// ── hover reveal: cursor-depth-driven face ──────────────────────────────────
+//
+// Resting face: #name sits centered and scaled up (see widget.css's .name
+// transform), door/log/buttonbar invisible. As the cursor crosses in from
+// whichever edge of the widget is nearest, --reveal tracks how far it has
+// traveled — 0 right at the border, 1 once it has advanced inward by the
+// same distance the face buttons already sit inset from that border (the
+// widget's own CSS padding, read live rather than hardcoded so this stays
+// correct if that padding ever changes). Tracking uses REVEAL_TRACK_MS, a
+// small capped duration, rather than 0s: a mouse that crosses the whole
+// margin in one fast swipe would otherwise SNAP straight to fully revealed
+// with nothing to see — capping the speed means even a fast entrance still
+// takes this little bit of time, so the title's slide-and-shrink is always
+// visible (the "ilusión de materialidad" this is going for), while staying
+// short enough to still read as immediate. A longer, separate duration
+// (REVEAL_SETTLE_MS) is only used for the moments where --reveal jumps
+// WITHOUT the mouse still driving it: leaving the widget, or a locked state
+// (settings open, occlusion-expanded banner) forcing a value.
+const REVEAL_TRACK_MS = 70;
+const REVEAL_SETTLE_MS = 380;
+const REVEAL_INTERACTIVE_THRESHOLD = 0.6;
+
+function revealMarginPx() {
+  const cs = getComputedStyle(widgetEl);
+  const h = parseFloat(cs.paddingLeft) || 16;
+  const v = parseFloat(cs.paddingTop) || 14;
+  // The tighter of the two axes — icons are inset by whichever margin is
+  // smaller, so that's the depth that should mean "fully revealed".
+  return Math.max(4, Math.min(h, v));
+}
+
+function setReveal(value, { settle } = {}) {
+  const v = Math.max(0, Math.min(1, value));
+  widgetEl.style.setProperty('--reveal-speed', `${settle ? REVEAL_SETTLE_MS : REVEAL_TRACK_MS}ms`);
+  widgetEl.style.setProperty('--reveal', String(v));
+  widgetEl.classList.toggle('reveal-interactive', v >= REVEAL_INTERACTIVE_THRESHOLD);
+}
+
+setReveal(0);
+
+// Settings panel (active interaction) and the full-screen occlusion banner
+// (its own always-visible centered name, see .occlusion-expanded overrides
+// in widget.css) both opt out of mouse-depth-driven reveal entirely.
+function revealLocked() {
+  return settingsOpen || widgetEl.classList.contains('occlusion-expanded');
+}
+
+// Two states, not a value that's recomputed on every mousemove forever:
+//
+//   - Entering: depth/margin drives --reveal from 0 toward 1, 1:1 with the
+//     cursor (no transition) — this is the only part that "follows" the
+//     mouse, purely as the entrance gets pushed in from the border.
+//   - Revealed (latched once depth crosses the margin): --reveal just STAYS
+//     at 1. Mousemove is ignored entirely for reveal purposes from then on —
+//     wandering anywhere inside the widget (including right back over the
+//     now-visible icons, which necessarily sit at shallow depth) can't
+//     recompute anything and yank it back down. This is what fixes the
+//     earlier "va para atrás y para adelante" flicker: that came from
+//     treating depth as a live value for as long as the cursor stayed
+//     inside, instead of a one-shot entrance trigger.
+//
+// Only mouseleave (debounced below) drops back to Entering/resting.
+let revealed = false;
+
+function trackEntrance(depthRatio) {
+  if (revealed) return;
+  if (depthRatio >= 1) {
+    revealed = true;
+    setReveal(1, { settle: false });
+    return;
+  }
+  setReveal(depthRatio, { settle: false });
+}
+
+// A native mouseleave fires the instant the cursor crosses the widget's
+// exact pixel boundary — a window this small means just grazing the edge
+// while moving toward something else (or a hair of pointer jitter) reads as
+// "left" and yanks the face back to resting mid-interaction. Rather than
+// collapsing immediately, arm a short timer instead: only if the cursor is
+// STILL outside once it fires (no mousemove/mouseenter cancelled it first)
+// do we treat the widget as definitively left. That's the "debounce en
+// tiempo" — the nearest thing to a spatial buffer an Electron window this
+// size can give us without literally growing the window past the visible
+// rounded rect (mouse events simply stop arriving once the cursor is past
+// the real window edge, so there's no space to measure "how far outside").
+const REVEAL_LEAVE_DEBOUNCE_MS = 260;
+let leaveTimer = null;
+
+function cancelPendingLeave() {
+  if (leaveTimer) {
+    clearTimeout(leaveTimer);
+    leaveTimer = null;
+  }
+}
+
+widgetEl.addEventListener('mousemove', (e) => {
+  if (resizing || revealLocked()) return;
+  cancelPendingLeave();
+  if (revealed) return;
+  const rect = widgetEl.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const depth = Math.min(x, rect.width - x, y, rect.height - y);
+  trackEntrance(depth / revealMarginPx());
+});
+
+widgetEl.addEventListener('mouseenter', () => {
+  cancelPendingLeave();
+});
+
+widgetEl.addEventListener('mouseleave', () => {
+  // Dragging the manual resize handle (see "manual resize" section below)
+  // moves the window itself via IPC, which lags the cursor just enough that
+  // widgetEl's live getBoundingClientRect() often reads the pointer as
+  // outside mid-drag — a real mouseleave that has nothing to do with the
+  // user actually leaving. Ignore it entirely while resizing; the drag's
+  // own mouseup/mousemove handlers don't touch reveal state at all, so
+  // there's nothing here that needs to run once resizing stops either.
+  if (revealLocked() || resizing) return;
+  cancelPendingLeave();
+  leaveTimer = setTimeout(() => {
+    leaveTimer = null;
+    revealed = false;
+    // The only spot that animates with a real transition instead of
+    // tracking the cursor 1:1 — settling smoothly back into the centered,
+    // scaled-up title card.
+    setReveal(0, { settle: true });
+  }, REVEAL_LEAVE_DEBOUNCE_MS);
+});
 
 // ── message log ─────────────────────────────────────────────────────────────
 

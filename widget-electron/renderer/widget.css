@@ -20,6 +20,18 @@ html, body {
   -webkit-app-region: drag;
   display: flex;
   flex-direction: column;
+  /* Hover-depth reveal (see widget.js's "hover reveal" section): 0 = resting
+   * face (title centered+larger, door/log/buttonbar hidden), 1 = fully
+   * revealed (title at its normal top-left spot, door/log/buttonbar at full
+   * opacity). widget.js's setReveal keeps --reveal-speed capped at a small
+   * constant (REVEAL_TRACK_MS) while the cursor is driving the entrance —
+   * short enough to read as immediate, but never literally 0s, so even a
+   * fast swipe across the margin still shows the title actually move — and
+   * only switches to a longer settle-back duration when --reveal changes
+   * WITHOUT the mouse still driving it (mouse left, or a locked state like
+   * settings/occlusion forcing a jump). */
+  --reveal: 0;
+  --reveal-speed: 0s;
 }
 
 .topbar {
@@ -42,13 +54,34 @@ html, body {
   -webkit-text-stroke: 1.2px rgba(15, 15, 15, 0.9);
   overflow: hidden;
   text-overflow: ellipsis;
+  /*
+   * Same element in both states — no crossfade between a "compact" and a
+   * "resting" title. At rest (--reveal: 0) it's translated from its normal
+   * top-left flow position to the widget's geometric center and scaled up
+   * slightly; fully revealed (--reveal: 1) both terms go to zero/one and it
+   * sits exactly where flex layout would put it anyway. --name-cx/--name-cy
+   * (the translation distance) and --name-origin-x (where the scale should
+   * expand from, in element-local coordinates) are computed from the
+   * ACTUAL rendered text, not the flex box's stretched width, so scaling
+   * expands from the glyphs themselves — see widget.js's
+   * updateNameCenterOffset. transform-origin's Y stays the default center,
+   * since the name element's height already tracks the text's line box.
+   */
+  transform-origin: var(--name-origin-x, 50%) center;
+  transform:
+    translate(calc((1 - var(--reveal)) * var(--name-cx, 0px)), calc((1 - var(--reveal)) * var(--name-cy, 0px)))
+    scale(calc(1 + (1 - var(--reveal)) * 0.15));
+  transition: transform var(--reveal-speed) ease-out;
 }
 
 /* Door button: always visible top-right, in both the normal face and
  * settings mode (see .settings-open below, which hides every OTHER
- * face button but leaves this and gear alone). */
+ * face button but leaves this and gear alone) — EXCEPT the hover-resting
+ * face, where it fades out with the rest of the icons (see --reveal). */
 .door-corner {
   flex-shrink: 0;
+  opacity: var(--reveal);
+  transition: opacity var(--reveal-speed) ease-out;
 }
 
 /*
@@ -78,11 +111,13 @@ html, body {
    * box instead of just the CSS min(18vw,20vh) guess. Solid black, no
    * transparency and no stroke needed — full-screen banner should be as
    * legible as possible, not styled to match the (now irrelevant) widget
-   * opacity. */
+   * opacity. This mode has its own always-centered name (via the .widget
+   * rule above), so the hover-reveal transform is switched off entirely. */
   color: #000;
   -webkit-text-stroke: 0;
   text-align: center;
   flex: none;
+  transform: none;
 }
 
 .widget.occlusion-expanded .log,
@@ -104,6 +139,10 @@ html, body {
    * individual bubbles get a legibility floor instead. */
   color: var(--log-text, #222);
   -webkit-app-region: no-drag;
+  /* Fades/slides in as the cursor advances inward — see .widget's --reveal. */
+  opacity: var(--reveal);
+  transform: translateY(calc((1 - var(--reveal)) * 6px));
+  transition: opacity var(--reveal-speed) ease-out, transform var(--reveal-speed) ease-out;
 }
 
 /*
@@ -333,6 +372,19 @@ html, body {
   align-items: center;
   margin-top: 6px;
   flex-shrink: 0;
+  /* Fades/slides in as the cursor advances inward — see .widget's --reveal. */
+  opacity: var(--reveal);
+  transform: translateY(calc((1 - var(--reveal)) * 8px));
+  transition: opacity var(--reveal-speed) ease-out, transform var(--reveal-speed) ease-out;
+}
+
+/* Below the interactive threshold widget.js sets (REVEAL_INTERACTIVE_THRESHOLD),
+ * these stay non-hit-testable so an invisible button/log line can't eat a
+ * click while it's still fading in/out. */
+.widget:not(.reveal-interactive) .door-corner,
+.widget:not(.reveal-interactive) .log,
+.widget:not(.reveal-interactive) .buttonbar {
+  pointer-events: none;
 }
 
 .bar-left,
