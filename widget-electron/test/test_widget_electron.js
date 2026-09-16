@@ -534,7 +534,7 @@ test('local-msg (this agent\'s own voice) has a centered gradient accent segment
 
 test('local-msg accent segment color is tied to the widget\'s own color (--local-accent), not the neutral --bubble-tint', () => {
   const jsSrc = readSrc('renderer', 'widget.js');
-  assert.match(jsSrc, /--local-accent['"]?,\s*darkenHexToRgba\(prefs\.color/);
+  assert.match(jsSrc, /--local-accent['"]?,\s*darkenHexToRgba\(color/);
   const css = readSrc('renderer', 'widget.css');
   assert.match(css, /\.log \.entry\.local-msg \.bubble::before \{[^}]*var\(--local-accent/s);
 });

@@ -71,6 +71,83 @@ def test_widgets_all_skips_inactive_agents(monkeypatch):
     assert not any("Inactive1" in url for url in opened)
 
 
+class _FakeClock:
+    """Lets a test drive `widget`'s 5s poll loop without any real wall-clock
+    wait: time.sleep() advances the fake clock instead of actually sleeping,
+    so a loop that "waits" 5 seconds in the code executes instantly here."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def test_widget_reports_success_once_process_is_found(monkeypatch):
+    """`las widget` must confirm the app actually launched — not just that
+    `open` was fired — before printing "Widget reopened". If pgrep finds the
+    packaged app process on the very first check, it must report success
+    immediately (no unnecessary polling/sleeping)."""
+    monkeypatch.setattr(agents_mod, "resolve_agent_name", lambda name: name or "TestAgent")
+
+    clock = _FakeClock()
+    monkeypatch.setattr(agents_mod.time, "time", clock.time)
+    monkeypatch.setattr(agents_mod.time, "sleep", clock.sleep)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[0] == "pgrep":
+            return types.SimpleNamespace(returncode=0)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(agents_mod.subprocess, "run", fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(agents_mod.widget, ["TestAgent"])
+
+    assert result.exit_code == 0
+    assert "Widget reopened for TestAgent." in result.output
+    assert "may have failed to launch" not in result.output
+    # Exactly one pgrep check — found on the first try, so no polling delay.
+    assert sum(1 for c in calls if c[0] == "pgrep") == 1
+    assert clock.now == 0.0
+
+
+def test_widget_reports_failure_when_process_never_appears(monkeypatch):
+    """If `open` routes the reopen request but the packaged app never
+    actually starts (e.g. a corrupted dist/ build from the electron-builder
+    rebuild race), `las widget` must say so instead of unconditionally
+    claiming success — this is what hid the widget-electron launch bug from
+    the reporter for two days."""
+    monkeypatch.setattr(agents_mod, "resolve_agent_name", lambda name: name or "TestAgent")
+
+    clock = _FakeClock()
+    monkeypatch.setattr(agents_mod.time, "time", clock.time)
+    monkeypatch.setattr(agents_mod.time, "sleep", clock.sleep)
+
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "pgrep":
+            return types.SimpleNamespace(returncode=1)  # never found
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(agents_mod.subprocess, "run", fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(agents_mod.widget, ["TestAgent"])
+
+    assert result.exit_code == 0  # fails soft — a message, not a crash
+    assert "Widget reopened for TestAgent." not in result.output
+    assert "no running process was found after 5s" in result.output
+    assert "may have failed to launch" in result.output
+    # Polled for the full 5s window before giving up.
+    assert clock.now >= 5.0
+
+
 def test_agent_listen_exits_cleanly_when_vortexia_unreachable(monkeypatch):
     """`las agent listen` must fail soft (clear message, exit 1) — not hang or
     crash — when it can't find a vortexia-mqtt port in the registry. This is

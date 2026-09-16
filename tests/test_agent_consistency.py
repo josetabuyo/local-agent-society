@@ -64,6 +64,28 @@ def test_install_sh_purges_legacy_watcher_plists():
         "install.sh does not delete the orphaned plist files"
 
 
+def test_stop_sh_waits_for_widget_processes_to_exit_before_returning():
+    """stop.sh must not fire-and-forget `kill` at the widget processes.
+
+    update.sh/start.sh run electron-builder right after stop.sh to overwrite
+    dist/mac-arm64/Local Agent Society.app. If stop.sh returns immediately
+    after sending SIGTERM, old helper processes (renderer/GPU) can still be
+    shutting down and holding file handles into that bundle when the rebuild
+    starts, corrupting the freshly-built .app so it silently fails to launch
+    (the exact bug reported by System on uy-mac, 2026-09-16). stop.sh must
+    poll until the processes are actually gone, with a SIGKILL fallback for
+    ones that don't exit in time.
+    """
+    text = (ROOT / "stop.sh").read_text()
+    assert "kill $PIDS" in text or "kill $PIDS " in text, \
+        "stop.sh does not send SIGTERM to the collected widget PIDs"
+    assert "pgrep -f \"$WIDGET_PATTERN\"" in text and text.count('pgrep -f "$WIDGET_PATTERN"') >= 2, \
+        "stop.sh does not re-check for the widget processes after killing them " \
+        "— it must poll in a loop, not fire-and-forget"
+    assert "kill -9" in text, \
+        "stop.sh has no SIGKILL fallback for widget processes that don't exit in time"
+
+
 def test_registered_agents_settings_no_direct_say_hooks():
     """No registered agent's hook settings should invoke 'say -v' directly — use POST /queue/speak."""
     violations = []
