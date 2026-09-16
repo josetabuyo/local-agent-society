@@ -1,5 +1,5 @@
 import click
-from cli.commands.system import status, start_cmd, stop_cmd, logs, install, uninstall, update
+from cli.commands.system import status, start_cmd, stop_cmd, restart_cmd, logs, install, uninstall, update
 from cli.commands.speak import speak
 from cli.commands.agents import agent, agents_list, link, widget, widgets_all
 from cli.commands.ports import ports
@@ -17,6 +17,7 @@ def cli():
 cli.add_command(status)
 cli.add_command(start_cmd, name="start")
 cli.add_command(stop_cmd, name="stop")
+cli.add_command(restart_cmd, name="restart")
 cli.add_command(logs)
 cli.add_command(install)
 cli.add_command(uninstall)

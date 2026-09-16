@@ -926,11 +926,30 @@ ipcMain.handle('vortexia:send', async (event, toName, text) => {
     return { ok: false, error: 'vortexia client not connected' };
   }
   try {
-    client.send(toName, text, { from: fromName, source: 'human' });
+    // sendConfirmed(), not send(): send() is fire-and-forget, and mqtt.js
+    // QUEUES a QoS-1 publish instead of erroring when the socket died
+    // without a clean FIN (exactly what happens after a vortexia
+    // restart/keepalive-timeout — the client object survives in
+    // vortexiaClients with a doomed connection). That silently ate mic
+    // dictations and self-test pings while this handler kept logging "ok".
+    // sendConfirmed() rejects if the broker never PUBACKs, so a dead
+    // connection now surfaces as a real error instead of a lost message.
+    await client.sendConfirmed(toName, text, { from: fromName, source: 'human' });
     log.info('mic', `vortexia:send ok from=${fromName} to=${toName} chars=${text.length}`);
     return { ok: true };
   } catch (err) {
     log.error('mic', `vortexia:send failed from=${fromName} to=${toName}: ${err && err.stack ? err.stack : err}`);
+    // The connection is confirmed dead — drop it and reconnect immediately
+    // rather than waiting on 'close' (which may never fire for a socket
+    // that died without a clean FIN) so the next send has a fresh client.
+    if (vortexiaClients.get(fromName) === client) {
+      vortexiaClients.delete(fromName);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('vortexia:status', { connected: false, error: 'connection confirmed dead' });
+        connectVortexia(fromName, win);
+      }
+    }
     return { ok: false, error: String(err) };
   }
 });
@@ -1319,6 +1338,28 @@ app.whenReady().then(async () => {
     }
   };
   powerMonitor.on('resume', resyncAllOcclusion);
+
+  // Same class of bug as occlusion above, but for vortexia: connectVortexia's
+  // retry chain is a chain of setTimeout(..., 3000)s, and Node timers don't
+  // fire while the Mac is asleep — they queue up and fire in a burst on
+  // wake, which is usually fine (confirmed live: a broker restart dropped
+  // every widget's connection and they all reconnected together on the next
+  // wake). But if a wake-time retry lands before the network/vortexia is
+  // actually reachable, whatever's left of the chain up to that point can
+  // go quiet — nothing schedules a NEW attempt beyond what was already
+  // pending, so a client can just stay dead for the rest of the day
+  // (confirmed live: DailyMonkey's connection died at 20:06 and never
+  // recovered on its own, only fixed by manually restarting the app).
+  // Same fix as above: force a fresh reconnect attempt on resume for any
+  // window whose client is missing, plus a periodic sweep as insurance.
+  const reconnectDeadVortexiaClients = () => {
+    for (const [name, win] of windows) {
+      if (win.isDestroyed()) continue;
+      if (!vortexiaClients.has(name)) connectVortexia(name, win);
+    }
+  };
+  powerMonitor.on('resume', reconnectDeadVortexiaClients);
+  setInterval(reconnectDeadVortexiaClients, 5 * 60 * 1000);
 
   // Belt-and-suspenders beyond sleep/wake: sleep is the ONE case we can
   // detect and react to (powerMonitor above), but it's not the only way

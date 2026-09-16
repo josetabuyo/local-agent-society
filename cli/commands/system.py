@@ -51,6 +51,12 @@ def stop_cmd():
     _run_script("stop.sh")
 
 
+@click.command("restart")
+def restart_cmd():
+    """Restart the backend + widget, warning with beeps only if a mic dictation is actually in progress."""
+    _run_script("restart-widget.sh")
+
+
 @click.command()
 def logs():
     """Tail the backend log."""
