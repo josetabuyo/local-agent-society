@@ -528,7 +528,25 @@ def widget(name):
     """Reopen the agent widget on the current Space."""
     name = resolve_agent_name(name)
     subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=reopen"], check=False)
-    click.echo(f"Widget reopened for {name}.")
+    # `open` on the URL scheme only asks macOS to route the request to the
+    # handler app — it returns success even if that app then fails to launch
+    # (e.g. a corrupted dist/ build). Poll for the actual process instead of
+    # reporting success unconditionally, so a dead app is visible here rather
+    # than only discovered later as "the widget isn't showing up".
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        result = subprocess.run(
+            ["pgrep", "-f", "Local Agent Society.app/Contents/MacOS/Local Agent Society"],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            click.echo(f"Widget reopened for {name}.")
+            return
+        time.sleep(0.25)
+    click.echo(
+        f"Widget reopen requested for {name}, but no running process was found after 5s — "
+        "the app may have failed to launch (check dist/ build)."
+    )
 
 
 @click.command("widgets")

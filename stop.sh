@@ -25,14 +25,28 @@ fi
 # Covers both the packaged app (process name matches the productName, "Local
 # Agent Society") and a dev instance launched via `npm start`/`electron .`
 # under widget-electron/ (process name "Electron", cwd under widget-electron).
+#
+# Waits for the processes to actually exit before returning: a caller like
+# update.sh runs electron-builder right after this to overwrite
+# dist/mac-arm64/Local Agent Society.app, and `kill` alone only sends SIGTERM
+# without waiting — helper processes (renderer/GPU) can still be shutting
+# down and holding file handles into the bundle when the rebuild starts,
+# corrupting the freshly-built .app so it silently fails to launch.
 FOUND=0
-PACKAGED_PIDS=$(pgrep -f "Local Agent Society.app/Contents/MacOS/Local Agent Society" 2>/dev/null || true)
-if [ -n "$PACKAGED_PIDS" ]; then
-    kill $PACKAGED_PIDS 2>/dev/null && FOUND=1
-fi
-DEV_PIDS=$(pgrep -f "widget-electron" 2>/dev/null || true)
-if [ -n "$DEV_PIDS" ]; then
-    kill $DEV_PIDS 2>/dev/null && FOUND=1
+WIDGET_PATTERN='Local Agent Society\.app/Contents/MacOS/Local Agent Society|widget-electron'
+PIDS=$(pgrep -f "$WIDGET_PATTERN" 2>/dev/null || true)
+if [ -n "$PIDS" ]; then
+    FOUND=1
+    kill $PIDS 2>/dev/null
+    for _ in $(seq 1 20); do
+        PIDS=$(pgrep -f "$WIDGET_PATTERN" 2>/dev/null || true)
+        [ -z "$PIDS" ] && break
+        sleep 0.25
+    done
+    if [ -n "$PIDS" ]; then
+        kill -9 $PIDS 2>/dev/null
+        sleep 0.25
+    fi
 fi
 
 if [ "$FOUND" -eq 1 ]; then
