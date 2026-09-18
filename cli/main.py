@@ -11,7 +11,16 @@ from cli.commands.completion import completion
 
 @click.group()
 def cli():
-    """Local Agent Society — CLI"""
+    """Local Agent Society — CLI.
+
+    If the current directory has a .las-agent.json (or the legacy
+    .agent.json), you are a local agent of this society. Load the
+    `/las-agent` skill before doing anything else — it covers how to speak
+    (`las speak`), how to talk to other agents on this machine or another
+    one (`las agent send`), how the widget works, and what's expected of
+    you as a member of the society. Don't rediscover any of this from the
+    command tree; it's already documented there.
+    """
 
 
 cli.add_command(status)

@@ -15,7 +15,14 @@ from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
 
 @click.group()
 def agent():
-    """Manage agents."""
+    """Manage agents.
+
+    Cross-machine messaging already exists — don't rebuild it. `send --to
+    "Name@env"` reaches an agent on a different Mac via vortex-relay (LAN
+    direct when possible, falling back to a Nostr relay). See `las agent
+    send --help` and the /las-agent skill before assuming this needs a
+    new mechanism.
+    """
 
 
 @click.command("agents")
