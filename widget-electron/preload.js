@@ -8,10 +8,27 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 const { pickVoice } = require('./lib/voiceHash');
+const { KOKORO_VOICES } = require('./lib/kokoroVoices');
 
 contextBridge.exposeInMainWorld('las', {
   /** Deterministic voice selection — see lib/voiceHash.js. */
   pickVoice: (name, locale, voices) => pickVoice(name, locale, voices),
+
+  /** The local Kokoro voice pool (see lib/kokoroVoices.js) — plain data, fed
+   * into pickVoice() in place of the old speechSynthesis.getVoices() list. */
+  ttsVoices: KOKORO_VOICES,
+
+  /** Synthesize `text` with a Kokoro voice id + kokoro-onnx lang code (both
+   * from ttsVoices) via the backend's /tts/synthesize; returns
+   * {ok:true, wav: ArrayBuffer} or {ok:false, error}. */
+  synthesizeSpeech: (text, voiceId, lang) => ipcRenderer.invoke('tts:synthesize', text, voiceId, lang),
+
+  /** Progress pushes during synthesizeSpeech (model download/load vs.
+   * inference), same shape as onAudioStatus below.
+   * @param {(status: {state:string, progress?:number, file?:string}) => void} cb */
+  onTtsStatus: (cb) => {
+    ipcRenderer.on('tts:status', (_event, status) => cb(status));
+  },
 
   /** Agent name this window was opened for, read from ?agent= query string. */
   getAgentName: () => new URLSearchParams(window.location.search).get('agent') || '',

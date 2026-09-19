@@ -332,6 +332,74 @@ def get_voice(name: str):
     return voice
 
 
+# ── local text-to-speech (Kokoro-82M via kokoro-onnx) ───────────────────────
+#
+# widget-electron used to run Kokoro in-process (kokoro-js, in Electron's
+# main/Node process). That broke when packaged: electron-builder's own
+# native-module rebuild step re-flattens node_modules, collapsing the
+# onnxruntime-common version Kokoro needs back down to the older one Whisper
+# (@xenova/transformers) pins, which crashes Kokoro's tokenizer at runtime.
+# Moving synthesis here sidesteps that packaging conflict entirely — one
+# Python process, one onnxruntime — and as a bonus, kokoro-onnx's espeak-ng
+# phonemizer is a real native binary (via espeakng-loader), not the WASM
+# build kokoro-js uses, which is what made Spanish voices (ef_/em_) crash in
+# Node but work fine here.
+#
+# Model files are NOT bundled in the repo (~340MB) — download once with:
+#   curl -L -o backend/data/kokoro/kokoro-v1.0.onnx \
+#     https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+#   curl -L -o backend/data/kokoro/voices-v1.0.bin \
+#     https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+KOKORO_DIR = DATA_DIR / "kokoro"
+KOKORO_MODEL_PATH = KOKORO_DIR / "kokoro-v1.0.onnx"
+KOKORO_VOICES_PATH = KOKORO_DIR / "voices-v1.0.bin"
+
+_kokoro = None
+_kokoro_lock = threading.Lock()
+
+
+def get_kokoro():
+    """Lazily create (and memoize) the Kokoro instance — first call pays
+    model-load time, every call after is just inference."""
+    global _kokoro
+    if _kokoro is None:
+        with _kokoro_lock:
+            if _kokoro is None:
+                from kokoro_onnx import Kokoro
+                logger.info(f"tts: loading kokoro model from {KOKORO_MODEL_PATH}")
+                _kokoro = Kokoro(str(KOKORO_MODEL_PATH), str(KOKORO_VOICES_PATH))
+                logger.info("tts: kokoro model loaded")
+    return _kokoro
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "af_heart"
+    lang: str = "en-us"
+    speed: float = 1.0
+
+
+@app.post("/tts/synthesize")
+def tts_synthesize(req: TTSRequest):
+    if not KOKORO_MODEL_PATH.exists() or not KOKORO_VOICES_PATH.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Kokoro model files not found under {KOKORO_DIR} — see the download instructions in main.py",
+        )
+    try:
+        kokoro = get_kokoro()
+        samples, sample_rate = kokoro.create(req.text, voice=req.voice, speed=req.speed, lang=req.lang)
+    except Exception as e:
+        logger.error(f"tts: synthesis failed (voice={req.voice!r} lang={req.lang!r}): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    import io
+    import soundfile as sf
+    from fastapi.responses import Response as FastResponse
+    buf = io.BytesIO()
+    sf.write(buf, samples, sample_rate, format="WAV")
+    return FastResponse(content=buf.getvalue(), media_type="audio/wav")
+
+
 # ── agents ────────────────────────────────────────────────────────────────────
 
 @app.get("/agents")

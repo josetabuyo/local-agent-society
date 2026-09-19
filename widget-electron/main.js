@@ -1218,6 +1218,52 @@ ipcMain.handle('audio:transcribe', async (event, pcmBuffer, languageHint) => {
   }
 });
 
+// ── local text-to-speech (Kokoro-82M, via the backend's /tts/synthesize) ────
+//
+// The widget's speak() used to call the renderer's window.speechSynthesis —
+// Chromium's built-in TTS, which on macOS exposes only a thin compact voice,
+// noticeably worse than both `say`'s default voices and the enhanced voices
+// available in System Settings (confirmed by the user). Kokoro-82M (Apache
+// 2.0) sounds clearly better and is free.
+//
+// Inference does NOT run in this process. It was first tried in-process
+// (kokoro-js, Node's onnxruntime-node) but that breaks once packaged:
+// electron-builder's own native-module rebuild step re-flattens
+// node_modules, collapsing the onnxruntime-common version Kokoro needs back
+// down to the older one Whisper (@xenova/transformers) pins — crashing
+// Kokoro's tokenizer at runtime with a version this exact repo could
+// reproduce, but never fix by pinning versions alone. The backend (a single
+// Python/uvicorn process, its own onnxruntime, no packaging step at all) now
+// owns synthesis via kokoro-onnx and exposes it over HTTP; this process just
+// fetches the WAV and forwards it to the renderer. Bonus: kokoro-onnx's
+// espeak-ng phonemizer is a real native binary (espeakng-loader), not the
+// WASM build kokoro-js used — which is what made Spanish voices crash there
+// but work fine here (see lib/kokoroVoices.js for the full voice pool).
+async function synthesizeSpeech(text, voiceId, lang) {
+  const res = await fetch(`${REGISTRY_URL}/tts/synthesize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice: voiceId, lang }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`backend /tts/synthesize returned ${res.status}: ${detail}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+ipcMain.handle('tts:synthesize', async (event, text, voiceId, lang) => {
+  try {
+    const startedAt = Date.now();
+    const wav = await synthesizeSpeech(String(text || ''), String(voiceId || 'af_heart'), String(lang || 'en-us'));
+    log.info('tts', `synthesized ${text.length} chars (voice=${voiceId}) in ${Date.now() - startedAt}ms`);
+    return { ok: true, wav: wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) };
+  } catch (err) {
+    log.error('tts', `tts:synthesize IPC failed: ${err && err.stack ? err.stack : err}`);
+    return { ok: false, error: String(err) };
+  }
+});
+
 // ── vortexia (MQTT) integration ─────────────────────────────────────────────
 //
 // Done in the MAIN process (Node context), not the renderer: main.js is a

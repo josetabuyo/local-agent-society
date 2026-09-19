@@ -1005,3 +1005,67 @@ test('visible and active are correlated: openWidget/reopenWidget both clear the 
   assert.match(openBody, /clearInactiveRemote\(name\)/);
   assert.match(reopenBody, /clearInactiveRemote\(name\)/);
 });
+
+// ── local Kokoro TTS (replaces window.speechSynthesis) ──────────────────────
+
+const { KOKORO_VOICES } = require('../lib/kokoroVoices');
+
+test('KOKORO_VOICES only lists en-US/en-GB/es-ES voices, each with a unique name and a kokoroLang', () => {
+  assert.ok(KOKORO_VOICES.length > 0);
+  const names = new Set();
+  for (const v of KOKORO_VOICES) {
+    assert.match(v.lang, /^(en-US|en-GB|es-ES)$/, `unexpected lang "${v.lang}" for voice "${v.name}"`);
+    assert.equal(typeof v.kokoroLang, 'string', `voice "${v.name}" must carry the kokoro-onnx lang code`);
+    assert.equal(names.has(v.name), false, `duplicate voice name "${v.name}"`);
+    names.add(v.name);
+  }
+});
+
+test('every Spanish voice in KOKORO_VOICES maps to kokoroLang "es"', () => {
+  const esVoices = KOKORO_VOICES.filter((v) => v.lang === 'es-ES');
+  assert.ok(esVoices.length > 0, 'expected at least one Spanish voice');
+  for (const v of esVoices) assert.equal(v.kokoroLang, 'es');
+});
+
+test('pickVoice resolves a real Kokoro voice id for an English-locale agent', () => {
+  const { voice, warning } = pickVoice('SomeAgent', 'en-US', KOKORO_VOICES);
+  assert.equal(warning, null);
+  assert.ok(KOKORO_VOICES.some((v) => v.name === voice.name), 'resolved voice must come from the Kokoro pool');
+});
+
+test('preload.js exposes the Kokoro voice pool and synthesis bridge on window.las', () => {
+  const src = readSrc('preload.js');
+  assert.match(src, /ttsVoices:\s*KOKORO_VOICES/);
+  assert.match(src, /synthesizeSpeech:\s*\(text, voiceId, lang\) => ipcRenderer\.invoke\('tts:synthesize', text, voiceId, lang\)/);
+});
+
+test('main.js exposes a tts:synthesize IPC handler that calls the backend, not in-process ONNX', () => {
+  const src = readSrc('main.js');
+  assert.match(src, /ipcMain\.handle\('tts:synthesize'/);
+  const body = extractFunctionBody(src, 'async function synthesizeSpeech(text, voiceId, lang) {');
+  assert.match(body, /\$\{REGISTRY_URL\}\/tts\/synthesize/, 'synthesis must go through the backend, not kokoro-js/onnxruntime-node in this process');
+  assert.doesNotMatch(stripComments(readSrc('main.js')), /kokoro-js/, 'kokoro-js must not be loaded in the Electron process (packaging conflict with onnxruntime-node — see backend/main.py instead)');
+});
+
+test("widget.js's speak() no longer uses window.speechSynthesis (replaced by local Kokoro synthesis)", () => {
+  const src = stripComments(readSrc('renderer', 'widget.js'));
+  assert.doesNotMatch(src, /speechSynthesis/);
+  assert.doesNotMatch(src, /SpeechSynthesisUtterance/);
+});
+
+test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays back the returned WAV", () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'async function speak(text) {');
+  assert.match(body, /window\.las\.pickVoice\(agentName, locale, window\.las\.ttsVoices\)/);
+  assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang\)/);
+  assert.match(body, /new Audio\(url\)/);
+});
+
+test("widget.js's speak() still respects the mute pref before doing any synthesis work", () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'async function speak(text) {');
+  const muteCheck = body.indexOf('if (prefs.mute) return;');
+  const synthCall = body.indexOf('window.las.synthesizeSpeech');
+  assert.notEqual(muteCheck, -1);
+  assert.ok(muteCheck < synthCall, 'mute must be checked before synthesis is attempted');
+});

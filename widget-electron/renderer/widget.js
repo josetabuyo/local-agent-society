@@ -614,44 +614,42 @@ function appendLogEntry(envelope, { speak } = {}) {
   while (logEl.children.length > 100) logEl.removeChild(logEl.firstChild);
 }
 
-// ── speech (Web Speech API) ─────────────────────────────────────────────────
+// ── speech (local Kokoro TTS) ────────────────────────────────────────────────
 //
 // Speak-request convention (also documented in main.js): an inbox envelope
 // with "kind": "speak" -> { kind: "speak", from, to, text, voice?, ts }.
 // This is our own convention for this pass (PROTOCOL.md doesn't define one
 // yet); any future vortexia-side convention should update both places.
+//
+// Replaced window.speechSynthesis (Chromium's built-in TTS — noticeably
+// worse than macOS's own `say` voices, confirmed by the user) with Kokoro-82M
+// run locally via kokoro-js: main.js does the ONNX inference (see its "local
+// text-to-speech" section) and hands back a WAV buffer for this process to
+// play. window.las.ttsVoices replaces speechSynthesis.getVoices() as the pool
+// pickVoice() hashes agents into — same function, same locale-fallback
+// behavior, just a different (better-sounding, and free) voice source.
 
-// speechSynthesis.getVoices() is frequently empty on first call — the OS
-// voice list loads asynchronously and fires 'voiceschanged' once ready.
-let cachedVoices = [];
-function refreshVoices() {
-  if (!('speechSynthesis' in window)) return;
-  const list = window.speechSynthesis.getVoices();
-  if (list.length) cachedVoices = list;
-}
-if ('speechSynthesis' in window) {
-  refreshVoices();
-  window.speechSynthesis.addEventListener('voiceschanged', refreshVoices);
-}
-
-function speak(text) {
+async function speak(text) {
   if (prefs.mute) return;
-  if (!('speechSynthesis' in window)) {
-    console.warn('[widget] speechSynthesis unavailable in this environment');
+  const { voice, warning } = window.las.pickVoice(agentName, locale, window.las.ttsVoices);
+  if (warning) console.warn('[widget]', warning);
+  if (!voice) return;
+  let result;
+  try {
+    result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang);
+  } catch (err) {
+    console.warn('[widget] synthesizeSpeech IPC failed', err);
     return;
   }
-  refreshVoices();
-  const utter = new SpeechSynthesisUtterance(text);
-  const voices = cachedVoices;
-  const { voice, warning } = window.las.pickVoice(agentName, locale, voices);
-  if (warning) console.warn('[widget]', warning);
-  if (voice) {
-    // getVoices() results aren't structured-cloneable 1:1 across the bridge
-    // in all Electron versions; re-find by name+lang to be safe.
-    const match = voices.find((v) => v.name === voice.name && v.lang === voice.lang);
-    if (match) utter.voice = match;
+  if (!result || !result.ok) {
+    console.warn('[widget] tts synthesis failed', result && result.error);
+    return;
   }
-  window.speechSynthesis.speak(utter);
+  const url = URL.createObjectURL(new Blob([result.wav], { type: 'audio/wav' }));
+  const audioEl = new Audio(url);
+  audioEl.addEventListener('ended', () => URL.revokeObjectURL(url));
+  audioEl.addEventListener('error', () => URL.revokeObjectURL(url));
+  audioEl.play().catch((err) => console.warn('[widget] audio playback failed', err));
 }
 
 // Set by runMicSelfTest() while it's waiting for the live session's "OK"
