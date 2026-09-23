@@ -392,10 +392,14 @@ def listen(name):
     the broker hands over everything queued while nobody was listening, in
     order, then live traffic; each message is consumed by being acknowledged
     (QoS 1), nothing to clear. While `listen` runs it IS the delivery path —
-    `las agent poll` sees the session is held and stands down. Only one
-    consumer can hold the session: if another connection takes it over, this
-    process exits (exit 2) instead of reconnecting and fighting it. The
-    /las-agent skill's "purge before Monitor" step exists for exactly that.
+    `las agent poll` sees the session is held and stands down. A dropped
+    connection (keep-alive timeout after a system stall, a broker restart)
+    is reconnected automatically — the session survives on the broker, so
+    nothing is lost. Only one consumer can hold the session, though: if the
+    drops keep coming (3 within a minute) that's another connection taking
+    the session over each time, and this process exits (exit 2) instead of
+    fighting it forever. The /las-agent skill's "purge before Monitor" step
+    exists for exactly that.
 
     Mechanically (and silently — no TTS) answers the mic self-test sentinel
     (see widget.js's MIC_SELFTEST_PING and runMicSelfTest) the instant it
@@ -447,14 +451,26 @@ def listen(name):
         if not vx._session_present(flags):
             c.subscribe(topic, qos=1)
 
+    drops: list[float] = []
+    TAKEOVER_DROPS, TAKEOVER_WINDOW_S = 3, 60.0
+
     def on_disconnect(c, userdata, rc, *_args):
-        # rc != 0 is an unexpected drop: broker restart, or another client
-        # taking over this session (MQTT-3.1.4-2). Either way exit rather
-        # than auto-reconnect — a reconnecting listener vs. a takeover would
-        # kick each other forever, and the Monitor re-arms us on exit anyway.
-        if rc != 0:
-            click.echo(f"{name}: mailbox session lost (rc={rc}) — taken over by another listener, or broker restarted", err=True)
+        # rc != 0 is an unexpected drop. One-off drops (keep-alive timeout
+        # after the Mac stalled or slept, broker restart) are fine: paho's
+        # loop_forever reconnects, the broker restores the session, and
+        # on_connect sees "session present" so nothing is re-subscribed.
+        # Repeated drops mean another client keeps taking this session over
+        # (MQTT-3.1.4-2) — then exit rather than kick each other forever.
+        if rc == 0:
+            return
+        now = time.time()
+        drops.append(now)
+        recent = [t for t in drops if now - t <= TAKEOVER_WINDOW_S]
+        drops[:] = recent
+        if len(recent) >= TAKEOVER_DROPS:
+            click.echo(f"{name}: mailbox session lost {len(recent)} times in {int(TAKEOVER_WINDOW_S)}s (rc={rc}) — another listener keeps taking it over, giving up", err=True)
             os._exit(2)
+        click.echo(f"{name}: connection dropped (rc={rc}) — reconnecting, mailbox session kept by the broker", err=True)
 
     def on_message(c, userdata, msg):
         try:

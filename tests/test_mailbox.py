@@ -8,7 +8,8 @@ Three touchpoints, all covered here with a fake paho client — no broker:
       live listener already holds the session;
   (c) `las agent listen` is that consumer: fixed client id, persistent
       session, subscribes only when no session is present, never clears a
-      retained slot, and exits instead of reconnecting when kicked.
+      retained slot, reconnects after a drop, and gives up only when
+      repeatedly kicked (a takeover fight).
 """
 import json
 import sys
@@ -181,22 +182,54 @@ def test_listen_prints_message_and_never_clears_a_retained_slot(listen_env, monk
     assert FakeMQTTClient.instances[-1].published == []   # no empty retained publish, no pong
 
 
-def test_listen_exits_instead_of_reconnecting_when_session_is_taken_over(listen_env, monkeypatch):
+def test_listen_reconnects_after_a_single_drop(listen_env, monkeypatch):
+    """A keep-alive timeout (Mac stalled/slept) or a broker restart is one
+    drop: paho reconnects and the broker restores the session — no exit."""
     exits = []
     monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code))
+    monkeypatch.setattr(FakeMQTTClient, "loop_forever", lambda self: self.on_disconnect(self, None, 7))
+    r = CliRunner().invoke(agents_mod.listen, ["Ana"])
+    assert exits == []
+    assert "reconnecting" in r.output
+
+
+def test_listen_gives_up_when_repeatedly_kicked(listen_env, monkeypatch):
+    """Three unexpected drops inside a minute = another client keeps taking
+    the session over (MQTT-3.1.4-2): exit 2 instead of fighting forever."""
+    exits = []
+    monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code) or (_ for _ in ()).throw(SystemExit(code)))
 
     def loop_forever(self):
-        self.on_disconnect(self, None, 7)   # unexpected drop: takeover or broker restart
+        for _ in range(3):
+            self.on_disconnect(self, None, 7)
 
     monkeypatch.setattr(FakeMQTTClient, "loop_forever", loop_forever)
     r = CliRunner().invoke(agents_mod.listen, ["Ana"])
     assert exits == [2]
-    assert "mailbox session lost" in r.output
+    assert "giving up" in r.output
+
+
+def test_listen_old_drops_outside_the_window_do_not_count(listen_env, monkeypatch):
+    exits = []
+    monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code))
+    clock = [1000.0]
+    monkeypatch.setattr(agents_mod.time, "time", lambda: clock[0])
+
+    def loop_forever(self):
+        for _ in range(2):
+            self.on_disconnect(self, None, 7)
+        clock[0] += 120          # a couple of minutes of calm
+        self.on_disconnect(self, None, 7)
+
+    monkeypatch.setattr(FakeMQTTClient, "loop_forever", loop_forever)
+    CliRunner().invoke(agents_mod.listen, ["Ana"])
+    assert exits == []
 
 
 def test_listen_clean_disconnect_does_not_exit(listen_env, monkeypatch):
     exits = []
     monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code))
     monkeypatch.setattr(FakeMQTTClient, "loop_forever", lambda self: self.on_disconnect(self, None, 0))
-    CliRunner().invoke(agents_mod.listen, ["Ana"])
+    r = CliRunner().invoke(agents_mod.listen, ["Ana"])
     assert exits == []
+    assert "dropped" not in r.output
