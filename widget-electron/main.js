@@ -1347,6 +1347,38 @@ async function fetchAgents() {
   }
 }
 
+// Same as fetchAgents, but null when the registry can't be reached at all —
+// callers that must not mistake "backend not up yet" for "no agents".
+async function fetchAgentsOrNull() {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+// At login, macOS relaunches this app (Reopen Windows / login item) in the
+// same second launchd starts the backend, so the registry is usually still
+// booting when the bulk "open everything" path runs. A single fetch then
+// returned {} and the app sat in the tray with no windows for the rest of
+// the day — `las start` saw the process and reported "already running"
+// (2026-09-23, after a reboot). Poll until the registry answers instead.
+async function fetchAgentsWhenRegistryUp({ delayMs = 3000 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const agents = await fetchAgentsOrNull();
+    if (agents) {
+      if (attempt > 1) log.info('startup', `registry ${REGISTRY_URL} reachable after ${attempt} attempts`);
+      return agents;
+    }
+    if (attempt === 1 || attempt % 10 === 0) {
+      log.warn('startup', `registry ${REGISTRY_URL} unreachable (attempt ${attempt}) — retrying every ${delayMs / 1000}s, no widgets until it answers`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 // ── initial agent(s) to open ─────────────────────────────────────────────────
 // (resolveInitialAgentNames is defined above the single-instance-lock block,
 // since userData scoping needs the agent name before that lock is requested.)
@@ -1433,7 +1465,7 @@ app.whenReady().then(async () => {
     // agents must stay put away here — only a deliberate `las widget NAME`/
     // `las agent activate`, or the vortexia wake-enabled fallback, should
     // bring one back. See main.js's set_inactive/`agent:deactivate` comments.
-    const agents = await fetchAgents();
+    const agents = await fetchAgentsWhenRegistryUp();
     for (const name of Object.keys(agents).sort()) {
       if (!agents[name].inactive) openWidget(name);
     }

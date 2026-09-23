@@ -39,6 +39,28 @@ python3 -m venv "$VENV"
 # fixed there earlier; this was install.sh's own separate copy of it).
 "$VENV/bin/pip" install -q -r "$INSTALL_DIR/backend/requirements.txt"
 
+# ── 2b. Kokoro TTS model files ───────────────────────────────────────────────
+# The backend synthesizes every widget voice with Kokoro-82M (see
+# backend/main.py's TTS section). The model (~340MB) is gitignored, so a
+# fresh clone has no voices at all until these two files exist — this used
+# to be a manual curl documented only in a code comment. Idempotent: skips
+# files already present.
+echo "[ 2b/5] Fetching Kokoro TTS model (once, ~340MB)..."
+KOKORO_DIR="$INSTALL_DIR/backend/data/kokoro"
+KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+mkdir -p "$KOKORO_DIR"
+for f in kokoro-v1.0.onnx voices-v1.0.bin; do
+    if [ -s "$KOKORO_DIR/$f" ]; then
+        echo "         present: $f"
+    elif curl -fL --progress-bar -o "$KOKORO_DIR/$f.part" "$KOKORO_BASE/$f"; then
+        mv "$KOKORO_DIR/$f.part" "$KOKORO_DIR/$f"
+        echo "         downloaded: $f"
+    else
+        rm -f "$KOKORO_DIR/$f.part"
+        echo "         ⚠️  could not download $f — TTS will fail until it exists (see backend/main.py)"
+    fi
+done
+
 # ── 3. Install skills ─────────────────────────────────────────────────────────
 echo "[ 3/5 ] Installing skills..."
 for skill in local-agent-voice local-agent-pronunciation local-agent-widget; do

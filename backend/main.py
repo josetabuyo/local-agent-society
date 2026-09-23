@@ -114,16 +114,10 @@ SPEAK_TOPIC = "las/speak"
 
 
 def _vortexia_mqtt_port() -> int:
-    ports = load_json(PORTS_FILE, {})
-    candidates = [info for info in ports.values() if info.get("app") == "vortexia-mqtt"]
-    if not candidates:
-        return vx.DEFAULT_PORT
-    # Claims accumulate rather than get cleaned up on restart (see claim_port's
-    # supersede logic below, added after this could already be stale data) —
-    # picking the most recently registered one is the best defense against a
-    # dead entry from an old vortexia process shadowing the live one.
-    latest = max(candidates, key=lambda info: info.get("registered_at", ""))
-    return latest.get("port", vx.DEFAULT_PORT)
+    # Precedence lives in vortexia_client.resolve_mqtt_port (port file written
+    # by the live broker first, then our registry's latest claim, then 1883) —
+    # shared with `las agent listen` so both sides agree on where the broker is.
+    return vx.resolve_mqtt_port(load_json(PORTS_FILE, {}))
 
 
 def _vortexia_publish(topic: str, envelope: dict, retain: bool = False) -> bool:

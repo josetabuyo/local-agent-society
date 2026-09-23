@@ -3,7 +3,7 @@ name: local-agent-society
 description: Multi-agent society for Claude Code. Each project folder gets a named agent that shares a port registry, communicates via vortexia (a local MQTT broker), and announces via macOS TTS.
 version: 2.0.0
 author: josetabuyo
-requires: macOS, Swift 5.6+, Python 3.10+, Claude Code CLI
+requires: macOS, Python 3.10+, Node.js 18+, Claude Code CLI, iTerm2
 ---
 
 # Local Agent Society

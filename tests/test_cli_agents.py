@@ -157,6 +157,11 @@ def test_agent_listen_exits_cleanly_when_vortexia_unreachable(monkeypatch):
     reporting "no live delivery available" and moving on.
     """
     monkeypatch.setattr(agents_mod.api, "get", lambda path: {})  # no vortexia-mqtt entry
+    # ...and no live broker's vortexia.port.json either (on a dev machine the
+    # sibling ../vortexia checkout has one, and `listen` would rightly connect
+    # to it — see vortexia_client.resolve_mqtt_port).
+    import vortexia_client as vx
+    monkeypatch.setattr(vx, "default_port_file_candidates", lambda ports=None: [])
 
     runner = CliRunner()
     result = runner.invoke(agents_mod.listen, ["testagent"])

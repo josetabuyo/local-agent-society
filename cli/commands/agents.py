@@ -344,23 +344,21 @@ def listen(name):
     """
     name = resolve_agent_name(name)
     ports = api.get("/ports") or {}
-    # Pick the most recently registered vortexia-mqtt claim, not just the
-    # first one found — stale claims from a previous vortexia process can
-    # otherwise shadow the live one (see backend/main.py's _vortexia_mqtt_port).
-    candidates = [info for info in ports.values() if info.get("app") == "vortexia-mqtt"]
-    mqtt_port = None
-    if candidates:
-        mqtt_port = max(candidates, key=lambda info: info.get("registered_at", "")).get("port")
-    if mqtt_port is None:
-        click.echo("vortexia unreachable — is `vortexia start` running?", err=True)
-        sys.exit(1)
 
     # Reuse the backend's vendored vortexia client (topic naming, envelope
-    # shape) instead of duplicating that logic here.
+    # shape, broker port resolution) instead of duplicating that logic here.
     backend_dir = Path(__file__).resolve().parents[2] / "backend"
     sys.path.insert(0, str(backend_dir))
     import vortexia_client as vx  # noqa: E402  (path must be set first)
     import paho.mqtt.client as mqtt  # noqa: E402
+
+    # Same precedence as backend/main.py's _vortexia_mqtt_port: the live
+    # broker's vortexia.port.json beats the registry, whose claim can be
+    # stale after a reboot race (see resolve_mqtt_port's docstring).
+    mqtt_port = vx.resolve_mqtt_port(ports, default=None)
+    if mqtt_port is None:
+        click.echo("vortexia unreachable — is `vortexia start` running?", err=True)
+        sys.exit(1)
 
     topic = vx.inbox_topic(name)
     client = mqtt.Client(client_id=f"las-listen-{name}-{os.getpid()}", protocol=mqtt.MQTTv311)
@@ -402,7 +400,14 @@ def listen(name):
 
     client.on_connect = on_connect
     client.on_message = on_message
-    client.connect("localhost", mqtt_port, keepalive=30)
+    try:
+        client.connect("localhost", mqtt_port, keepalive=30)
+    except OSError as exc:
+        # A known port with nobody on it (broker died, stale port file) must
+        # still exit cleanly — this runs under Claude Code's Monitor tool,
+        # where a traceback or a hang would stall session start.
+        click.echo(f"vortexia unreachable on :{mqtt_port} ({exc}) — is `vortexia start` running?", err=True)
+        sys.exit(1)
     client.loop_forever()
 
 

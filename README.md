@@ -19,10 +19,19 @@ Every agent knows the rules. They never talk over each other. They never steal p
 
 ## Requirements
 
-- macOS (arm64)
-- Swift 5.6+
-- Python 3.10+
+- macOS (arm64; Intel builds untested)
+- Python 3.10+ (Homebrew), with `pipx` recommended for the `las` CLI
+- Node.js 18+ (Electron widget and the vortexia broker)
 - [Claude Code CLI](https://claude.ai/code)
+- iTerm2 (agent focus/inject fallbacks use its AppleScript API)
+- Network access on first install: `install.sh` clones the sibling
+  [vortexia](https://github.com/haciendo/vortexia) repo next to this one and
+  downloads the Kokoro TTS model (~340MB); the first mic dictation fetches
+  Whisper (~140MB)
+
+> **Status:** this is a developer checkout, not yet a double-click app. Everything
+> (launchd jobs, the `las` CLI, the widget `.app`, data and models) lives inside the
+> clone. See `docs/adr/0003-standalone-app-distribution.md` for the plan to change that.
 
 ---
 
@@ -34,7 +43,7 @@ cd local-agent-society
 ./install.sh
 ```
 
-This compiles the tray app, registers the LaunchAgent, starts the backend on port 8700, and installs the `las` CLI.
+This builds the Electron widget, installs Python deps, fetches the Kokoro TTS model, clones/updates vortexia next to this repo, registers both launchd jobs, and installs the `las` CLI.
 
 ---
 

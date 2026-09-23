@@ -23,8 +23,10 @@ Message envelope (JSON): {from, to, source, text, ts}
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
+from pathlib import Path
 from typing import Callable, Optional
 
 try:
@@ -37,6 +39,81 @@ except ImportError as exc:  # pragma: no cover
 
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 1883
+
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def resolve_mqtt_port(ports: Optional[dict] = None,
+                      port_file_candidates: Optional[list] = None,
+                      default: Optional[int] = DEFAULT_PORT) -> Optional[int]:
+    """Resolve the broker's current TCP MQTT port, mirroring vortexia's own
+    client.js precedence: vortexia.port.json -> port registry -> DEFAULT_PORT.
+
+    Why the port file comes first: vortexia claims its ports from the :8700
+    registry at startup, and falls back to 1883 when the registry isn't up
+    yet. On a cold boot both services are launchd jobs racing each other, so
+    the broker can easily end up on 1883 while the registry still holds a
+    stale claim (9014) from the previous run — every backend/CLI publish then
+    goes to a port nobody listens on and vortexia is "unreachable" even
+    though it's running fine (seen 2026-09-23). vortexia.port.json is written
+    by the live broker *after* it binds, with its pid, so it's the
+    authoritative answer whenever that pid is still alive.
+
+    `ports` is the registry's ports.json content; `port_file_candidates` is an
+    ordered list of paths to try for vortexia.port.json. Both default to what
+    this checkout can see (see default_port_file_candidates()). `default` is
+    returned when neither source knows a broker — pass None to be told that
+    instead of getting the 1883 guess (e.g. a command that must fail soft
+    rather than block on a connect to a port nobody listens on).
+    """
+    ports = ports or {}
+    if port_file_candidates is None:
+        port_file_candidates = default_port_file_candidates(ports)
+    for candidate in port_file_candidates:
+        try:
+            data = json.loads(Path(candidate).read_text())
+        except (OSError, ValueError):
+            continue
+        port = data.get("mqttPort")
+        pid = data.get("pid")
+        if port and (pid is None or _pid_alive(pid)):
+            return int(port)
+
+    claims = [info for info in ports.values() if info.get("app") == "vortexia-mqtt"]
+    if claims:
+        # Claims accumulate rather than get cleaned up on restart — the most
+        # recently registered one is the best guess among them.
+        latest = max(claims, key=lambda info: info.get("registered_at", ""))
+        if latest.get("port"):
+            return int(latest["port"])
+    return default
+
+
+def default_port_file_candidates(ports: Optional[dict] = None) -> list:
+    """Where a live vortexia's port.json might be, most specific first:
+    $VORTEXIA_DIR, the path recorded on its registry claim, then the sibling
+    checkout next to this repo (the layout install.sh creates)."""
+    dirs = []
+    env_dir = os.environ.get("VORTEXIA_DIR")
+    if env_dir:
+        dirs.append(Path(env_dir))
+    for info in (ports or {}).values():
+        if str(info.get("app", "")).startswith("vortexia") and info.get("path"):
+            dirs.append(Path(info["path"]))
+    dirs.append(Path(__file__).resolve().parents[2] / "vortexia")
+    seen, out = set(), []
+    for d in dirs:
+        f = d / "vortexia.port.json"
+        if f not in seen:
+            seen.add(f)
+            out.append(f)
+    return out
 
 
 def inbox_topic(name: str) -> str:
