@@ -143,7 +143,7 @@ Agents share resources and follow a civility contract:
 2. **Voice language** — each TTS voice has a fixed language; English voices speak English text, Spanish voices speak Spanish text — never mix them
 3. **Ports** — always reserved via `las ports claim` or `POST /ports/claim` before starting any server
 4. **Voices** — unique per agent; declared in `.las-agent.json` with a `locale` field (e.g. `en-US`, `es-MX`)
-5. **Messages** — sent via `las agent inject NAME "msg"` or `POST /agents/{name}/inject`, delivered over **vortexia** (a sibling MQTT broker, see `vortexia/PROTOCOL.md`) rather than terminal injection. Not retained — the recipient only receives it if their `/las-agent` skill happens to be polling their vortexia inbox at that moment (it does so once, at the start of each session, via `las agent poll`). No live terminal, no on-disk queue; retry or wait for them to start a session.
+5. **Messages** — sent via `las agent send --to NAME "msg"` (or `inject`, or `POST /agents/{name}/inject`), delivered over **vortexia** (a sibling MQTT broker, see `vortexia/PROTOCOL.md`) rather than terminal injection. Each agent has a broker-owned **mailbox** (MQTT persistent session): a message sent while the recipient has no session open is queued, in order, and drained by `las agent poll` at their next session start or live by `las agent listen`. No live terminal, no on-disk queue in LAS — the broker holds it.
 6. **Response language** — agents respond in the language of their TTS voice (`locale` field in `.las-agent.json`)
 
 ---

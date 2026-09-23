@@ -349,11 +349,13 @@ def register(name):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 @click.option("--timeout", default=2.0, type=float, help="Seconds to wait for pending inbox messages.")
 def poll(name, timeout):
-    """Drain this agent's vortexia inbox and print any pending messages.
+    """Drain this agent's mailbox and print everything that was queued.
 
-    Called by the /las-agent skill at the start of a session — replaces the
-    old live-TTY injection model, which didn't need polling because the
-    backend typed straight into an already-open terminal.
+    Called by the /las-agent skill at the start of a session. The broker
+    keeps a persistent mailbox per agent (vortexia/PROTOCOL.md "Mailboxes"):
+    every message sent while no session was open is waiting here, in order.
+    Prints "no pending messages" without draining when a live `las agent
+    listen` already holds the mailbox — that listener is the delivery path.
     """
     name = resolve_agent_name(name)
     result = api.get(f"/agents/{name}/vortexia/poll?timeout={timeout}")
@@ -385,9 +387,15 @@ def listen(name):
     session start so live delivery is standard behavior for every agent,
     not something improvised per-conversation).
 
-    Each message is consumed on receipt (its retained flag is cleared, same
-    as `las agent poll` does) — while `listen` is running, it IS the live
-    delivery path, so a later `poll` won't see the same message again.
+    It connects as the agent's MAILBOX consumer (client id las-agent-<name>,
+    persistent session — see vortexia/PROTOCOL.md "Mailboxes"): on connect
+    the broker hands over everything queued while nobody was listening, in
+    order, then live traffic; each message is consumed by being acknowledged
+    (QoS 1), nothing to clear. While `listen` runs it IS the delivery path —
+    `las agent poll` sees the session is held and stands down. Only one
+    consumer can hold the session: if another connection takes it over, this
+    process exits (exit 2) instead of reconnecting and fighting it. The
+    /las-agent skill's "purge before Monitor" step exists for exactly that.
 
     Mechanically (and silently — no TTS) answers the mic self-test sentinel
     (see widget.js's MIC_SELFTEST_PING and runMicSelfTest) the instant it
@@ -423,15 +431,30 @@ def listen(name):
         sys.exit(1)
 
     topic = vx.inbox_topic(name)
-    client = mqtt.Client(client_id=f"las-listen-{name}-{os.getpid()}", protocol=mqtt.MQTTv311)
+    # The mailbox consumer: fixed client id + persistent session. The broker
+    # restores the inbox subscription on reconnect (and creates it on the
+    # first publish to the inbox), so subscribe only when it reports no
+    # session present — re-subscribing would replay a retained message some
+    # pre-mailbox sender left on the topic.
+    client = mqtt.Client(client_id=vx.mailbox_client_id(name), clean_session=False, protocol=mqtt.MQTTv311)
 
     # Must match widget.js's MIC_SELFTEST_PING exactly — no shared module
     # between the JS renderer and this CLI, so this is a deliberate literal
     # duplication (same as the las-agent skill's own copy of this string).
     MIC_SELFTEST_PING = '[las-mic-selftest] reply with just "OK" to confirm this session is listening.'
 
-    def on_connect(c, userdata, flags, rc):
-        c.subscribe(topic, qos=1)
+    def on_connect(c, userdata, flags, rc, *_args):
+        if not vx._session_present(flags):
+            c.subscribe(topic, qos=1)
+
+    def on_disconnect(c, userdata, rc, *_args):
+        # rc != 0 is an unexpected drop: broker restart, or another client
+        # taking over this session (MQTT-3.1.4-2). Either way exit rather
+        # than auto-reconnect — a reconnecting listener vs. a takeover would
+        # kick each other forever, and the Monitor re-arms us on exit anyway.
+        if rc != 0:
+            click.echo(f"{name}: mailbox session lost (rc={rc}) — taken over by another listener, or broker restarted", err=True)
+            os._exit(2)
 
     def on_message(c, userdata, msg):
         try:
@@ -440,9 +463,8 @@ def listen(name):
             return
         click.echo(json.dumps(envelope))
         sys.stdout.flush()
-        # Consume: clear the retained flag so a later `poll` doesn't see
-        # this same message again — this listener IS the delivery.
-        c.publish(topic, payload=None, qos=1, retain=True)
+        # Consumed by the QoS 1 ack paho sends when this handler returns —
+        # no retained-flag clearing, the mailbox is a queue now.
         if envelope.get("text") == MIC_SELFTEST_PING:
             # Silent, direct MQTT pong — deliberately NOT /queue/speak. This
             # confirms only that the plumbing (mic -> vortexia -> a live
@@ -461,6 +483,7 @@ def listen(name):
             c.publish(topic, payload=json.dumps(pong), qos=1, retain=False)
 
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     try:
         client.connect("localhost", mqtt_port, keepalive=30)

@@ -300,10 +300,11 @@ def test_inject_publishes_envelope_to_vortexia(client, app_module, monkeypatch):
     assert envelope["source"] == "agent"
     assert envelope["text"] == "hello"
     assert "ts" in envelope
-    assert published["retain"] is True, (
-        "inject must publish retained — otherwise a message sent while the "
-        "recipient's session isn't polling right now is lost forever instead "
-        "of surviving until their next /las-agent session-start poll"
+    assert published["retain"] is False, (
+        "inject must NOT publish retained — the broker's per-agent mailbox "
+        "(persistent session, vortexia PROTOCOL.md 'Mailboxes') queues every "
+        "message for an offline recipient; a retained publish is the legacy "
+        "single-slot behaviour where the latest message overwrote the rest"
     )
 
 

@@ -261,3 +261,7 @@ def test_agent_listen_mechanically_and_silently_answers_the_mic_selftest_ping_wi
     assert envelope["to"] == "testagent"
     assert envelope["text"] == "OK"
     assert kwargs.get("retain") is False
+
+    # Mailbox model: the listener never clears a retained slot (an empty
+    # retained publish) — every publish it makes carries a real payload.
+    assert all(call["payload"] for call in created_clients[-1].published), created_clients[-1].published

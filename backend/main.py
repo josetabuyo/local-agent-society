@@ -123,14 +123,14 @@ def _vortexia_mqtt_port() -> int:
 def _vortexia_publish(topic: str, envelope: dict, retain: bool = False) -> bool:
     """Fire-and-forget publish of one envelope. Fails soft if vortexia is unreachable.
 
-    `retain=True` for inbox messages (see vortexia_client.py's VortexiaClient.send
-    for the full rationale): plain MQTT delivery only reaches subscribers connected
-    at that instant, which silently loses a message sent while nobody happened to be
-    listening — e.g. `las agent inject` firing while the recipient's Claude Code
-    session isn't running yet. Retained delivery means their next
-    GET /agents/{name}/vortexia/poll (via vortexia_client.poll_inbox, which clears
-    the retained flag once read) still finds it. Not used for the TTS speak topic —
-    a stale replayed "speak this" the moment a new widget connects would be wrong.
+    Inbox messages are plain QoS 1, NOT retained: the broker owns a persistent
+    session per agent (client id las-agent-<name>, see vortexia/PROTOCOL.md
+    "Mailboxes") and queues every publish while that agent's consumer isn't
+    connected — in order, one entry per message. Retaining was the previous
+    mechanism and kept only the latest message per recipient (a second inject
+    before the first was read overwrote it). `retain=True` is still accepted
+    for callers that knowingly want the legacy single-slot behaviour; nothing
+    in this backend uses it for inbox traffic anymore.
     """
     try:
         import paho.mqtt.publish as _mqtt_publish
@@ -169,7 +169,12 @@ def _vortexia_set_presence_online(name: str) -> bool:
 
 
 def _vortexia_poll_inbox(name: str, timeout: float = 2.0) -> list[dict]:
-    """Drain whatever's waiting in `name`'s vortexia inbox. Fails soft (returns [])."""
+    """Drain whatever's waiting in `name`'s mailbox. Fails soft (returns []).
+
+    Connects as the mailbox consumer (las-agent-<name>, persistent session)
+    just long enough to receive the queued backlog. Stands down with [] when
+    a live `las agent listen` already holds that session — it IS the delivery
+    path while it runs, and taking the session over would kick it."""
     try:
         return vx.poll_inbox(name, host="localhost", port=_vortexia_mqtt_port(), timeout=timeout)
     except Exception as exc:
@@ -1031,7 +1036,9 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
     registry = load_json(REGISTRY_FILE, {})
     if "@" not in to and to in registry:
         envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts}
-        delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=True)
+        # Not retained: the broker's mailbox for `to` queues it if nobody is
+        # connected as its consumer (see _vortexia_publish).
+        delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=False)
 
         # ── structured inject log (local delivery only — a vortex-relayed `to`
         # has no local registry entry, so no session/ dir to log into) ──
@@ -1098,10 +1105,10 @@ def vortexia_register(name: str):
 
 @app.get("/agents/{name}/vortexia/poll")
 def vortexia_poll(name: str, timeout: float = 2.0):
-    """Drain `name`'s vortexia inbox for up to `timeout` seconds and return
-    whatever arrived. Called by the /las-agent skill at session start, replacing
-    the old live-TTY-injection model (which needed no polling because the
-    backend typed straight into an already-open terminal)."""
+    """Drain `name`'s mailbox for up to `timeout` seconds and return whatever
+    was queued. Called by the /las-agent skill at session start. Returns
+    count 0 without draining when a live `las agent listen` holds the mailbox
+    session (see _vortexia_poll_inbox)."""
     registry = load_json(REGISTRY_FILE, {})
     if name not in registry:
         raise HTTPException(status_code=404, detail="Agent not found")

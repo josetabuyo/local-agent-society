@@ -6,10 +6,9 @@ Tests for POST /agents/{name}/inject and the vortexia messaging path
 Inject used to type directly into a disposable iTerm2/AppleScript probe
 terminal — that mechanism is gone. Delivery is now 100% vortexia (a
 sibling MQTT broker, see ../vortexia/PROTOCOL.md): /inject publishes an
-envelope to las/agent/<name>/inbox, and a receiver only sees it if
-something is polling that inbox at the time (vortexia doesn't retain
-inbox/broadcast messages — same semantics as vortexia's own poll_inbox()
-helper).
+envelope to las/agent/<name>/inbox, where the broker's per-agent mailbox
+(MQTT persistent session, vortexia PROTOCOL.md "Mailboxes") queues it until
+the receiver's poll_inbox()/listen consumes it.
 
 These tests run against the real, live backend at localhost:8700 and
 (for the delivery test) the real vortexia broker it talks to — nothing is

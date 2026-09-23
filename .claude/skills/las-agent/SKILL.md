@@ -59,7 +59,7 @@ Monitor({
 })
 ```
 
-`las agent listen` stays connected to vortexia and emits one JSON line per message as soon as it arrives — each line generates a Monitor notification in this session. It consumes the message on receipt (clears the retained flag), so while the listener is active, live delivery replaces polling — a later `las agent poll` won't see the same message again.
+`las agent listen` stays connected to vortexia and emits one JSON line per message as soon as it arrives — each line generates a Monitor notification in this session. It holds the agent's mailbox session (client id `las-agent-<name>`, persistent — see `vortexia/PROTOCOL.md` "Mailboxes"), so on connect it first prints everything queued while nobody was listening, then live traffic; each message is consumed by the QoS 1 ack, nothing to clear. While it runs it IS the delivery path — `las agent poll` sees the session is held and stands down. Only one consumer can hold the session: a second `listen` for the same agent takes it over and the first exits (exit 2) — hence the purge step below.
 
 If `Monitor` isn't available in this environment, don't block session startup on this — proceed with just the initial poll and tell the user live delivery isn't active this session.
 
@@ -187,7 +187,7 @@ las agent focus <AgentName>
 las status
 ```
 
-Delivery is retained (see §"Presence registration and pending messages" above): a message sent while the recipient isn't polling still survives for their next `poll` or `listen`. It's a single-slot mailbox, not a queue — only the most recent unread message per agent is kept, so a second inject before the first is read overwrites it.
+Delivery is queued: every agent has a broker-owned mailbox (MQTT persistent session, `vortexia/PROTOCOL.md` "Mailboxes"). A message sent while the recipient has no session open waits there, in order, one entry per message — nothing overwrites anything (cap 500, TTL 30 days, survives a broker restart). They get it at their next `poll` or `listen`.
 
 ### Hitting a bug in Local Agent Society itself — fix it, don't just wait for someone else
 
