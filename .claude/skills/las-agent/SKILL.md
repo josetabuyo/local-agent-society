@@ -249,6 +249,35 @@ message round-tripped byte-exact through vortexia and `las agent listen`'s
 raw stdout); don't burn time chasing a payload-size bug in this codebase
 before ruling that out first.
 
+### Hierarchy — subordinates are read from the folders, never declared
+
+A folder that holds several git repos (a client workspace, a monorepo of
+sibling services) gets one agent for the container and one per repo. Nothing
+in `.las-agent.json` says who reports to whom: an agent whose folder sits
+under another agent's folder *is* its subordinate, computed from the
+registered paths every time it's asked (`cli/hierarchy.py`,
+`GET /agents/{name}/hierarchy`). Move the folder and the hierarchy follows.
+
+Only git repositories get a subordinate agent — a vault's note folders or
+asset directories under the same parent are not agents.
+
+```bash
+# From the parent agent's folder: one subordinate per git repo
+las agent new relay-ros --dir relay-ros --voice Paulina
+
+las agent children [Parent] [--deep]   # who reports to Parent (direct, or whole subtree)
+las agent parent [Child]               # who Child reports to
+las agents --tree                      # whole registry as a tree
+
+# Talk to every subordinate at once — one vortexia inbox delivery each
+las agent send --to Parent --children "<message>" --from Parent [--deep]
+```
+
+A session opened inside a subordinate's folder is that subordinate (the
+nearest config upward wins); a session in a non-repo folder under the parent
+(notes, docs) is the parent. Give subordinates the parent's voice so the
+name in the widget/inbox is what tells them apart, not the voice.
+
 ### Known issues
 
 **Rosetta / Node x86_64** — Pulpo and NeuroFlow have `node_modules` installed with Intel Node (`~/.nvm/versions/node/v20.20.2` is x86_64). `@esbuild/darwin-x64` runs under Rosetta. Pending fix:

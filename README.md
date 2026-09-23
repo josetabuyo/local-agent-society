@@ -82,6 +82,10 @@ las agent rename [OLD] NEW [--pronunciation P]  # rename in backend + update .la
 las agent focus [NAME]                  # bring the agent's iTerm2 window to the front
 las agent inject NAME "msg"             # send message to another agent's terminal
 las agent inject NAME "msg" --from Me   # with sender label
+las agent send --to PARENT --children "msg" [--deep]  # fan out to every subordinate (folder-derived hierarchy)
+las agent children [NAME] [--deep]      # list subordinates: agents whose folder sits under this one's
+las agent parent [NAME]                 # which agent this one reports to (nearest ancestor folder)
+las agents --tree                       # registry rendered as the folder hierarchy
 las agent clean [NAME]                  # inject /clear into agent terminal
 las agent mute [NAME]                   # silence an agent's TTS
 las agent unmute [NAME]                 # re-enable TTS

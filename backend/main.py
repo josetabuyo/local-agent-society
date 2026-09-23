@@ -433,6 +433,32 @@ def unregister_agent(name: str):
     return {"ok": True}
 
 
+@app.get("/agents/{name}/hierarchy")
+def agent_hierarchy(name: str, deep: bool = False):
+    """Parent and subordinates of `name`, derived purely from registered paths.
+
+    The folders are the source of truth: an agent registered under another
+    agent's path is its subordinate. Nothing is declared in .las-agent.json
+    (see cli/hierarchy.py). `deep=true` lists every descendant instead of
+    only direct children."""
+    from cli.hierarchy import children_of, parent_of
+    with _registry_lock:
+        registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    children = children_of(name, registry, deep=deep)
+    return {
+        "name": name,
+        "path": registry[name].get("path"),
+        "parent": parent_of(name, registry),
+        "children": [
+            {"name": c, "path": registry[c].get("path"), "voice": registry[c].get("voice")}
+            for c in children
+        ],
+        "deep": deep,
+    }
+
+
 @app.patch("/agents/{name}")
 def rename_agent(name: str, body: RenameRequest):
     with _registry_lock:

@@ -11,6 +11,7 @@ from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
 from cli.commands._agent_common import infer_locale, resolve_agent_name
 from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
+from cli.hierarchy import tree_lines
 
 
 @click.group()
@@ -28,11 +29,16 @@ def agent():
 @click.command("agents")
 @click.option("--inactive", "inactive_only", is_flag=True, help="Show only inactive (put-away) agents.")
 @click.option("--active", "active_only", is_flag=True, help="Show only active agents (default: shows all).")
-def agents_list(inactive_only, active_only):
+@click.option("--tree", "as_tree", is_flag=True, help="Render the folder-derived hierarchy (parents above their subordinates).")
+def agents_list(inactive_only, active_only, as_tree):
     """List all registered agents."""
     data = api.get("/agents")
     if not data:
         click.echo("No agents registered.")
+        return
+    if as_tree:
+        for line in tree_lines(data, marker=lambda n, i: "  (inactive)" if i.get("inactive") else ""):
+            click.echo(line)
         return
     if inactive_only:
         data = {n: i for n, i in data.items() if i.get("inactive")}
@@ -230,7 +236,10 @@ def inject(name, message, from_agent):
 @click.option("--to", default=None, help="Exact agent name, optionally \"Name@env\" for a specific environment (cross-machine)")
 @click.option("--scope", default=None, help="Free-text scope/intent instead of an exact name — broadcasts to whoever matches, possibly more than one agent")
 @click.option("--from", "from_agent", default=None, help="Sender name shown to the recipient(s)")
-def send(message, to, scope, from_agent):
+@click.option("--children", "to_children", is_flag=True,
+              help="Deliver to every subordinate of --to (agents whose folder sits under its folder) instead of to --to itself")
+@click.option("--deep", is_flag=True, help="With --children: the whole subtree, not only direct subordinates")
+def send(message, to, scope, from_agent, to_children, deep):
     """Generic send: point-to-point (--to) or scope broadcast (--scope), local or cross-machine.
 
     Replaces `inject`'s exact-name-only, single-machine model with one
@@ -241,16 +250,40 @@ def send(message, to, scope, from_agent):
       las agent send --to System "..."            # local, or vortex-relayed if not found locally
       las agent send --to "System@uy-mac" "..."    # explicit, disambiguates a name collision
       las agent send --scope "facturacion, pagos" "..."   # broadcast; 0, 1, or several may reply
+      las agent send --to RelayRobotics --children "..."  # every subordinate of RelayRobotics (see `las agent children`)
 
     `inject` still works unchanged for existing scripts/skills — this is
     the new generic entry point going forward, not a replacement in place.
     """
     if bool(to) == bool(scope):
         raise click.UsageError("exactly one of --to or --scope is required")
+    if (to_children or deep) and not to:
+        raise click.UsageError("--children/--deep need --to <ParentAgent>")
 
     payload = {"message": message, "source": "agent" if from_agent else "external"}
     if from_agent:
         payload["from_agent"] = from_agent
+
+    if to_children:
+        # Hierarchy is folder-derived (cli/hierarchy.py) — ask the backend,
+        # which owns the registry, then fan out one point-to-point send per
+        # subordinate so each one lands in its own vortexia inbox.
+        info = api.get(f"/agents/{quote(to, safe='')}/hierarchy?deep={'true' if deep else 'false'}")
+        targets = [c["name"] for c in info.get("children", [])]
+        if not targets:
+            click.echo(f"{to}: no subordinates" + (" (try --deep)" if not deep else ""))
+            return
+        failures = 0
+        for target in targets:
+            result = api.post("/agents/send", {**payload, "to": target})
+            ok = result.get("injected", False)
+            failures += 0 if ok else 1
+            click.echo(f"{target}: {'sent via vortexia' if ok else 'not delivered'}")
+        click.echo(f"{to}: {len(targets) - failures}/{len(targets)} subordinates reached")
+        if failures:
+            raise SystemExit(1)
+        return
+
     if to:
         payload["to"] = to
     else:
@@ -266,6 +299,35 @@ def send(message, to, scope, from_agent):
     else:
         status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
     click.echo(f"{target}: {status}")
+
+
+@agent.command("children")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+@click.option("--deep", is_flag=True, help="Whole subtree, not only direct subordinates")
+def children(name, deep):
+    """List the subordinates of an agent (default: the agent in the cwd).
+
+    Hierarchy is read from the folders, never declared: any registered agent
+    whose path sits under this agent's path is a subordinate. Create one with
+    `las agent new NAME --dir <repo>` from inside the parent's folder.
+    """
+    name = resolve_agent_name(name)
+    info = api.get(f"/agents/{quote(name, safe='')}/hierarchy?deep={'true' if deep else 'false'}")
+    kids = info.get("children", [])
+    if not kids:
+        click.echo(f"{name}: no subordinates" + ("" if deep else " (try --deep)"))
+        return
+    for c in kids:
+        click.echo(f"{c['name']:<20} {c.get('voice') or '?':<25} {c.get('path', '?')}")
+
+
+@agent.command("parent")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def parent(name):
+    """Print the agent this one reports to (nearest registered ancestor folder), if any."""
+    name = resolve_agent_name(name)
+    info = api.get(f"/agents/{quote(name, safe='')}/hierarchy")
+    click.echo(info.get("parent") or f"{name}: top-level (no parent agent)")
 
 
 @agent.command("register")
