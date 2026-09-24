@@ -30,15 +30,14 @@ Report: "Widget reopened on this Space."
 |--------|-----|------|
 | ⚙ Gear | Expand/collapse config panel | — |
 | ⊙ Scope | Focus agent terminal | Drop on any terminal to link it via `las link` |
-| ⊞ Terminal | Open command palette | — |
+| ⧉ Open | Run the default open action (terminal window at the agent's folder, out of the box) | Long-press / right-click: pick Terminal or Folder, ▲ ▼ to reorder (top = default) |
 | 🎤 Mic | Toggle voice input | Long-press: change language |
 | 🔊 Speaker | Mute/unmute TTS | Long-press: speaker options |
 
 ### Linking a terminal (scope drag)
 Drag the ⊙ scope button onto any open terminal. The widget pastes `las link --agent NAME` and presses Enter. The widget flashes green when linked. The linked TTY receives all voice and text injections.
 
-### Command palette (terminal button)
-- **Open terminal** items (⊠ icon): launch a new iTerm2 window with a Claude model.
-- **Inject command** items: insert text into the linked session (e.g. `/clear`).
-- Right side of each row: ▲ ▼ to reorder, ✏ to edit/delete.
-- `+ Add command` at the bottom to create new entries.
+### Open button (replaced the command palette)
+- **Terminal**: a new window of the default terminal (Ghostty on this machine, else iTerm2, else Terminal.app) with its shell in the agent's folder — the one holding `.las-agent.json`, as registered on the backend.
+- **Folder**: that folder in Finder.
+- Click = the top action. Hold or right-click = the menu; ▲ ▼ reorder, and the order is saved per agent.

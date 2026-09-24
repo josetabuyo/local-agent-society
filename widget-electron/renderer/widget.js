@@ -230,7 +230,7 @@ function relativeLuminance(hex) {
  * --widget-bg (a placeholder green) and only switches to the real color
  * once that IPC call returns, which reads as a startup flash/glitch.
  *
- * Set on the root, not widgetEl: #settings/#commands/#commandEdit/
+ * Set on the root, not widgetEl: #settings/#openMenu/
  * #ttyPicker are siblings of #widget in the DOM (not descendants), so a
  * CSS custom property set on widgetEl's own inline style wouldn't inherit
  * into them — :root is the shared ancestor all of them do inherit from.
@@ -730,7 +730,8 @@ window.addEventListener('mouseup', () => {
 //
 // Restores the buttons the retired Swift widget (widget/tray.swift) had on
 // its compact face: speaker (mute toggle), mic (dictation), clear (log),
-// terminal (command palette), focus/scope (focus + link a TTY). The gear
+// open (terminal window / folder at the agent's path — it replaced the
+// command palette), focus/scope (focus + link a TTY). The gear
 // button/settings panel above are untouched — this section is purely
 // additive.
 
@@ -1218,142 +1219,158 @@ closeTtyPickerEl.addEventListener('click', () => {
   window.las.setExpanded(false);
 });
 
-// -- terminal: command palette ------------------------------------------------
+// -- open: a NEW terminal window, or the folder, at this agent's path -------
+//
+// Replaces the retired command palette (saved-command list + edit form).
+// Two actions only, both anchored on the agent's registered directory —
+// main.js's agent:open resolves it from the backend registry, nothing is
+// typed in here:
+//   terminal — a new window of the default terminal, shell in that folder
+//   folder   — that folder in the file manager
+// A plain click runs the DEFAULT action: whichever is first in
+// prefs.openOrder. Press-and-hold (or right-click) shows a small inline
+// menu listing both, in order; each row runs its action, and ▲/▼ move it —
+// the top row is the default, persisted per agent like any other pref.
 
-const terminalEl = document.getElementById('terminal');
-const commandsEl = document.getElementById('commands');
-const commandsListEl = document.getElementById('commandsList');
-const commandsAddEl = document.getElementById('commandsAdd');
-const closeCommandsEl = document.getElementById('closeCommands');
+const openEl = document.getElementById('open');
+const openMenuEl = document.getElementById('openMenu');
+const OPEN_ACTION_LABELS = { terminal: 'Terminal', folder: 'Folder' };
+const DEFAULT_OPEN_ORDER = ['terminal', 'folder'];
+const OPEN_LONG_PRESS_MS = 600;
 
-const commandEditEl = document.getElementById('commandEdit');
-const cmdLabelEl = document.getElementById('cmdLabel');
-const cmdKindEl = document.getElementById('cmdKind');
-const cmdCwdRowEl = document.getElementById('cmdCwdRow');
-const cmdCommandRowEl = document.getElementById('cmdCommandRow');
-const cmdTextRowEl = document.getElementById('cmdTextRow');
-const cmdCwdEl = document.getElementById('cmdCwd');
-const cmdCommandEl = document.getElementById('cmdCommand');
-const cmdTextEl = document.getElementById('cmdText');
-const cmdSaveEl = document.getElementById('cmdSave');
-const cmdCancelEl = document.getElementById('cmdCancel');
-
-let editingIndex = null; // null => adding a new command
-
-terminalEl.addEventListener('click', async () => {
-  if (!commandsEl.classList.contains('hidden')) {
-    commandsEl.classList.add('hidden');
-    window.las.setExpanded(false);
-    return;
+/** prefs.openOrder, sanitized: unknown entries dropped, duplicates collapsed,
+ * missing actions appended in default order — so a stale/garbled pref can
+ * never hide an action or leave the click with nothing to run. */
+function currentOpenOrder() {
+  const saved = Array.isArray(prefs.openOrder) ? prefs.openOrder : [];
+  const order = saved.filter((action, i) => DEFAULT_OPEN_ORDER.includes(action) && saved.indexOf(action) === i);
+  for (const action of DEFAULT_OPEN_ORDER) {
+    if (!order.includes(action)) order.push(action);
   }
-  await renderCommandsList();
-  commandsEl.classList.remove('hidden');
-  window.las.setExpanded(true);
-});
+  return order;
+}
 
-closeCommandsEl.addEventListener('click', () => {
-  commandsEl.classList.add('hidden');
-  window.las.setExpanded(false);
-});
+let openMenuOpen = false;
+let openLongPressTimer = null;
+let openLongPressFired = false;
+let openTerminalAppName = '';
 
-async function renderCommandsList() {
-  const commands = await window.las.getCommands(agentName);
-  commandsListEl.innerHTML = '';
-  if (!commands.length) {
-    commandsListEl.innerHTML = '<div class="command-row">No saved commands yet.</div>';
+async function runOpenAction(action) {
+  closeOpenMenu();
+  try {
+    const result = await window.las.openAgent(agentName, action);
+    if (!result || !result.ok) console.warn(`[widget] open ${action} failed:`, result);
+  } catch (err) {
+    console.warn(`[widget] open ${action} failed:`, err);
   }
-  commands.forEach((cmd, index) => {
+}
+
+function closeOpenMenu() {
+  openMenuOpen = false;
+  openMenuEl.classList.add('hidden');
+  openEl.classList.remove('active');
+}
+
+async function showOpenMenu() {
+  openMenuOpen = true;
+  openEl.classList.add('active');
+  if (!openTerminalAppName) {
+    try {
+      openTerminalAppName = (await window.las.getDefaultTerminalApp()) || '';
+    } catch {
+      openTerminalAppName = '';
+    }
+  }
+  renderOpenMenu();
+  openMenuEl.classList.remove('hidden');
+}
+
+function renderOpenMenu() {
+  const order = currentOpenOrder();
+  openMenuEl.innerHTML = '';
+  order.forEach((action, index) => {
     const row = document.createElement('div');
-    row.className = 'command-row';
+    row.className = 'open-row' + (index === 0 ? ' default' : '');
 
-    const kindTag = document.createElement('span');
-    kindTag.className = 'command-kind';
-    kindTag.textContent = cmd.kind === 'sendMessage' ? 'MSG' : 'TERM';
-    row.appendChild(kindTag);
-
-    const label = document.createElement('span');
-    label.className = 'command-label';
-    label.textContent = cmd.label || '(untitled)';
-    label.title = 'Run';
-    label.addEventListener('click', () => runCommand(cmd));
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'open-label';
+    label.textContent = OPEN_ACTION_LABELS[action] + (action === 'terminal' && openTerminalAppName ? ` · ${openTerminalAppName}` : '');
+    label.title = index === 0 ? 'Default — what a plain click runs' : 'Run';
+    label.addEventListener('click', () => runOpenAction(action));
     row.appendChild(label);
 
-    const editBtn = document.createElement('button');
-    editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', () => openCommandEdit(cmd, index));
-    row.appendChild(editBtn);
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'open-move';
+    up.textContent = '▲';
+    up.title = 'Move up (top = default)';
+    up.disabled = index === 0;
+    up.addEventListener('click', () => moveOpenAction(index, index - 1));
+    row.appendChild(up);
 
-    const delBtn = document.createElement('button');
-    delBtn.textContent = 'Delete';
-    delBtn.addEventListener('click', async () => {
-      const next = commands.slice();
-      next.splice(index, 1);
-      await window.las.setCommands(agentName, next);
-      await renderCommandsList();
-    });
-    row.appendChild(delBtn);
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'open-move';
+    down.textContent = '▼';
+    down.title = 'Move down';
+    down.disabled = index === order.length - 1;
+    down.addEventListener('click', () => moveOpenAction(index, index + 1));
+    row.appendChild(down);
 
-    commandsListEl.appendChild(row);
+    openMenuEl.appendChild(row);
   });
 }
 
-function runCommand(cmd) {
-  commandsEl.classList.add('hidden');
-  window.las.setExpanded(false);
-  if (cmd.kind === 'sendMessage') {
-    window.las.vortexiaSend(agentName, cmd.text || '');
-  } else {
-    window.las.openTerminal(cmd.cwd || '', cmd.command || '');
+async function moveOpenAction(from, to) {
+  const order = currentOpenOrder();
+  if (to < 0 || to >= order.length || from === to) return;
+  const [item] = order.splice(from, 1);
+  order.splice(to, 0, item);
+  await persist({ openOrder: order });
+  renderOpenMenu();
+}
+
+function cancelOpenLongPress() {
+  if (openLongPressTimer) clearTimeout(openLongPressTimer);
+  openLongPressTimer = null;
+}
+
+openEl.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  openLongPressFired = false;
+  cancelOpenLongPress();
+  openLongPressTimer = setTimeout(() => {
+    openLongPressTimer = null;
+    openLongPressFired = true;
+    showOpenMenu();
+  }, OPEN_LONG_PRESS_MS);
+});
+openEl.addEventListener('mouseup', cancelOpenLongPress);
+openEl.addEventListener('mouseleave', cancelOpenLongPress);
+
+openEl.addEventListener('click', () => {
+  if (openLongPressFired) {
+    // The hold already opened the menu; this is the release of that press.
+    openLongPressFired = false;
+    return;
   }
-}
-
-function updateCommandEditRows() {
-  const isTerminal = cmdKindEl.value === 'openTerminal';
-  cmdCwdRowEl.style.display = isTerminal ? 'flex' : 'none';
-  cmdCommandRowEl.style.display = isTerminal ? 'flex' : 'none';
-  cmdTextRowEl.style.display = isTerminal ? 'none' : 'flex';
-}
-
-cmdKindEl.addEventListener('change', updateCommandEditRows);
-
-function openCommandEdit(cmd, index) {
-  editingIndex = typeof index === 'number' ? index : null;
-  cmdLabelEl.value = cmd ? cmd.label || '' : '';
-  cmdKindEl.value = cmd ? cmd.kind : 'openTerminal';
-  cmdCwdEl.value = cmd ? cmd.cwd || '' : '';
-  cmdCommandEl.value = cmd ? cmd.command || '' : '';
-  cmdTextEl.value = cmd ? cmd.text || '' : '';
-  updateCommandEditRows();
-  commandsEl.classList.add('hidden');
-  commandEditEl.classList.remove('hidden');
-}
-
-commandsAddEl.addEventListener('click', () => openCommandEdit(null, null));
-cmdCancelEl.addEventListener('click', () => {
-  commandEditEl.classList.add('hidden');
-  commandsEl.classList.remove('hidden');
+  if (openMenuOpen) {
+    closeOpenMenu();
+    return;
+  }
+  runOpenAction(currentOpenOrder()[0]);
 });
 
-cmdSaveEl.addEventListener('click', async () => {
-  const kind = cmdKindEl.value === 'sendMessage' ? 'sendMessage' : 'openTerminal';
-  const label = cmdLabelEl.value.trim() || (kind === 'sendMessage' ? (cmdTextEl.value.trim() || 'message') : (cmdCommandEl.value.trim() || 'terminal'));
-  const entry = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    label,
-    kind,
-    cwd: cmdCwdEl.value.trim(),
-    command: cmdCommandEl.value.trim(),
-    text: cmdTextEl.value.trim(),
-  };
-  const commands = await window.las.getCommands(agentName);
-  if (editingIndex === null) {
-    commands.push(entry);
-  } else {
-    entry.id = commands[editingIndex].id;
-    commands[editingIndex] = entry;
-  }
-  await window.las.setCommands(agentName, commands);
-  commandEditEl.classList.add('hidden');
-  commandsEl.classList.remove('hidden');
-  await renderCommandsList();
+openEl.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (openMenuOpen) closeOpenMenu();
+  else showOpenMenu();
+});
+
+// Click anywhere else dismisses the menu.
+document.addEventListener('mousedown', (e) => {
+  if (!openMenuOpen) return;
+  if (openMenuEl.contains(e.target) || openEl.contains(e.target)) return;
+  closeOpenMenu();
 });

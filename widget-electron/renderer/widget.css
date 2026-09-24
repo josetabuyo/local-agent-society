@@ -470,8 +470,9 @@ html, body {
   100% { opacity: 0; transform: translate(-50%, -28px) scale(0.9); }
 }
 
-/* Command palette: list of saved commands + an edit form, reusing the
- * full-overlay .settings look for visual consistency with the gear panel. */
+/* TTY picker rows (the class names date from the retired command palette,
+ * which used the same list look), reusing the full-overlay .settings look
+ * for visual consistency with the gear panel. */
 .commands-list {
   flex: 1;
   overflow-y: auto;
@@ -515,6 +516,96 @@ html, body {
   flex: 1;
 }
 
+/* "Open" button press-and-hold menu: a small popover pinned above the
+ * button bar's right end (fixed = window coords; the window IS the widget),
+ * NOT a full-window overlay like the TTY picker, so no expand round-trip.
+ * Top row is the default click action; ▲/▼ reorder and persist. Same fill
+ * and ink as .settings so it reads as part of the widget. */
+.open-menu {
+  position: fixed;
+  right: 16px;
+  bottom: 46px;
+  min-width: 160px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--widget-bg, rgba(144, 192, 96, 0.72));
+  border: 1.5px solid rgba(20, 20, 20, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  color: #141414;
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+  z-index: 5;
+}
+
+.open-menu.hidden {
+  display: none;
+}
+
+.open-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+}
+
+.open-row + .open-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.open-row .open-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.open-row .open-label:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.open-row.default .open-label {
+  font-weight: 700;
+}
+
+.open-row.default .open-label::after {
+  content: ' · default';
+  font-weight: 400;
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.open-row .open-move {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid rgba(20, 20, 20, 0.35);
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+
+.open-row .open-move:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.open-row .open-move:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 
 .settings {
   position: fixed;
@@ -538,7 +629,7 @@ html, body {
   display: none;
 }
 
-/* The gear panel only — NOT #commands/#commandEdit/#ttyPicker, which stay
+/* The gear panel only — NOT #ttyPicker, which stays
  * full-screen overlays. Normal flow inside #widget, below the buttonbar, so
  * the real name/log above it stay visible (see setSettingsOpen in
  * widget.js) instead of being covered by a full-window opaque panel. */

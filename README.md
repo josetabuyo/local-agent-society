@@ -204,18 +204,28 @@ button top-right, and a row of face buttons at the bottom:
 | 🚪 Door (top-right, next to the name) | Deactivate: mark inactive, close this widget (session untouched) — see `las agent deactivate` |
 | ⚙ Gear | Toggle settings mode inline (name/log stay visible above it; every other face button hides; gear shows "pressed" while open) |
 | 🧹 Clear | Type `/clear` into the linked terminal(s) |
-| `>_` Terminal | Toggle the command palette |
+| ⧉ Open | Open a new terminal window (or the folder) at the agent's path — click runs the default, hold/right-click picks and reorders |
 | 🔊 Speaker | Toggle mute |
 | 🎙 Mic | Toggle dictation (click to start/stop; local Whisper transcription) |
 | ⌦ Focus | Focus the linked terminal (right-click, or long-press, to link a new TTY) |
 
-## Command palette
+## Open button
 
-Click the terminal button (`>_`) to open the **command palette**. Each saved
-command is either `openTerminal` (opens iTerm2 at a directory, optionally
-running a shell command) or `sendMessage` (sends text to the agent's own
-vortexia inbox — the dictation pipeline's send primitive). Edit or delete a
-row inline; `+ Add command` creates a new one.
+The ⧉ button (it replaced the command palette) has two actions, both anchored
+on the agent's registered directory — the folder holding its
+`.las-agent.json`, as the backend registry reports it:
+
+- **Terminal** — a *new window* of the default terminal with its shell started
+  in that folder. On macOS the widget prefers Ghostty (via its scripting
+  dictionary, so it's a window, not a tab in whatever you were typing in), then
+  iTerm2, then Terminal.app; `LAS_TERMINAL_APP` overrides that. The window
+  lands on the Space you pressed the button from.
+- **Folder** — that folder in Finder.
+
+A plain click runs the **default** (the top one). Press-and-hold or
+right-click shows both, in order: click a row to run it, ▲/▼ to reorder. The
+order persists per agent (`openOrder` pref); out of the box it's Terminal,
+then Folder.
 
 ## Widget settings
 

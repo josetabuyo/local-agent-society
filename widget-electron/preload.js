@@ -44,11 +44,11 @@ contextBridge.exposeInMainWorld('las', {
   /** Grow/shrink this window by (dw, dh) pixels — see .resize-handle in widget.css. */
   resizeBy: (dw, dh) => ipcRenderer.send('window:resize-by', dw, dh),
 
-  /** Grow the window to fit an overlay panel (settings/commands/TTY picker),
+  /** Grow the window to fit an overlay panel (settings/TTY picker),
    * or shrink it back to its remembered compact size. Idempotent.
    * `height` optionally overrides the default expanded height — the settings
    * panel is short and fixed (no scrolling list), so it asks for a smaller
-   * height than the commands/TTY-picker panels' default. */
+   * height than the TTY-picker panel's default. */
   setExpanded: (expanded, height) => ipcRenderer.send('window:set-expanded', expanded, height),
 
   /** "Expand when hidden" (retired Swift "Expand on space change"): balloon
@@ -100,12 +100,13 @@ contextBridge.exposeInMainWorld('las', {
     ipcRenderer.on('audio:status', (_event, status) => cb(status));
   },
 
-  /** Command-palette persistence (electron-store, per agent). */
-  getCommands: (name) => ipcRenderer.invoke('commands:get', name),
-  setCommands: (name, commands) => ipcRenderer.invoke('commands:set', name, commands),
-
-  /** Open a real terminal window (kind "openTerminal" commands). Fire-and-forget. */
-  openTerminal: (cwd, command) => ipcRenderer.send('terminal:open', { cwd, command }),
+  /** "Open" button: a NEW window of the default terminal ('terminal'), or
+   * the file manager ('folder'), at this agent's registered directory —
+   * main.js resolves the path from the backend registry. Resolves to
+   * {ok, action, path, app?} or {ok:false, error}. */
+  openAgent: (name, action) => ipcRenderer.invoke('agent:open', name, action),
+  /** Name of the terminal app the 'terminal' open action launches (menu label). */
+  getDefaultTerminalApp: () => ipcRenderer.invoke('terminal:default-app'),
 
   /** Focus/scope button: proxied backend calls (still AppleScript-based on
    * the backend side, untouched — see CLAUDE.md). */

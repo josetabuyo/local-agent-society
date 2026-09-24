@@ -41,6 +41,14 @@ function extractFunctionBody(src, needle) {
   throw new Error(`unbalanced braces after "${needle}"`);
 }
 
+/** Like extractFunctionBody, but returns the whole `function ...() {...}` text. */
+function extractFunction(src, needle) {
+  const start = src.indexOf(needle);
+  assert.notEqual(start, -1, `could not find "${needle}"`);
+  const body = extractFunctionBody(src, needle);
+  return src.slice(start, src.indexOf(body, start) + body.length);
+}
+
 // ── single-instance lock ────────────────────────────────────────────────────
 
 test('main.js requests the single-instance lock', () => {
@@ -92,8 +100,8 @@ test('main.js claims the real localagentsociety:// scheme (post-cutover)', () =>
 // (backend/main.py) has safely done exactly this all along for focus/
 // terminal. So: ban NSAppleEventDescriptor (in-process) everywhere, and ban
 // spawning `osascript` everywhere EXCEPT openTerminalAtPath's macOS branch
-// in main.js, which is the one legitimate, reviewed use (opening iTerm2 for
-// the command-palette's "openTerminal" commands).
+// in main.js, which is the one legitimate, reviewed use (a NEW Ghostty/iTerm2
+// window at the agent's folder, for the "Open" button).
 
 test('no in-process Apple Events anywhere in the app source', () => {
   const dirs = ['.', 'renderer', 'lib'];
@@ -112,7 +120,7 @@ test('no in-process Apple Events anywhere in the app source', () => {
   assert.deepEqual(offenders, [], `found in-process Apple Events usage in: ${offenders.join(', ')}`);
 });
 
-test('osascript is only spawned from openTerminalAtPath (macOS iTerm2 launch), nowhere else', () => {
+test('osascript is only spawned from openTerminalAtPath (macOS new-terminal-window launch), nowhere else', () => {
   const dirs = ['.', 'renderer', 'lib'];
   const offenders = [];
   for (const dir of dirs) {
@@ -131,8 +139,8 @@ test('osascript is only spawned from openTerminalAtPath (macOS iTerm2 launch), n
 
   const mainSrc = readSrc('main.js');
   const occurrences = [...stripComments(mainSrc).matchAll(/osascript/gi)];
-  assert.ok(occurrences.length > 0, 'expected openTerminalAtPath to spawn osascript for iTerm2');
-  const body = extractFunctionBody(mainSrc, 'function openTerminalAtPath(cwd, command)');
+  assert.ok(occurrences.length > 0, 'expected openTerminalAtPath to spawn osascript for a new Ghostty/iTerm2 window');
+  const body = extractFunctionBody(mainSrc, 'function openTerminalAtPath(cwd)');
   for (const m of stripComments(body).matchAll(/osascript/gi)) {
     void m; // presence check only — every osascript reference in main.js must be inside this function
   }
@@ -204,9 +212,9 @@ test('widget/ (Swift) has been removed — this Electron app is the sole widget'
 
 // ── face buttons (restored from widget/tray.swift) ──────────────────────────
 
-test('index.html renders all 6 face buttons (gear + 5 restored ones)', () => {
+test('index.html renders all 6 face buttons (gear + 5 restored ones, "open" in the retired palette\'s slot)', () => {
   const html = readSrc('renderer', 'index.html');
-  for (const id of ['gear', 'clear', 'terminal', 'speaker', 'mic', 'focus']) {
+  for (const id of ['gear', 'clear', 'open', 'speaker', 'mic', 'focus']) {
     assert.match(html, new RegExp(`id="${id}"`), `missing button #${id}`);
   }
 });
@@ -217,9 +225,8 @@ test('preload.js exposes the face-button bridge methods on window.las', () => {
     'getAgentInfo',
     'vortexiaSend',
     'sendToSelf',
-    'getCommands',
-    'setCommands',
-    'openTerminal',
+    'openAgent',
+    'getDefaultTerminalApp',
     'focusAgent',
     'getAgentTtys',
     'pinTty',
@@ -387,32 +394,100 @@ test('main.js never opens a second vortexia connection for face-button sends (no
   assert.equal(matches.length, 1, 'expected exactly one `new VortexiaClient(` call site (inside connectVortexia)');
 });
 
-test('command palette persistence: shape has {id, label, kind, cwd, command, text} and is stored per-agent under commands.<agentName>', () => {
-  const mainSrc = readSrc('main.js');
-  assert.match(mainSrc, /store\.get\(`commands\.\$\{name\}`/);
-  assert.match(mainSrc, /store\.set\(`commands\.\$\{name\}`/);
+// ── "Open" button (replaced the command palette) ────────────────────────────
 
-  const rendererSrc = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(rendererSrc, "cmdSaveEl.addEventListener('click', async () => {");
-  for (const field of ['id:', 'label,', 'kind,', 'cwd:', 'command:', 'text:']) {
-    assert.ok(body.includes(field), `saved command entry missing field matching "${field}"`);
+test('command palette is gone: no saved-command store, overlays or bridge methods remain', () => {
+  const main = stripComments(readSrc('main.js'));
+  const preload = stripComments(readSrc('preload.js'));
+  const html = readSrc('renderer', 'index.html');
+  const widget = stripComments(readSrc('renderer', 'widget.js'));
+  for (const needle of ["'commands:get'", "'commands:set'", "'terminal:open'", 'function getCommands', 'function setCommands']) {
+    assert.ok(!main.includes(needle), `main.js still has ${needle}`);
+  }
+  for (const needle of ['getCommands', 'setCommands', 'openTerminal:']) {
+    assert.ok(!preload.includes(needle), `preload.js still exposes ${needle}`);
+  }
+  for (const needle of ['id="commands"', 'id="commandEdit"', 'id="terminal"']) {
+    assert.ok(!html.includes(needle), `index.html still has ${needle}`);
+  }
+  for (const needle of ['renderCommandsList', 'openCommandEdit', 'window.las.getCommands', 'window.las.openTerminal(']) {
+    assert.ok(!widget.includes(needle), `widget.js still has ${needle}`);
   }
 });
 
-test('command palette "sendMessage" kind runs via vortexiaSend, "openTerminal" kind runs via openTerminal', () => {
-  const src = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(src, 'function runCommand(cmd)');
-  assert.match(body, /cmd\.kind === 'sendMessage'/);
-  assert.match(body, /window\.las\.vortexiaSend\(agentName,\s*cmd\.text/);
-  assert.match(body, /window\.las\.openTerminal\(cmd\.cwd/);
+test('DEFAULT_PREFS.openOrder defaults to terminal first, then folder', () => {
+  const body = extractFunctionBody(readSrc('main.js'), 'const DEFAULT_PREFS = {');
+  assert.match(body, /openOrder:\s*\['terminal',\s*'folder'\]/);
 });
 
-test('openTerminalAtPath opens iTerm2 (this project\'s default terminal) via spawned osascript on macOS, not Terminal.app', () => {
+test('agent:open resolves the folder from the backend registry (never a typed cwd) and dispatches terminal / folder', () => {
   const src = readSrc('main.js');
-  const body = extractFunctionBody(src, 'function openTerminalAtPath(cwd, command) {');
-  assert.match(body, /osascript/i, 'expected a spawned osascript call to open iTerm2');
-  assert.match(body, /iTerm2/, 'expected iTerm2, not Terminal.app — see main.js header comment for why');
-  assert.doesNotMatch(body, /-a['"`],?\s*['"`]Terminal['"`]/, 'must not fall back to Terminal.app');
+  const body = extractFunctionBody(src, "ipcMain.handle('agent:open', async (_event, name, action) => {");
+  assert.match(body, /OPEN_ACTIONS\.includes\(action\)/, 'unknown actions must be rejected');
+  assert.match(body, /await resolveAgentPath\(name\)/, 'the directory comes from the registry');
+  assert.match(body, /shell\.openPath\(dir\)/, "'folder' reveals the directory via Electron's shell, no AppleScript");
+  assert.match(body, /openTerminalAtPath\(dir\)/, "'terminal' opens a new terminal window at the directory");
+  assert.doesNotMatch(body, /cwd/, 'no caller-supplied cwd is accepted');
+  const resolver = extractFunctionBody(src, 'async function resolveAgentPath(name)');
+  assert.match(resolver, /fetchAgents\(\)/);
+  assert.match(resolver, /\.path/);
+});
+
+test('openTerminalAtPath opens a NEW WINDOW: Ghostty (preferred, via its scripting dictionary with an initial working directory), iTerm2 next, Terminal.app last', () => {
+  const src = readSrc('main.js');
+  assert.match(src, /TERMINAL_APP_CANDIDATES = \['Ghostty', 'iTerm', 'Terminal'\]/, 'Ghostty is this machine\'s default terminal; the rest are fallbacks in order');
+  assert.match(src, /new window with configuration \{initial working directory:dir\}/, 'Ghostty must get a NEW WINDOW at the directory — `open -a Ghostty <dir>` only adds a tab to the frontmost window');
+  const body = extractFunctionBody(src, 'function openTerminalAtPath(cwd) {');
+  assert.match(body, /resolveTerminalApp\(\)/);
+  assert.match(body, /GHOSTTY_NEW_WINDOW_SCRIPT/);
+  assert.match(body, /ITERM_NEW_WINDOW_SCRIPT/);
+  assert.match(body, /spawn\('osascript',\s*\[scriptPath,\s*dir\]/, 'the directory is passed as an argv item, never interpolated into the script text');
+  assert.match(body, /spawn\('open',\s*\['-a',\s*appName,\s*dir\]/, 'Terminal.app / custom apps open via `open -a <App> <dir>`');
+  assert.doesNotMatch(src, /'-a',\s*'Ghostty'/, 'never `open -a Ghostty` (tab, not window)');
+});
+
+test('open button: a plain click runs the FIRST entry of the (sanitized) openOrder', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, "openEl.addEventListener('click', () => {");
+  assert.match(body, /runOpenAction\(currentOpenOrder\(\)\[0\]\)/);
+  assert.match(body, /openLongPressFired/, 'the release of a long press must not also fire the default action');
+  const run = extractFunctionBody(src, 'async function runOpenAction(action)');
+  assert.match(run, /window\.las\.openAgent\(agentName,\s*action\)/);
+});
+
+test('open button: press-and-hold (and right-click) shows the menu instead of running anything', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const down = extractFunctionBody(src, "openEl.addEventListener('mousedown', (e) => {");
+  assert.match(down, /setTimeout\(/);
+  assert.match(down, /showOpenMenu\(\)/);
+  assert.match(down, /OPEN_LONG_PRESS_MS/);
+  assert.doesNotMatch(down, /runOpenAction/);
+  assert.match(src, /openEl\.addEventListener\('mouseup',\s*cancelOpenLongPress\)/);
+  assert.match(src, /openEl\.addEventListener\('mouseleave',\s*cancelOpenLongPress\)/);
+  const ctx = extractFunctionBody(src, "openEl.addEventListener('contextmenu', (e) => {");
+  assert.match(ctx, /e\.preventDefault\(\)/);
+  assert.match(ctx, /showOpenMenu\(\)/);
+});
+
+test('open menu: rows can be moved up/down and the new order persists as the openOrder pref', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const render = extractFunctionBody(src, 'function renderOpenMenu()');
+  assert.match(render, /moveOpenAction\(index,\s*index - 1\)/);
+  assert.match(render, /moveOpenAction\(index,\s*index \+ 1\)/);
+  assert.match(render, /index === 0 \? ' default' : ''/, 'the top row is marked as the default');
+  const move = extractFunctionBody(src, 'async function moveOpenAction(from, to)');
+  assert.match(move, /persist\(\{\s*openOrder:\s*order\s*\}\)/);
+});
+
+test('currentOpenOrder sanitizes the pref: drops unknown entries, collapses duplicates, appends missing actions', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const fn = extractFunction(src, 'function currentOpenOrder()');
+  const run = (openOrder) => new Function('prefs', `const DEFAULT_OPEN_ORDER = ['terminal', 'folder']; ${fn}; return currentOpenOrder();`)({ openOrder });
+  assert.deepEqual(run(undefined), ['terminal', 'folder'], 'no pref -> default order');
+  assert.deepEqual(run(['folder', 'terminal']), ['folder', 'terminal'], 'a reordered pref is honored');
+  assert.deepEqual(run(['folder']), ['folder', 'terminal'], 'a missing action is appended');
+  assert.deepEqual(run(['bogus', 'folder', 'folder', 'terminal']), ['folder', 'terminal'], 'unknown + duplicate entries are cleaned');
+  assert.deepEqual(run('garbage'), ['terminal', 'folder'], 'a non-array pref falls back to the default');
 });
 
 test('focus button click calls focusAgent(agentName); a separate contextmenu/long-press opens the TTY picker (documented simplified route, not native drag)', () => {

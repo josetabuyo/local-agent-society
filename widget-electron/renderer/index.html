@@ -19,16 +19,16 @@
         <button id="clear" class="facebtn" title="Send /clear to the linked terminal(s)">&#129529;</button>
       </div>
       <div class="bar-right">
-        <button id="terminal" class="facebtn" title="Command palette">&#128241;</button>
+        <button id="open" class="facebtn" title="Open: terminal window / folder at this agent's path (click = default, hold or right-click = choose and reorder)">&#10697;</button>
         <button id="speaker" class="facebtn" title="Mute/unmute">&#128266;</button>
         <button id="mic" class="facebtn" title="Dictate (click to start/stop, double-click to test mic)">&#127908;</button>
         <button id="focus" class="facebtn" title="Focus terminal (right-click to link a TTY)">&#8982;</button>
       </div>
     </div>
 
-    <!-- Inline, NOT a full-screen overlay (unlike #commands/#commandEdit/
-         #ttyPicker below) — settings mode keeps the real name/log visible
-         above it. See widget.js's setSettingsOpen. -->
+    <!-- Inline, NOT a full-screen overlay (unlike #ttyPicker below) —
+         settings mode keeps the real name/log visible above it. See
+         widget.js's setSettingsOpen. -->
     <div id="settings" class="settings settings-inline hidden">
       <div class="settings-row">
         <label for="color">Color</label>
@@ -66,45 +66,12 @@
       </div>
     </div>
 
+    <!-- "Open" button press-and-hold menu: both actions in order, the top
+         one is what a plain click runs. Small inline popover (fixed above
+         the button bar), not a full-window overlay — no expand needed. -->
+    <div id="openMenu" class="open-menu hidden"></div>
+
     <div id="resizeHandle" class="resize-handle" title="Drag to resize"></div>
-  </div>
-
-  <div id="commands" class="settings hidden">
-    <div id="commandsList" class="commands-list"></div>
-    <div class="settings-row">
-      <button id="commandsAdd">+ Add command</button>
-      <button id="closeCommands">Done</button>
-    </div>
-  </div>
-
-  <div id="commandEdit" class="settings hidden">
-    <div class="settings-row">
-      <label for="cmdLabel">Label</label>
-      <input id="cmdLabel" type="text" placeholder="e.g. Resume" />
-    </div>
-    <div class="settings-row">
-      <label for="cmdKind">Kind</label>
-      <select id="cmdKind">
-        <option value="openTerminal">Open terminal</option>
-        <option value="sendMessage">Send message</option>
-      </select>
-    </div>
-    <div class="settings-row" id="cmdCwdRow">
-      <label for="cmdCwd">Directory</label>
-      <input id="cmdCwd" type="text" placeholder="/path/to/project" />
-    </div>
-    <div class="settings-row" id="cmdCommandRow">
-      <label for="cmdCommand">Shell command</label>
-      <input id="cmdCommand" type="text" placeholder="claude --resume" />
-    </div>
-    <div class="settings-row" id="cmdTextRow">
-      <label for="cmdText">Message text</label>
-      <input id="cmdText" type="text" placeholder="/clear" />
-    </div>
-    <div class="settings-row">
-      <button id="cmdSave">Save</button>
-      <button id="cmdCancel">Cancel</button>
-    </div>
   </div>
 
   <div id="ttyPicker" class="settings hidden">

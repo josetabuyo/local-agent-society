@@ -14,9 +14,9 @@
  *     replacing the old AppleScript/tty-injection pipeline
  *   - minimal settings (color, opacity, always-on-top, mute) via electron-store
  *
- * Explicitly NOT ported in this pass: marquee text, drag-to-link-tty, and
- * the full command-palette feature set from tray.swift. See the task report
- * for the full list. (Mosaic/tiling layout for multiple occlusion-expanded
+ * Explicitly NOT ported: marquee text, drag-to-link-tty, and the command
+ * palette from tray.swift (its trimmed-down port was later removed in favor
+ * of the two-action "Open" button — see the agent:open section below). (Mosaic/tiling layout for multiple occlusion-expanded
  * widgets sharing a display WAS ported — see mosaicTiles/applyMosaicLayout
  * below.)
  * (Mic/STT dictation IS implemented — via local offline Whisper, not the
@@ -33,13 +33,13 @@
  * terminal). Window focus/raise in THIS file still uses only
  * BrowserWindow#show()/#focus() and app.focus({ steal: true }) — no
  * AppleScript needed there. The one legitimate spawned-osascript use in this
- * app is openTerminalAtPath()'s macOS branch (opens iTerm2 for the command
- * palette's "openTerminal" commands) — see its own comment, and
+ * app is openTerminalAtPath()'s macOS branch (a NEW Ghostty/iTerm2 window at
+ * the agent's folder, for the "Open" button) — see its own comment, and
  * test/test_widget_electron.js's tests enforcing osascript stays confined
  * to that one function and no in-process Apple Events appear anywhere.
  */
 
-const { app, BrowserWindow, ipcMain, screen, session, powerMonitor } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, session, powerMonitor, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -574,6 +574,9 @@ const DEFAULT_PREFS = {
   // Spanish). Defaults to Spanish per explicit request; 'auto' lets Whisper
   // auto-detect instead of forcing a language.
   micLanguage: 'es',
+  // "Open" button actions, in menu order — the FIRST one is what a plain
+  // click runs; press-and-hold shows the menu that reorders them.
+  openOrder: ['terminal', 'folder'],
 };
 
 function getPrefs(name) {
@@ -614,14 +617,14 @@ ipcMain.on('window:resize-by', (event, dw, dh) => {
   });
 });
 
-// Auto-expand for overlay panels (settings / command palette / TTY picker):
+// Auto-expand for overlay panels (settings / TTY picker):
 // those panels are `position: fixed; width:100vw; height:100vh` (see
 // widget.css .settings), so they're only as big as the compact widget
 // window (300x160 by default) unless the window itself grows to fit them.
 // The renderer calls setExpanded(true) whenever it shows one of those
 // panels and setExpanded(false) when it returns to the compact face; this
 // is idempotent (each state remembers whether it's already applied) so
-// switching between commands<->commandEdit without fully closing doesn't
+// switching between two overlay panels without fully closing doesn't
 // re-trigger a resize or lose the remembered compact size.
 const EXPANDED_WIDTH = 340;
 const EXPANDED_HEIGHT = 460;
@@ -824,85 +827,138 @@ ipcMain.on('window:set-occlusion-expanded', (event, expanded) => {
   }
 });
 
-// ── face buttons: commands (terminal-palette) store ─────────────────────────
+// ── face buttons: "Open" — a terminal, or the folder, at the agent's path ──
 //
-// Saved per-agent, mirroring the getPrefs/setPrefs pattern above. Each entry
-// is either:
-//   { id, label, kind: 'openTerminal', command, cwd }
-//   { id, label, kind: 'sendMessage',  text }
-// (kept to the fields actually used — see widget/tray.swift's WidgetCommand
-// for the retired superset this is a trimmed-down port of).
-
-function getCommands(name) {
-  return store.get(`commands.${name}`, []);
-}
-
-function setCommands(name, commands) {
-  store.set(`commands.${name}`, commands);
-  return commands;
-}
-
-ipcMain.handle('commands:get', (_event, name) => getCommands(name));
-ipcMain.handle('commands:set', (_event, name, commands) => setCommands(name, commands));
-
-// ── face buttons: open a real terminal window at a path (terminal command) ──
+// Replaces the retired command palette (a per-agent list of saved
+// openTerminal/sendMessage commands, dropped as unused). The button has
+// exactly two actions, both anchored on the agent's registered directory
+// (the `path` the backend registry holds for it — never a user-typed cwd):
+//   terminal — a NEW WINDOW of the default terminal, shell started in the
+//              agent's folder
+//   folder   — the agent's folder revealed in the file manager (Finder)
+// Which one a plain click runs is the first entry of the agent's
+// `openOrder` pref (DEFAULT_PREFS); the renderer's press-and-hold menu lets
+// the user reorder them. Neither action touches an existing terminal.
 //
-// This does NOT depend on the retired TTY-injection mechanism — it launches
-// a fresh terminal process, it does not type into an existing one.
-//
-// macOS: opens iTerm2 (this project's default terminal everywhere else —
-// see backend/main.py's POST /agents/{name}/terminal and _focus_via_iterm),
-// not Terminal.app. A plain `open <dir>`/`.command` file always launches
-// Terminal.app regardless of the user's actual default terminal, since
-// .command scripts are hardwired to Terminal.app at the OS level — that's
-// NOT a "default terminal" setting, it's a fixed file-type association. To
-// pick iTerm specifically (with or without a command to run), we spawn
-// `osascript` as a subprocess, exactly like the backend already does for
-// terminal/focus. This is safe and unrelated to the historical TCC
-// incident: that was about the compiled Swift tray binary's own IN-PROCESS
-// NSAppleEventDescriptor calls losing their Apple Events grant on every
-// recompile (a code-signing identity problem). Spawning the `osascript` CLI
-// as a child process is a completely different mechanism — macOS attributes
-// the automation permission to the stable `osascript` binary itself, never
-// to this app, so it isn't affected by rebuilding widget-electron. The
-// backend has done this safely all along.
-function openTerminalAtPath(cwd, command) {
-  if (process.platform === 'darwin') {
-    const dir = cwd || '.';
-    const shellCmd = command && command.trim() ? `cd ${JSON.stringify(dir)} && ${command}` : `cd ${JSON.stringify(dir)}`;
-    const script =
-      'on run argv\n' +
-      '  set shellCmd to item 1 of argv\n' +
-      '  tell application "iTerm2"\n' +
-      '    create window with default profile command "/bin/zsh -l -c " & quoted form of shellCmd\n' +
-      '  end tell\n' +
-      'end run\n';
-    const scriptPath = path.join(os.tmpdir(), `las-widget-iterm-${Date.now()}-${Math.random().toString(36).slice(2)}.applescript`);
-    fs.writeFileSync(scriptPath, script);
-    const child = spawn('osascript', [scriptPath, shellCmd], { detached: true, stdio: 'ignore' });
-    child.unref();
-    child.on('exit', () => fs.unlink(scriptPath, () => {}));
-  } else if (process.platform === 'win32') {
-    // Untested (dev machine is macOS) — attempted best-effort via cmd.exe.
-    const inner = command && command.trim() ? `cd /d ${cwd || '.'} && ${command}` : `cd /d ${cwd || '.'}`;
-    spawn('cmd', ['/c', 'start', 'cmd', '/k', inner], { detached: true, stdio: 'ignore', shell: true }).unref();
-  } else {
-    // Linux best-effort fallback; varies a lot by distro/DE, no single
-    // reliable command. x-terminal-emulator is a common Debian/Ubuntu alias.
-    spawn('x-terminal-emulator', cwd ? ['--working-directory', cwd] : [], { detached: true, stdio: 'ignore' }).unref();
+// Why AppleScript for the terminal action on macOS: `open -a Ghostty <dir>`
+// works but Ghostty (its `macos-dock-drop-behavior` default is `new-tab`)
+// adds a TAB to the frontmost window — right where the user is typing —
+// instead of opening a window of its own, which is what the button is for.
+// Ghostty 1.2+ ships a scripting dictionary whose `new window` takes an
+// `initial working directory`, so that's what's used; iTerm2 gets its own
+// classic `create window` script. This is the SPAWNED `osascript` CLI, not
+// in-process Apple Events — see the header comment on why that's safe, and
+// test/test_widget_electron.js keeps it confined to openTerminalAtPath.
+// The new window lands on the current Space by itself (whoever presses the
+// button is on the widget's desktop), so no positioning is attempted —
+// Ghostty's dictionary exposes none anyway.
+
+const OPEN_ACTIONS = ['terminal', 'folder'];
+
+// macOS has no LaunchServices "default terminal" role, so "default" is
+// resolved here: the first INSTALLED app in this list wins. Ghostty is the
+// terminal the user treats as this machine's default; iTerm2 is what the
+// backend still drives for focus/tty-write; Terminal.app always exists.
+// LAS_TERMINAL_APP in the environment overrides the whole list.
+const TERMINAL_APP_CANDIDATES = ['Ghostty', 'iTerm', 'Terminal'];
+
+function resolveTerminalApp() {
+  if (process.env.LAS_TERMINAL_APP) return process.env.LAS_TERMINAL_APP;
+  if (process.platform !== 'darwin') return null;
+  const roots = ['/Applications', path.join(os.homedir(), 'Applications'), '/System/Applications/Utilities'];
+  for (const name of TERMINAL_APP_CANDIDATES) {
+    for (const root of roots) {
+      if (fs.existsSync(path.join(root, `${name}.app`))) return name;
+    }
   }
+  return 'Terminal';
 }
 
-ipcMain.on('terminal:open', (_event, { cwd, command } = {}) => {
-  openTerminalAtPath(cwd, command);
+// Both scripts take the directory as argv[1] — never interpolated into the
+// script text, so a path with quotes can't break out of it.
+const GHOSTTY_NEW_WINDOW_SCRIPT =
+  'on run argv\n' +
+  '  set dir to item 1 of argv\n' +
+  '  tell application "Ghostty"\n' +
+  '    new window with configuration {initial working directory:dir}\n' +
+  '    activate\n' +
+  '  end tell\n' +
+  'end run\n';
+
+const ITERM_NEW_WINDOW_SCRIPT =
+  'on run argv\n' +
+  '  set dir to item 1 of argv\n' +
+  '  tell application "iTerm2"\n' +
+  '    create window with default profile\n' +
+  '    tell current session of current window to write text "cd " & quoted form of dir\n' +
+  '    activate\n' +
+  '  end tell\n' +
+  'end run\n';
+
+/** Open a NEW terminal window whose shell starts in `cwd`. Returns the name
+ * of the terminal app it used. */
+function openTerminalAtPath(cwd) {
+  const dir = cwd || os.homedir();
+  if (process.platform === 'darwin') {
+    const appName = resolveTerminalApp();
+    const script = appName === 'Ghostty' ? GHOSTTY_NEW_WINDOW_SCRIPT : appName === 'iTerm' ? ITERM_NEW_WINDOW_SCRIPT : null;
+    if (script) {
+      const scriptPath = path.join(os.tmpdir(), `las-widget-open-${Date.now()}-${Math.random().toString(36).slice(2)}.applescript`);
+      fs.writeFileSync(scriptPath, script);
+      const child = spawn('osascript', [scriptPath, dir], { detached: true, stdio: 'ignore' });
+      child.unref();
+      child.on('exit', () => fs.unlink(scriptPath, () => {}));
+    } else {
+      // Terminal.app (and any other app named via LAS_TERMINAL_APP) opens a
+      // new window at a directory handed to it this way.
+      spawn('open', ['-a', appName, dir], { detached: true, stdio: 'ignore' }).unref();
+    }
+    return appName;
+  }
+  if (process.platform === 'win32') {
+    // Untested (dev machine is macOS) — best-effort via cmd.exe.
+    spawn('cmd', ['/c', 'start', 'cmd', '/k', `cd /d "${dir}"`], { detached: true, stdio: 'ignore', shell: true }).unref();
+    return 'cmd';
+  }
+  // Linux best-effort fallback; varies a lot by distro/DE, no single
+  // reliable command. x-terminal-emulator is a common Debian/Ubuntu alias.
+  spawn('x-terminal-emulator', ['--working-directory', dir], { detached: true, stdio: 'ignore' }).unref();
+  return 'x-terminal-emulator';
+}
+
+async function resolveAgentPath(name) {
+  const agents = await fetchAgents();
+  const entry = agents && agents[name];
+  return entry && entry.path ? entry.path : null;
+}
+
+ipcMain.handle('agent:open', async (_event, name, action) => {
+  if (!OPEN_ACTIONS.includes(action)) return { ok: false, error: `unknown open action: ${action}` };
+  const dir = await resolveAgentPath(name);
+  if (!dir) return { ok: false, error: `no registered path for agent ${name}` };
+  try {
+    if (action === 'folder') {
+      const failure = await shell.openPath(dir); // '' on success, else an error string
+      if (failure) return { ok: false, error: failure };
+      log.info('open', `folder ${dir} for ${name}`);
+      return { ok: true, action, path: dir };
+    }
+    const terminalApp = openTerminalAtPath(dir);
+    log.info('open', `terminal (${terminalApp}) at ${dir} for ${name}`);
+    return { ok: true, action, path: dir, app: terminalApp };
+  } catch (err) {
+    log.error('open', `${action} failed for ${name}: ${err && err.stack ? err.stack : err}`);
+    return { ok: false, error: String(err) };
+  }
 });
 
-// ── face buttons: vortexia send primitive (mic dictation + command palette) ─
+ipcMain.handle('terminal:default-app', () => resolveTerminalApp());
+
+// ── face buttons: vortexia send primitive (mic dictation) ───────────────────
 //
-// Generalized "send this text to <toName> over vortexia" primitive, reused
-// by both the mic button (dictation -> agent's own inbox, the closest
-// faithful equivalent of the retired live-TTY injectToSession) and the
-// command palette's "sendMessage" command kind. Reuses the already-connected
+// Generalized "send this text to <toName> over vortexia" primitive, used by
+// the mic button (dictation -> agent's own inbox, the closest faithful
+// equivalent of the retired live-TTY injectToSession). Reuses the already-connected
 // per-window VortexiaClient in `vortexiaClients` — does not open a second
 // connection.
 
