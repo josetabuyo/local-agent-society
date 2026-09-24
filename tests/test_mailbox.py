@@ -9,7 +9,8 @@ Three touchpoints, all covered here with a fake paho client — no broker:
   (c) `las agent listen` is that consumer: fixed client id, persistent
       session, subscribes only when no session is present, never clears a
       retained slot, reconnects after a drop, and gives up only when
-      repeatedly kicked (a takeover fight).
+      three connections in a row die within seconds (a takeover fight) —
+      a keep-alive storm after a broker stall or a Mac sleep is not one.
 """
 import json
 import sys
@@ -194,14 +195,19 @@ def test_listen_reconnects_after_a_single_drop(listen_env, monkeypatch):
 
 
 def test_listen_gives_up_when_repeatedly_kicked(listen_env, monkeypatch):
-    """Three unexpected drops inside a minute = another client keeps taking
-    the session over (MQTT-3.1.4-2): exit 2 instead of fighting forever."""
+    """Three connections in a row that each die within seconds = another
+    client keeps taking the session over (MQTT-3.1.4-2): exit 2 instead of
+    fighting forever."""
     exits = []
     monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code) or (_ for _ in ()).throw(SystemExit(code)))
+    clock = [1000.0]
+    monkeypatch.setattr(agents_mod.time, "monotonic", lambda: clock[0])
 
     def loop_forever(self):
         for _ in range(3):
+            clock[0] += 1.5          # the rival kicks us back within seconds
             self.on_disconnect(self, None, 7)
+            self.connect()           # paho reconnects (and kicks the rival)
 
     monkeypatch.setattr(FakeMQTTClient, "loop_forever", loop_forever)
     r = CliRunner().invoke(agents_mod.listen, ["Ana"])
@@ -209,17 +215,48 @@ def test_listen_gives_up_when_repeatedly_kicked(listen_env, monkeypatch):
     assert "giving up" in r.output
 
 
-def test_listen_old_drops_outside_the_window_do_not_count(listen_env, monkeypatch):
+def test_listen_stall_storm_keep_alive_drops_never_read_as_a_fight(listen_env, monkeypatch):
+    """relay-sim, evening of 2026-09-23: vortexia's event loop stalls (Mac
+    asleep / process not scheduled), so on resume every client's keep-alive
+    expires at once — several times an hour. Each such drop follows a
+    connection that lived a full keep-alive period, however close together
+    the drops land: never exit, just reconnect (and only on stderr)."""
     exits = []
     monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code))
     clock = [1000.0]
-    monkeypatch.setattr(agents_mod.time, "time", lambda: clock[0])
+    monkeypatch.setattr(agents_mod.time, "monotonic", lambda: clock[0])
 
     def loop_forever(self):
-        for _ in range(2):
+        for _ in range(5):
+            clock[0] += 45           # keep-alive (30s) × 1.5: the broker's timeout
             self.on_disconnect(self, None, 7)
-        clock[0] += 120          # a couple of minutes of calm
+            self.connect()
+
+    monkeypatch.setattr(FakeMQTTClient, "loop_forever", loop_forever)
+    r = CliRunner().invoke(agents_mod.listen, ["Ana"])
+    assert exits == []
+    assert r.stdout == ""                        # stdout is the Monitor's event stream: nothing to notify
+    assert r.stderr.count("reconnecting") == 5   # stderr only lands in the Monitor's output file
+
+
+def test_listen_a_long_lived_connection_resets_the_fight_counter(listen_env, monkeypatch):
+    exits = []
+    monkeypatch.setattr(agents_mod.os, "_exit", lambda code: exits.append(code))
+    clock = [1000.0]
+    monkeypatch.setattr(agents_mod.time, "monotonic", lambda: clock[0])
+
+    def loop_forever(self):
+        for _ in range(2):           # two fast kicks…
+            clock[0] += 1
+            self.on_disconnect(self, None, 7)
+            self.connect()
+        clock[0] += 300              # …a calm five minutes…
         self.on_disconnect(self, None, 7)
+        self.connect()
+        for _ in range(2):           # …two more fast ones: still never three in a row
+            clock[0] += 1
+            self.on_disconnect(self, None, 7)
+            self.connect()
 
     monkeypatch.setattr(FakeMQTTClient, "loop_forever", loop_forever)
     CliRunner().invoke(agents_mod.listen, ["Ana"])

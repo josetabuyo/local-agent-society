@@ -30,11 +30,14 @@ cat .las-agent.json 2>/dev/null || cat .agent.json 2>/dev/null
 If the agent config file exists, run this once when the skill loads:
 
 ```bash
+pkill -f "las agent listen <agent_name>" 2>/dev/null; sleep 0.3   # zombie listener from a previous session? kill it BEFORE polling
 las agent register            # publishes "online" presence (retained) to vortexia
 las agent poll --timeout 2    # drains the vortexia inbox and shows pending messages
 ```
 
 `las agent poll` replaces the old direct terminal injection: messages from other agents no longer arrive on their own — they have to be requested. If `poll` returns pending messages, treat them as if they'd just arrived — mention them to the user or act on them as appropriate before continuing with the task. If vortexia isn't running, both commands fail without breaking the session (fail-soft); there just won't be any messages.
+
+The purge comes first on purpose: a `las agent listen` left over from a previous session (closed, or surviving a `/clear`) still holds the mailbox, so `poll` would stand down and print "no pending messages" while the zombie consumed everything into an output file nobody reads.
 
 ### Live listening (mandatory, not optional)
 
@@ -54,12 +57,20 @@ With the `Monitor` tool (if available in this environment):
 Monitor({
   description: "Live dictation for <agent_name> (las agent listen)",
   command: "las agent listen <agent_name>",
-  persistent: true,
-  timeout_ms: 3600000,
+  timeout_ms: 1800000,
 })
 ```
 
-`las agent listen` stays connected to vortexia and emits one JSON line per message as soon as it arrives — each line generates a Monitor notification in this session. It holds the agent's mailbox session (client id `las-agent-<name>`, persistent — see `vortexia/PROTOCOL.md` "Mailboxes"), so on connect it first prints everything queued while nobody was listening, then live traffic; each message is consumed by the QoS 1 ack, nothing to clear. While it runs it IS the delivery path — `las agent poll` sees the session is held and stands down. A dropped connection (keep-alive timeout after a stall, broker restart) is reconnected automatically and the broker keeps the session, so nothing is lost. Only one consumer can hold the session: a second `listen` for the same agent takes it over, and a listener kicked 3 times within a minute exits (exit 2) instead of fighting — hence the purge step below.
+`las agent listen` stays connected to vortexia and emits one JSON line per message as soon as it arrives — each line generates a Monitor notification in this session. It holds the agent's mailbox session (client id `las-agent-<name>`, persistent — see `vortexia/PROTOCOL.md` "Mailboxes"), so on connect it first prints everything queued while nobody was listening, then live traffic; each message is consumed by the QoS 1 ack, nothing to clear. While it runs it IS the delivery path — `las agent poll` sees the session is held and stands down. A dropped connection (keep-alive timeout after a stall, broker restart) is reconnected automatically and the broker keeps the session, so nothing is lost. Only one consumer can hold the session: a second `listen` for the same agent takes it over, and a listener whose reconnected connections die within seconds three times in a row exits (exit 2) instead of fighting — hence the purge step above.
+
+**Listener housekeeping is silent.** The listener ends on its own now and then: the `Monitor` tool caps a watch at 30 minutes (expiry notice), a purge or `las stop` kills it (exit 144), and a real takeover fight makes it give up (exit 2). A broker restart or a Mac that slept only makes it reconnect — nothing to do. None of this is news for the human: it lands in the middle of whatever they are doing, and a paragraph plus a spoken report every half hour derails the task and confuses the coding agents. So, on a Monitor expiry / exit-144 / exit-2 notification for this listener, re-arm it (purge + `Monitor` again) and that is the whole turn:
+
+- No narration: at most one short line, and only if the human is mid-conversation; otherwise nothing.
+- No closing report and no `las speak` — a housekeeping turn is not a turn the human started (see "Closing report", below).
+- No diagnosis, no `las agent poll` (the listener drains the mailbox itself on connect), no `ps`/`pgrep` hunts, nothing touched in the repo or in the task at hand.
+- The reconnect notices (`connection dropped after Ns (rc=7) — reconnecting`) go to stderr, i.e. the Monitor's output file, never a notification — they are not something to react to.
+
+Two exceptions, each worth exactly one line to the human, then stop re-arming until they answer: exit 2 twice within a few minutes means a rival listener really exists (name it: `pgrep -fl "las agent listen <agent_name>"`); exit 1 means vortexia is unreachable (`las status`), so re-arming in a loop is pointless.
 
 If `Monitor` isn't available in this environment, don't block session startup on this — proceed with just the initial poll and tell the user live delivery isn't active this session.
 
@@ -95,6 +106,7 @@ The global `Stop` hook (`~/.claude/hooks/announce-here.sh`) that announced a gen
   - Read `response_length_hint` from the agent config. **If the field doesn't exist, use 40 as the default.**
   - This governs only what THIS agent chooses to say in its own summary/acknowledge lines — never cut the sentence to fit the number after the fact. Compose it to roughly that length; if it runs a little over, that's fine.
   - **Hard fallback** (never leave the slot empty): if there's nothing substantial to summarize — a chat-only turn, a question with no action, etc. — use `"done"` (English) / `"listo"` (Spanish) as `<summary>`.
+  - **Not on housekeeping turns.** A turn that exists only because a background notification arrived — the listener's Monitor expired or exited, a background task finished — with no human message and nothing done for the human gets no closing report and no TTS at all. The `"done"`/`"listo"` fallback is for turns the human started; speaking "Reporting: done" every 30 minutes is exactly the noise this rule exists to prevent.
 - `<AgentName>` is the `name` from the agent config.
 
 Text the agent RECEIVES — mic dictation, messages from other agents — must never be shortened or truncated for any reason other than the mic's own practical recording cap (10 minutes; see `widget-electron/renderer/widget.js`'s `MAX_RECORDING_MS`). `response_length_hint` only shapes what this agent chooses to say, never what it hears.
