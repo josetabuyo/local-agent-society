@@ -867,7 +867,7 @@ def focus_agent_terminal(name: str):
     with _wake_enabled_lock:
         wake_enabled = name in load_json(WAKE_ENABLED_FILE, [])
     if not ttys and is_inactive and wake_enabled and path:
-        shell_cmd = f"cd {shlex.quote(path)} && claude --dangerously-skip-permissions"
+        shell_cmd = f"cd {shlex.quote(path)} && las claude --dangerously-skip-permissions"
         result = _open_iterm_window(shell_cmd)
         if result.returncode == 0:
             with _inactive_lock:
@@ -930,11 +930,13 @@ def open_terminal(name: str, body: TerminalRequest):
         raise HTTPException(status_code=404, detail="Agent not found")
     path = registry[name].get("path", "")
     if body.resume:
-        shell_cmd = f"cd {shlex.quote(path)} && claude --resume"
+        shell_cmd = f"cd {shlex.quote(path)} && las claude --resume"
     elif body.bare:
         shell_cmd = f"cd {shlex.quote(path)}"
     else:
-        claude_cmd = f"claude --model {body.model_id}" if body.model_id else "claude"
+        # `las claude`, not bare `claude`: adds the channel flag so the session
+        # receives its mailbox live (cli/commands/bridge.py, docs/adr/0004).
+        claude_cmd = f"las claude --model {body.model_id}" if body.model_id else "las claude"
         shell_cmd = f"cd {shlex.quote(path)} && {claude_cmd}"
     result = _open_iterm_window(shell_cmd)
     if result.returncode != 0:

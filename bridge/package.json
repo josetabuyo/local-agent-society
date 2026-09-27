@@ -1,0 +1,26 @@
+{
+  "name": "las-bridge",
+  "version": "0.1.0",
+  "description": "Local Agent Society bridge: delivers an agent's vortexia mailbox into any session runtime (Claude Code channel, a plain shell, an external command, stdout) through one source → interceptors → sink pipeline.",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "las-bridge": "./bin/las-bridge.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "mqtt": "^5.15.2",
+    "vortexia": "file:../../vortexia"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "zod": "^3.25.76"
+  }
+}

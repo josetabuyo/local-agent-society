@@ -35,3 +35,7 @@ uv.lock
 
 # macOS
 .DS_Store
+
+# Bridge runtime state (docs/adr/0004) and its dependencies
+session/bridge-*.json
+bridge/node_modules/

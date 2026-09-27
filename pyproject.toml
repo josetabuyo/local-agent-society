@@ -19,3 +19,10 @@ las = "cli.main:cli"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cli*"]
+
+[dependency-groups]
+dev = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]

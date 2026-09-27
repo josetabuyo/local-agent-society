@@ -7,6 +7,7 @@ from cli.commands.voices import voices
 from cli.commands.queue import queue
 from cli.commands.boarding import boarding
 from cli.commands.completion import completion
+from cli.commands.bridge import bridge, claude_cmd
 
 
 @click.group()
@@ -42,3 +43,5 @@ cli.add_command(voices)
 cli.add_command(queue)
 cli.add_command(boarding)
 cli.add_command(completion)
+cli.add_command(bridge)
+cli.add_command(claude_cmd, name="claude")

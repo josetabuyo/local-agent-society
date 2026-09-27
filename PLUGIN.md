@@ -15,7 +15,7 @@ A system that turns Claude Code sessions into a coordinated society of agents.
 - **Agent** — a named identity tied to a project directory (e.g. `System`, `Garantido`), declared in that directory's `.las-agent.json`
 - **Voice** — each agent has one unique TTS voice with a fixed language
 - **Widget** — an always-on-top floating tray window showing the agent name on every Space
-- **Inject** — send a message to another agent via `las agent inject` or `POST /agents/{name}/inject`, delivered over vortexia (`las/agent/{name}/inbox`), not a live terminal. Not retained — the recipient sees it only if polling (`las agent poll`), which the `/las-agent` skill does once at the start of each session
+- **Inject** — send a message to another agent via `las agent inject` or `POST /agents/{name}/inject`, delivered over vortexia (`las/agent/{name}/inbox`) into a broker-owned mailbox, and from there live into the recipient's Claude Code session by the LAS channel (`bridge/`, sessions started with `las claude`) — or into a plain terminal / any other runtime with `las bridge shell|exec|stdout`; `las agent poll` drains it by hand
 
 ## Install
 

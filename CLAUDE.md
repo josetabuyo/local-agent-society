@@ -6,7 +6,7 @@ You are the protagonist agent of this project. You are part of the **Local Agent
 
 ## At the start of each conversation
 
-Messages from other agents or external processes arrive over **vortexia** (a sibling MQTT broker — see `vortexia/PROTOCOL.md`), not by being injected into the terminal. The `/las-agent` skill, loaded at the start of a session, registers this agent's presence and polls its vortexia inbox for anything that arrived before this session started (`las agent register` + `las agent poll`, or the equivalent backend calls). This is polling, not push — nothing is delivered to you outside that skill's session-start check, so if the skill hasn't loaded yet, pending messages are just sitting in the inbox.
+Messages from other agents or external processes arrive over **vortexia** (a sibling MQTT broker — see `vortexia/PROTOCOL.md`), delivered live into this session by the **LAS channel**: a Claude Code channel (`bridge/`, an MCP server Claude Code starts from `~/.claude.json`) that holds this agent's mailbox and pushes each message into the session as a `<channel source="las" ...>` event the moment it arrives — idle at the prompt or mid-turn, no Monitor, no polling. It only arms after the session acks its probe (`las_channel_ack`), which the `/las-agent` skill handles at session start along with `las agent register`. Sessions must be started with `las claude` (adds the research-preview channel flag); a session started as bare `claude` has no channel, and the skill then falls back to a one-shot `las agent poll`. See `docs/adr/0004-session-bridge.md`.
 
 ---
 
@@ -74,7 +74,7 @@ curl -s -X POST http://localhost:8700/agents/OtherAgent/inject \
   -d '{"message":"...","source":"agent","from_agent":"MyAgentName"}'
 ```
 
-Inbox messages are queued in a per-agent **mailbox** owned by the broker (an MQTT persistent session, client id `las-agent-<name>` — see `vortexia/PROTOCOL.md` "Mailboxes"): a message sent while the recipient has no session open waits there, in order, one entry per message, nothing overwrites anything (cap 500, TTL 30 days, survives a broker restart). The recipient drains it when their `/las-agent` skill runs `las agent poll` at the start of their next session, or live through `las agent listen` — whichever holds the mailbox session; each message is consumed by being acknowledged, so it's never handed out twice. Broadcast (`las/broadcast`) is NOT queued — only currently-connected listeners get it.
+Inbox messages are queued in a per-agent **mailbox** owned by the broker (an MQTT persistent session, client id `las-agent-<name>` — see `vortexia/PROTOCOL.md` "Mailboxes"): a message sent while the recipient has no session open waits there, in order, one entry per message, nothing overwrites anything (cap 500, TTL 30 days, survives a broker restart). It is delivered by whichever **bridge** holds the mailbox session (`bridge/`, docs/adr/0004): the LAS channel inside a Claude session, `las bridge shell` in a plain terminal, `las bridge exec --exec CMD` for any other runtime (Codex, a local model), or `las agent poll` as a manual fallback — each message is consumed by being acknowledged *after* delivery, so it's never handed out twice and never lost to a sink that failed. Broadcast (`las/broadcast`) is NOT queued — only currently-connected listeners get it.
 
 There are no inbox files on disk. There is no `extern-inbox.md`. The "inbox" is vortexia's MQTT topic, drained by polling at session start — not a live TTY, and not a filesystem queue.
 

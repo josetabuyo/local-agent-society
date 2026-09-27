@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { normalize, KIND, MIC_SELFTEST_PING, isMicSelfTest, micSelfTestPong } from '../src/envelope.js';
+
+test('normalize fills kind/ts/id and coerces fields, without touching a complete envelope', () => {
+  const now = () => 1234;
+  const bare = normalize({ from: 'A', to: 'B', text: 'hi' }, { now });
+  assert.equal(bare.kind, KIND.MESSAGE);
+  assert.equal(bare.ts, 1234);
+  assert.equal(bare.source, 'agent');
+  assert.equal(bare.id, 'A:1234:2');
+  const full = normalize({ id: 'x', from: 'A', to: 'B', text: 'hi', kind: 'speak', ts: 9, source: 'human' }, { now });
+  assert.deepEqual(full, { id: 'x', from: 'A', to: 'B', text: 'hi', kind: 'speak', ts: 9, source: 'human' });
+  assert.equal(normalize(null, { now }).text, '');
+  assert.equal(normalize({ text: 42 }, { now }).text, '42');
+});
+
+test('the mic self-test sentinel is classified by text, and the pong mirrors the CLI listener', () => {
+  const env = normalize({ from: 'X', to: 'X', text: MIC_SELFTEST_PING, source: 'human' });
+  assert.equal(env.kind, KIND.MIC_SELFTEST);
+  assert.ok(isMicSelfTest(env));
+  const pong = micSelfTestPong('X', { now: () => 5 });
+  assert.deepEqual(pong, { from: 'X', to: 'X', source: 'system', kind: KIND.MIC_SELFTEST_PONG, text: 'OK', ts: 5 });
+});

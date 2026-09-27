@@ -29,6 +29,13 @@ else
     echo "         ⚠️  Electron widget build did not produce an .app bundle — check widget-electron/dist"
 fi
 
+# ── 1b. Bridge dependencies ──────────────────────────────────────────────────
+# The bridge (bridge/, docs/adr/0004) delivers each agent's vortexia mailbox
+# into its session: Claude Code starts it as the `las` MCP channel server,
+# and `las bridge shell|exec|stdout` run it for anything that isn't Claude.
+echo "[ 1b/5] Installing bridge dependencies..."
+(cd "$INSTALL_DIR/bridge" && npm install --no-audit --no-fund -q)
+
 # ── 2. Python dependencies ────────────────────────────────────────────────────
 echo "[ 2/5 ] Installing Python dependencies..."
 VENV="$INSTALL_DIR/backend/.venv"
@@ -272,6 +279,15 @@ if ! command -v las &>/dev/null \
 fi
 
 echo ""
+# ── Register the bridge as Claude Code's `las` channel server ────────────────
+# User-level (~/.claude.json), so every agent folder gets it. Sessions must
+# then be started with `las claude` (adds the research-preview channel flag).
+if command -v las >/dev/null 2>&1; then
+    las bridge install
+else
+    echo "⚠️  'las' not on PATH yet — run 'las bridge install' once it is."
+fi
+
 echo "Done! Start with:"
 echo "  las start"
 echo "  las status"

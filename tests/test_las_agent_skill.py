@@ -1,11 +1,10 @@
-"""The /las-agent skill is what every session loads at start, so it is
-where the listener's noise is decided: how a session reacts to the
-listener's Monitor expiring every 30 minutes, to it being killed, or to it
-giving up. On 2026-09-23 a session that had done nothing but load the
-skill produced a narrated paragraph plus a spoken "Reportando: listo"
-on every expiry, and a 2m43s diagnosis on one exit 2 — noise that derails
-the human's task and confuses the coding agents. These tests pin the
-rules that keep that quiet, in the copy install.sh ships."""
+"""The /las-agent skill is what every session loads at start, so it is where
+delivery noise is decided. Until 2026-09-27 the skill armed `las agent
+listen` under Claude Code's Monitor tool, whose 30-minute cap produced a
+visible re-arm turn every half hour in every session — the flooding the
+LAS channel (docs/adr/0004) exists to remove. These tests pin the new
+contract, in the copy install.sh ships (.claude/skills/las-agent/SKILL.md
+must equal ~/.claude/skills/las-agent/SKILL.md after install)."""
 from pathlib import Path
 
 SKILL = (Path(__file__).parent.parent / ".claude/skills/las-agent/SKILL.md").read_text()
@@ -17,37 +16,52 @@ def _section(title: str) -> str:
     return SKILL[start:end if end != -1 else None]
 
 
-def test_listener_housekeeping_turns_are_silent():
-    live = _section("### Live listening")
-    assert "Listener housekeeping is silent" in live
-    assert "No closing report and no `las speak`" in live
-    assert "No diagnosis, no `las agent poll`" in live
-    # the three ways the listener ends on its own are all named as re-arm-and-hush
-    for what in ("30 minutes", "exit 144", "exit 2"):
-        assert what in live
+def test_no_monitor_based_listener_remains_anywhere_in_the_skill():
+    assert "Monitor(" not in SKILL
+    assert "timeout_ms" not in SKILL
+    assert "### Live listening" not in SKILL
+    assert 'pkill -f "las agent listen' not in SKILL
 
 
-def test_stall_and_sleep_drops_are_described_as_reconnects_not_fights():
-    live = _section("### Live listening")
-    assert "reconnected automatically" in live
-    assert "die within seconds three times in a row" in live
-    assert "kicked 3 times within a minute" not in live   # the old wall-clock rule is gone
+def test_session_start_registers_then_checks_the_channel_and_only_polls_as_fallback():
+    live = _section("### Presence and live delivery")
+    assert live.index("las agent register") < live.index("las bridge status")
+    assert live.index("las bridge status") < live.index("las agent poll --timeout 2")
+    assert "exits non-zero" in live and "fall back" in live
+    assert "tell the user in one line that live delivery isn't active" in live
 
 
-def test_closing_report_is_skipped_on_housekeeping_turns():
+def test_channel_event_shape_and_reply_path_are_documented():
+    live = _section("### Presence and live delivery")
+    assert '<channel source="las"' in live
+    assert 'sender="' in live and 'origin="' in live and 'kind="' in live
+    assert "`reply` tool" in live
+    assert "las claude" in live and "--dangerously-load-development-channels server:las" in live
+
+
+def test_probe_is_acked_silently_and_gates_mailbox_consumption():
+    live = _section("### Presence and live delivery")
+    assert "las_channel_ack" in live
+    assert "[las-channel-probe]" in live
+    assert "say nothing about it" in live
+    assert "only then does the bridge attach the mailbox" in live
+
+
+def test_listen_under_a_monitor_is_explicitly_forbidden_and_non_claude_runtimes_are_named():
+    live = _section("### Presence and live delivery")
+    assert "Never start `las agent listen` under a Monitor" in live
+    for runtime in ("las bridge shell", "las bridge exec", "las bridge stdout"):
+        assert runtime in live
+
+
+def test_closing_report_is_skipped_on_housekeeping_turns_including_probes():
     report = _section("### Closing report")
     assert "Not on housekeeping turns" in report
+    assert "a channel probe" in report
     assert "no closing report and no TTS at all" in report
 
 
-def test_zombie_listener_is_purged_before_the_session_start_poll():
-    presence = _section("### Presence registration and pending messages")
-    purge = presence.index('pkill -f "las agent listen <agent_name>"')
-    assert purge < presence.index("las agent register")
-    assert purge < presence.index("las agent poll")
-
-
-def test_monitor_snippet_matches_the_tool_that_exists():
-    live = _section("### Live listening")
-    assert "timeout_ms: 1800000" in live       # the Monitor tool caps a watch at 30 minutes
-    assert "persistent: true" not in live      # no such option
+def test_installed_copy_matches_the_repo_copy_when_present():
+    installed = Path.home() / ".claude/skills/las-agent/SKILL.md"
+    if installed.exists():
+        assert installed.read_text() == SKILL, "run install.sh (or copy) — the shipped skill drifted from the repo"
