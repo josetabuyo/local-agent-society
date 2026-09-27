@@ -87,8 +87,11 @@ MailboxSource ──▶ Pipeline [interceptor, interceptor, …] ──▶ Sink
 - **Status file** `session/bridge-<agent>.json` (pid, sink, armed, counters)
   so `las bridge status` and the skill can ask "is this mailbox being
   delivered right now?" without opening a broker connection.
-- **CLI**: `las bridge claude|stdout|shell|exec|status|install` and
-  `las claude [args]`, which starts Claude Code with
+- **CLI**: one command per runtime — `las claude [args]`, `las codex`,
+  `las shell` — each chaining MCP registration, presence and the widget
+  before handing the terminal over (no alias, no separate steps), over the
+  low-level `las bridge claude|stdout|shell|exec|status|install`.
+  `las claude` starts Claude Code with
   `--dangerously-load-development-channels server:las` — mandatory while
   channels are a research preview, and the reason the backend's terminal
   launchers now run `las claude` instead of `claude`. `las bridge install`

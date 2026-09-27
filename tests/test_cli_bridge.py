@@ -98,3 +98,75 @@ def test_install_registers_the_mcp_server_idempotently_and_uninstall_removes_it(
     broken = runner.invoke(cli, ["bridge", "install"])
     assert broken.exit_code == 1 and "not touching" in broken.output
     assert config.read_text() == "{not json"
+
+
+# ── one command per runtime, chaining everything the session needs ────────────
+
+def _chain_spies(monkeypatch, tmp_path, agent="Robo"):
+    calls = _capture(monkeypatch)
+    monkeypatch.setattr(bridge_mod, "_agent_name_from_cwd", lambda: agent)
+    monkeypatch.setattr(bridge_mod, "resolve_agent_name", lambda name, **kw: name or agent)
+    config = tmp_path / ".claude.json"
+    monkeypatch.setenv("LAS_CLAUDE_CONFIG", str(config))
+    posts = []
+    monkeypatch.setattr(bridge_mod.api, "post", lambda path, data=None: (posts.append(path), {"registered": True})[1])
+    opened = []
+    monkeypatch.setattr(bridge_mod.subprocess, "run", lambda argv, **kw: opened.append(argv))
+    monkeypatch.setattr(bridge_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: f"/usr/local/bin/{name}")
+    return calls, config, posts, opened
+
+
+def test_las_claude_chains_mcp_registration_presence_and_widget_then_execs(monkeypatch, tmp_path):
+    calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path)
+    result = CliRunner().invoke(cli, ["claude", "--resume"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(config.read_text())["mcpServers"]["las"]["args"][-1] == "claude", "MCP server registered without a separate install step"
+    assert posts == ["/agents/Robo/vortexia/register"], "presence published"
+    assert opened == [["open", "localagentsociety://Robo?action=reopen"]], "widget brought to this Space"
+    assert calls == [["claude", bridge_mod.CLAUDE_CHANNEL_FLAG, bridge_mod.CLAUDE_CHANNEL_SERVER, "--resume"]]
+
+
+def test_las_claude_outside_an_agent_folder_skips_the_chain_but_still_passes_the_flag(monkeypatch, tmp_path):
+    calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path, agent=None)
+    assert CliRunner().invoke(cli, ["claude"]).exit_code == 0
+    assert not config.exists() and posts == [] and opened == []
+    assert calls == [["claude", bridge_mod.CLAUDE_CHANNEL_FLAG, bridge_mod.CLAUDE_CHANNEL_SERVER]]
+
+
+def test_chain_fails_soft_when_the_backend_is_down(monkeypatch, tmp_path):
+    calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path)
+
+    def down(path, data=None):
+        print("Error: backend not running. Try `las start`.")
+        raise SystemExit(1)
+
+    monkeypatch.setattr(bridge_mod.api, "post", down)
+    result = CliRunner().invoke(cli, ["claude", "--no-widget"])
+    assert result.exit_code == 0, "a dead backend must not stop the session from opening"
+    assert "presence not published" in result.output
+    assert opened == [], "--no-widget honored"
+    assert len(calls) == 1
+
+
+def test_las_codex_and_las_shell_chain_then_launch_their_sinks(monkeypatch, tmp_path):
+    calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path)
+    runner = CliRunner()
+    assert runner.invoke(cli, ["codex"]).exit_code == 0
+    assert runner.invoke(cli, ["shell", "--yes"]).exit_code == 0
+    monkeypatch.setenv("LAS_CODEX_CMD", "my-router --stdin")
+    assert runner.invoke(cli, ["codex", "--no-widget"]).exit_code == 0
+    bin_path = str(bridge_mod.BRIDGE_BIN)
+    assert calls[0] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "codex exec -"]
+    assert calls[1] == ["/usr/local/bin/node", bin_path, "shell", "--agent", "Robo", "--yes"]
+    assert calls[2] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "my-router --stdin"]
+    assert posts == ["/agents/Robo/vortexia/register"] * 3
+    assert len(opened) == 2, "two widget reopens: the third run passed --no-widget"
+
+
+def test_las_codex_refuses_clearly_when_codex_is_missing(monkeypatch, tmp_path):
+    calls, *_ = _chain_spies(monkeypatch, tmp_path)
+    monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: None if name == "codex" else f"/usr/local/bin/{name}")
+    result = CliRunner().invoke(cli, ["codex"])
+    assert result.exit_code == 1 and "codex not found" in result.output
+    assert calls == []

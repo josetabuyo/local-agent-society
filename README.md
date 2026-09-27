@@ -194,6 +194,25 @@ A TypeScript SDK is available at `sdk/society.ts`.
 
 ---
 
+## Opening a session — one command per runtime
+
+Every runtime that should hear this agent's messages is opened with one `las`
+command from its own terminal, in the agent's folder. Each one chains what
+the session needs — the `las` MCP server registered in `~/.claude.json`,
+presence published, the widget brought to the current Space — and then hands
+the terminal over. No alias, no `las widget`, no separate register step.
+
+| Command | What listens | What a message becomes |
+|---|---|---|
+| `las claude [args]` | Claude Code with the LAS channel (`bridge/`, ADR 0004) | a `<channel source="las">` event the model acts on, idle or mid-turn |
+| `las codex` | Codex CLI | a `codex exec` run in this folder; its answer goes back to the sender |
+| `las shell [--yes] [--all]` | a terminal with no AI | printed; `kind: "command"` ones run after a `y/N`, output goes back |
+
+A bare `claude` still works, only without live delivery: messages wait in the
+mailbox and the `/las-agent` skill says so in one line. `las bridge status`
+tells whether the current session is armed; `las bridge <sink>` is the
+low-level form behind all three.
+
 ## Widget buttons
 
 Each widget (Electron, `widget-electron/`) has a name/log face with a door

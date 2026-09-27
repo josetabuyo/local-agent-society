@@ -29,7 +29,9 @@ export class ExecSink {
       });
       let out = '';
       child.stdout.on('data', (chunk) => {
-        if (out.length < this.maxOutput) out += chunk.toString('utf8');
+        const s = chunk.toString('utf8');
+        this.echo.write(s); // the human at this terminal sees the answer too
+        if (out.length < this.maxOutput) out += s;
       });
       child.on('error', reject);
       child.on('close', async (code) => {

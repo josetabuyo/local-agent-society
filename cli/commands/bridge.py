@@ -6,7 +6,14 @@ implementation, in Node: bridge/bin/las-bridge.js (see docs/adr/0004). This
 module only knows how to launch it for a given sink, where its status file
 lives, and how to register it with Claude Code as a channel.
 
-Sinks:
+One command per runtime, each run from that runtime's own terminal, each
+chaining everything the session needs (MCP registration, presence, the
+widget on this Space) before handing over — see `_chain`:
+  las claude [args]   Claude Code with the LAS channel
+  las codex           Codex, fed by `las bridge exec --exec "codex exec -"`
+  las shell           a terminal with no AI in it
+
+Sinks (the low-level `las bridge <sink>` form):
   claude   Claude Code channel — normally started by Claude Code itself from
            ~/.claude.json (see `las bridge install`); run by hand only to debug
   stdout   one JSON line per message (a script, a log, a plain terminal)
@@ -18,13 +25,16 @@ Sinks:
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 import click
 
+from cli import api
 from cli.commands import complete_agent_names
-from cli.commands._agent_common import resolve_agent_name
+from cli.commands._agent_common import _agent_name_from_cwd, resolve_agent_name
 
 REPO = Path(__file__).resolve().parents[2]
 BRIDGE_BIN = REPO / "bridge" / "bin" / "las-bridge.js"
@@ -186,11 +196,97 @@ def bridge_install(uninstall):
     click.echo(f"Start sessions with `las claude` (adds {CLAUDE_CHANNEL_FLAG} {CLAUDE_CHANNEL_SERVER}).")
 
 
+def ensure_mcp_registered(quiet=True) -> bool:
+    """Idempotent `las bridge install` — True when the entry is (now) present."""
+    path = claude_config_path()
+    try:
+        config = json.loads(path.read_text()) if path.exists() else {}
+    except ValueError:
+        return False
+    servers = config.setdefault("mcpServers", {})
+    entry = mcp_server_entry()
+    if servers.get(MCP_SERVER_NAME) == entry:
+        return True
+    servers[MCP_SERVER_NAME] = entry
+    path.write_text(json.dumps(config, indent=2) + "\n")
+    if not quiet:
+        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server registered.")
+    return True
+
+
+def _register_presence(name: str) -> bool:
+    """`las agent register`, fail-soft: a backend that is down must not stop a session from opening."""
+    try:
+        result = api.post(f"/agents/{name}/vortexia/register", {})
+        return bool(result and result.get("registered"))
+    except SystemExit:
+        return False
+
+
+def _reopen_widget(name: str) -> None:
+    """Same URL-scheme reopen `las widget` does: the widget lands on THIS Space, the one the terminal is on."""
+    if sys.platform != "darwin":
+        return
+    subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=reopen"], check=False)
+
+
+def _chain(name: str | None, *, widget: bool = True) -> None:
+    """Everything a runtime session needs, in one go, before the runtime takes
+    the terminal over: the `las` MCP server registered (so Claude finds the
+    channel), presence published (so `las agents`/the widget show this agent
+    online), and the widget brought to this Space. Each step fails soft and
+    says nothing when it has nothing to say — the human typed ONE command."""
+    if not name:
+        return
+    ensure_mcp_registered()
+    if not _register_presence(name):
+        click.echo(f"{name}: backend unreachable — presence not published (session opens anyway).", err=True)
+    if widget:
+        _reopen_widget(name)
+
+
 @click.command("claude", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def claude_cmd(args):
-    """Start Claude Code with the LAS channel enabled (all other arguments pass through)."""
+def claude_cmd(no_widget, args):
+    """Start Claude Code here, connected to LAS: channel on, presence published, widget on this Space. Other arguments pass through."""
     if not shutil.which("claude"):
         click.echo("Error: claude not found on PATH.", err=True)
         raise SystemExit(1)
+    _chain(_agent_name_from_cwd(), widget=not no_widget)
     _exec(["claude", CLAUDE_CHANNEL_FLAG, CLAUDE_CHANNEL_SERVER, *args])
+
+
+CODEX_DEFAULT_CMD = "codex exec -"
+
+
+@click.command("codex")
+@_name_arg
+@click.option("--exec", "command", default=None, help=f'Command fed each message on stdin (default: "{CODEX_DEFAULT_CMD}", or $LAS_CODEX_CMD).')
+@click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
+@_intercept
+@_port
+def codex_cmd(name, command, no_widget, intercept_url, port):
+    """Connect Codex to LAS here: every mailbox message becomes a `codex exec` run in this folder, its answer sent back to the sender."""
+    name = resolve_agent_name(name)
+    command = command or os.environ.get("LAS_CODEX_CMD") or CODEX_DEFAULT_CMD
+    if command == CODEX_DEFAULT_CMD and not shutil.which("codex"):
+        click.echo("Error: codex not found on PATH (install the Codex CLI, or pass --exec).", err=True)
+        raise SystemExit(1)
+    _chain(name, widget=not no_widget)
+    _exec(bridge_argv("exec", name, _common(["--exec", command], intercept_url, port)))
+
+
+@click.command("shell")
+@_name_arg
+@click.option("--yes", is_flag=True, help="Run kind=command messages without asking on the TTY.")
+@click.option("--all", "run_all", is_flag=True, help="Offer EVERY message to run, not only kind=command.")
+@click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
+@_intercept
+@_port
+def shell_cmd(name, yes, run_all, no_widget, intercept_url, port):
+    """Connect a plain terminal (no AI) to LAS here: messages print, commands run after a y/N, output goes back to the sender."""
+    name = resolve_agent_name(name)
+    _chain(name, widget=not no_widget)
+    extra = (["--yes"] if yes else []) + (["--all"] if run_all else [])
+    _exec(bridge_argv("shell", name, _common(extra, intercept_url, port)))

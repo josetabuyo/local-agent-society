@@ -56,10 +56,19 @@ cat .las-agent.json 2>/dev/null || cat .agent.json 2>/dev/null
 
 ### Presence and live delivery (vortexia → this session)
 
-If a config file exists, run this once when the skill loads:
+**How a session is opened decides everything.** One `las` command per runtime, run from that runtime's own terminal, in the agent's folder — it chains what the session needs (the `las` MCP server registered, presence published, the widget brought to this Space) and then hands the terminal over:
 
 ```bash
-las agent register            # publishes "online" presence (retained) on vortexia
+las claude [claude args]   # Claude Code with the LAS channel — THIS session, if it was opened right
+las codex                  # Codex: each mailbox message becomes a `codex exec` run here, answer sent back
+las shell [--yes] [--all]  # a terminal with no AI: messages print, kind=command ones run after y/N
+```
+
+Nothing else to type — no `las widget`, no `las agent register`, no alias. Be the expert here: when the human asks how to "connect" a terminal, an agent, Codex, a shell, the answer is one of those three commands; never a pile of setup steps.
+
+When this skill loads, run exactly one check:
+
+```bash
 las bridge status             # is this session's LAS channel armed? exit 0 = yes
 ```
 
@@ -73,9 +82,10 @@ Treat it exactly as if the human had typed it (§7): act, then report as usual. 
 
 **Arming — the probe.** Right after it connects, the channel pushes one probe event (`kind="probe"`, text starting with `[las-channel-probe]`). Call the `las_channel_ack` tool with its `probe_id` immediately and say nothing about it. That single round trip proves the path end-to-end, and only then does the bridge attach the mailbox — before that nothing is consumed, because a session started without the channel flag would otherwise swallow messages silently (Claude Code drops channel events it wasn't told to accept, with no error). The probe is a liveness check, not a message: no report, no TTS, no comment — the same rule as the mic self-test.
 
-**If `las bridge status` exits non-zero**, the channel isn't armed in this session — almost always because Claude was started as bare `claude` instead of `las claude` (the wrapper adds `--dangerously-load-development-channels server:las`, mandatory while channels are a research preview), or the `las` MCP server isn't registered (`las bridge install`). Then, and only then, fall back to a one-shot drain and tell the user in one line that live delivery isn't active this session:
+**If `las bridge status` exits non-zero**, the channel isn't armed in this session — almost always because Claude was started as bare `claude` instead of `las claude` (the wrapper adds `--dangerously-load-development-channels server:las`, mandatory while channels are a research preview, and it is also what registers the `las` MCP server and publishes presence). Then, and only then, do the chain's work by hand, drain once, and tell the user in one line that live delivery isn't active this session and that `las claude` fixes it next time:
 
 ```bash
+las agent register            # presence — `las claude` would have done this
 las agent poll --timeout 2    # prints anything queued; the mailbox keeps everything until a consumer arms
 ```
 

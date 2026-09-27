@@ -23,12 +23,21 @@ def test_no_monitor_based_listener_remains_anywhere_in_the_skill():
     assert 'pkill -f "las agent listen' not in SKILL
 
 
-def test_session_start_registers_then_checks_the_channel_and_only_polls_as_fallback():
+def test_session_start_is_one_check_and_register_plus_poll_are_the_fallback_only():
     live = _section("### Presence and live delivery")
-    assert live.index("las agent register") < live.index("las bridge status")
-    assert live.index("las bridge status") < live.index("las agent poll --timeout 2")
-    assert "exits non-zero" in live and "fall back" in live
+    register_cmd = "las agent register            # presence"   # the fallback code block, not the prose that forbids it at start
+    assert live.index("las bridge status") < live.index(register_cmd)
+    assert live.index(register_cmd) < live.index("las agent poll --timeout 2")
+    assert "exits non-zero" in live and "by hand" in live
     assert "tell the user in one line that live delivery isn't active" in live
+
+
+def test_one_command_per_runtime_is_the_documented_way_to_open_a_session():
+    live = _section("### Presence and live delivery")
+    for cmd in ("las claude", "las codex", "las shell"):
+        assert cmd in live
+    assert "chains" in live and "hands the terminal over" in live
+    assert "no `las widget`, no `las agent register`, no alias" in live
 
 
 def test_channel_event_shape_and_reply_path_are_documented():
