@@ -512,7 +512,6 @@ def listen(name):
     # how long a connection actually lived, not what time it is.
     connected_at = [time.monotonic()]
     short_lived = [0]
-    stand_down = [None]  # set by on_disconnect when a bridge session took the mailbox
     FIGHT_DROPS, FIGHT_LIFETIME_S = 3, 15.0
 
     def on_connect(c, userdata, flags, rc, *_args):
@@ -534,11 +533,15 @@ def listen(name):
             return
         # Kicked? If a bridge session now exists for this agent, that is who
         # kicked us and who should hold the mailbox: yield, don't fight.
+        # Yielding means blocking right here, inside paho's own loop: a
+        # `disconnect()` from this callback does NOT stop loop_forever's
+        # reconnect (verified live 2026-09-28 — it reconnected silently and
+        # kicked the bridge back, forever). Blocking the callback keeps the
+        # connection dead, the process alive and quiet, and the old
+        # session's Monitor untouched until it expires on its own.
         sessions = _bridge_sessions(name)
         if sessions:
-            stand_down[0] = sessions
-            c.disconnect()
-            return
+            _stand_by_forever(name, sessions)
         lived = time.monotonic() - connected_at[0]
         short_lived[0] = short_lived[0] + 1 if lived < FIGHT_LIFETIME_S else 0
         if short_lived[0] >= FIGHT_DROPS:
@@ -584,8 +587,6 @@ def listen(name):
         click.echo(f"vortexia unreachable on :{mqtt_port} ({exc}) — is `vortexia start` running?", err=True)
         sys.exit(1)
     client.loop_forever()
-    if stand_down[0]:
-        _stand_by_forever(name, stand_down[0])
 
 
 @agent.command("sessions")

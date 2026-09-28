@@ -117,6 +117,5 @@ def test_legacy_listen_yields_when_a_bridge_session_kicks_it_later(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paho.mqtt.client", fake_client_mod)
 
     result = CliRunner().invoke(agents_mod.listen, ["Robo"])
-    assert FakeMQTTClient.instances[-1].disconnected is True, "yielded the mailbox instead of reconnecting"
-    assert slept == [3600]
+    assert slept == [3600], "blocked inside the disconnect callback — paho must never get to reconnect"
     assert "standing by" in result.output
