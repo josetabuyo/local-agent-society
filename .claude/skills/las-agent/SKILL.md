@@ -72,7 +72,7 @@ When this skill loads, run exactly one check:
 las bridge status             # is this session's LAS channel armed? exit 0 = yes
 ```
 
-Messages reach this session over the **LAS channel**: a Claude Code *channel* (an MCP server, `bridge/` in the local-agent-society repo, that Claude Code itself starts from `~/.claude.json` — see `las bridge install`). It holds the agent's vortexia mailbox and pushes every message into the session the instant it arrives, whether the session is idle at the prompt or busy (then it's queued into the next turn, in order). There is no Monitor, no polling loop and no re-arming: a message shows up in context as
+Messages reach this session over the **LAS channel**: a Claude Code *channel* (an MCP server, `bridge/` in the local-agent-society repo, that Claude Code itself starts from `~/.claude.json` — registered by `las claude` itself, repairable with `las claude register`). It holds the agent's vortexia mailbox and pushes every message into the session the instant it arrives, whether the session is idle at the prompt or busy (then it's queued into the next turn, in order). There is no Monitor, no polling loop and no re-arming: a message shows up in context as
 
 ```
 <channel source="las" sender="Robotics" origin="agent" kind="message" msg_id="..." ts="...">text</channel>

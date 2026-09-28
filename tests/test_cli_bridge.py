@@ -82,13 +82,13 @@ def test_status_exit_code_is_the_skill_contract(monkeypatch, tmp_path):
     assert dead.exit_code == 1, "a stale status file from a dead process must not read as delivering"
 
 
-def test_install_registers_las_bridge_claude_idempotently_and_uninstall_removes_it(monkeypatch, tmp_path):
+def test_claude_register_is_idempotent_and_unregister_removes_it(monkeypatch, tmp_path):
     config = tmp_path / ".claude.json"
     config.write_text(json.dumps({"theme": "dark", "mcpServers": {"other": {"command": "x"}}}))
     monkeypatch.setenv("LAS_CLAUDE_CONFIG", str(config))
     runner = CliRunner()
 
-    first = runner.invoke(cli, ["bridge", "install"])
+    first = runner.invoke(cli, ["claude", "register"])
     assert first.exit_code == 0, first.output
     data = json.loads(config.read_text())
     assert data["theme"] == "dark" and "other" in data["mcpServers"], "other keys untouched"
@@ -96,16 +96,16 @@ def test_install_registers_las_bridge_claude_idempotently_and_uninstall_removes_
         "the stable `las` shim, never an absolute node path (that depends on the shell that ran it)"
     assert "registered" in first.output and "las claude" in first.output
 
-    second = runner.invoke(cli, ["bridge", "install"])
+    second = runner.invoke(cli, ["claude", "register"])
     assert "already registered" in second.output
     assert json.loads(config.read_text()) == data
 
-    gone = runner.invoke(cli, ["bridge", "install", "--uninstall"])
+    gone = runner.invoke(cli, ["claude", "unregister"])
     assert gone.exit_code == 0
     assert "las" not in json.loads(config.read_text())["mcpServers"]
 
     config.write_text("{not json")
-    broken = runner.invoke(cli, ["bridge", "install"])
+    broken = runner.invoke(cli, ["claude", "register"])
     assert broken.exit_code == 1 and "not touching" in broken.output
     assert config.read_text() == "{not json"
 
@@ -120,7 +120,7 @@ def test_a_working_entry_is_never_rewritten_but_a_broken_one_is_repaired(monkeyp
     config.write_text(json.dumps({"mcpServers": {"las": older_shape}}))
     assert bridge_mod.ensure_mcp_registered() is True
     assert json.loads(config.read_text())["mcpServers"]["las"] == older_shape, "an older but working entry stays"
-    assert "already registered" in CliRunner().invoke(cli, ["bridge", "install"]).output
+    assert "already registered" in CliRunner().invoke(cli, ["claude", "register"]).output
 
     broken = {"command": "/usr/local/bin/node-that-does-not-exist", "args": [str(bridge_mod.BRIDGE_BIN), "claude"]}
     config.write_text(json.dumps({"mcpServers": {"las": broken}}))
@@ -128,7 +128,7 @@ def test_a_working_entry_is_never_rewritten_but_a_broken_one_is_repaired(monkeyp
     assert json.loads(config.read_text())["mcpServers"]["las"] == {"command": "/Users/me/.local/bin/las", "args": ["bridge", "claude"]}, "a dead command is repaired"
 
     config.write_text(json.dumps({"mcpServers": {"las": older_shape}}))
-    forced = CliRunner().invoke(cli, ["bridge", "install", "--force"])
+    forced = CliRunner().invoke(cli, ["claude", "register", "--force"])
     assert "registered ->" in forced.output
     assert json.loads(config.read_text())["mcpServers"]["las"]["args"] == ["bridge", "claude"]
 
@@ -228,3 +228,30 @@ def test_bridge_claude_outside_an_agent_folder_starts_the_idle_server_instead_of
     result = CliRunner().invoke(cli, ["bridge", "claude"])
     assert result.exit_code == 0, result.output
     assert calls == [["/usr/local/bin/node", str(bridge_mod.BRIDGE_BIN), "claude"]], "no --agent: the Node side goes idle"
+
+
+def test_las_claude_passes_options_prompts_and_claude_subcommands_through(monkeypatch, tmp_path):
+    calls, *_ = _chain_spies(monkeypatch, tmp_path)
+    runner = CliRunner()
+    flag = [bridge_mod.CLAUDE_CHANNEL_FLAG, bridge_mod.CLAUDE_CHANNEL_SERVER]
+    assert runner.invoke(cli, ["claude"]).exit_code == 0
+    assert runner.invoke(cli, ["claude", "--resume"]).exit_code == 0
+    assert runner.invoke(cli, ["claude", "fix the failing test"]).exit_code == 0
+    assert runner.invoke(cli, ["claude", "--model", "opus", "explain this repo"]).exit_code == 0
+    assert runner.invoke(cli, ["claude", "mcp", "list"]).exit_code == 0
+    assert runner.invoke(cli, ["claude", "--no-widget", "-p", "hi"]).exit_code == 0
+    assert calls == [
+        ["claude", *flag],
+        ["claude", *flag, "--resume"],
+        ["claude", *flag, "fix the failing test"],
+        ["claude", *flag, "--model", "opus", "explain this repo"],
+        ["claude", *flag, "mcp", "list"],
+        ["claude", *flag, "-p", "hi"],
+    ]
+
+
+def test_las_claude_help_lists_only_our_scoped_subcommands():
+    out = " ".join(CliRunner().invoke(cli, ["claude", "--help"]).output.split())
+    assert "register" in out and "unregister" in out
+    assert "goes to Claude Code as-is" in out
+    assert "No such command" not in out

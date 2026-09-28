@@ -279,13 +279,13 @@ if ! command -v las &>/dev/null \
 fi
 
 echo ""
-# ── Register the bridge as Claude Code's `las` channel server ────────────────
+# ── Register the LAS channel server in Claude Code's own config ─────────────
 # User-level (~/.claude.json), so every agent folder gets it. Sessions must
 # then be started with `las claude` (adds the research-preview channel flag).
 if command -v las >/dev/null 2>&1; then
-    las bridge install
+    las claude register
 else
-    echo "⚠️  'las' not on PATH yet — run 'las bridge install' once it is."
+    echo "⚠️  'las' not on PATH yet — run 'las claude register' once it is."
 fi
 
 echo "Done! Start with:"

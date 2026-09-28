@@ -4,7 +4,7 @@
  *
  * Deliver an agent's vortexia mailbox into a session runtime:
  *   claude   Claude Code channel (this process is the MCP server; start it
- *            from ~/.claude.json's mcpServers, see `las bridge install`)
+ *            from ~/.claude.json's mcpServers, see `las claude register`)
  *   stdout   one JSON line per message (what `las agent listen` printed)
  *   shell    a plain terminal: print every message, offer kind="command"
  *            ones to run here (--yes to skip the prompt, --all for any text)

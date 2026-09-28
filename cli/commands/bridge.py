@@ -13,9 +13,13 @@ widget on this Space) before handing over — see `_chain`:
   las codex           Codex, fed by `las bridge exec --exec "codex exec -"`
   las shell           a terminal with no AI in it
 
+Claude's own config lives under its own scope: `las claude register|unregister`
+(Codex and the shell need no registration — their commands launch the bridge
+directly).
+
 Sinks (the low-level `las bridge <sink>` form):
   claude   Claude Code channel — normally started by Claude Code itself from
-           ~/.claude.json (see `las bridge install`); run by hand only to debug
+           ~/.claude.json (see `las claude register`); run by hand only to debug
   stdout   one JSON line per message (a script, a log, a plain terminal)
   shell    a terminal with no AI in it: print messages, offer kind="command"
            ones to run in the agent's folder (confirmed on the TTY)
@@ -205,36 +209,8 @@ def _entry_is_usable(entry) -> bool:
     return ours and os.access(str(entry.get("command", "")), os.X_OK)
 
 
-@bridge.command("install")
-@click.option("--uninstall", is_flag=True, help="Remove the `las` MCP server entry instead.")
-@click.option("--force", is_flag=True, help="Rewrite the entry even if a working one exists.")
-def bridge_install(uninstall, force):
-    """Register the bridge as the `las` MCP server in ~/.claude.json (user-level, so every agent folder gets it)."""
-    path = claude_config_path()
-    try:
-        config = json.loads(path.read_text()) if path.exists() else {}
-    except ValueError:
-        click.echo(f"Error: {path} is not valid JSON — not touching it.", err=True)
-        raise SystemExit(1)
-    servers = config.setdefault("mcpServers", {})
-    if uninstall:
-        removed = servers.pop(MCP_SERVER_NAME, None) is not None
-        path.write_text(json.dumps(config, indent=2) + "\n")
-        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server {'removed' if removed else 'was not registered'}.")
-        return
-    entry = mcp_server_entry()
-    current = servers.get(MCP_SERVER_NAME)
-    if current == entry or (not force and _entry_is_usable(current)):
-        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server already registered -> {current['command']} {' '.join(current['args'])}")
-    else:
-        servers[MCP_SERVER_NAME] = entry
-        path.write_text(json.dumps(config, indent=2) + "\n")
-        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server registered -> {entry['command']} {' '.join(entry['args'])}")
-    click.echo(f"Start sessions with `las claude` (adds {CLAUDE_CHANNEL_FLAG} {CLAUDE_CHANNEL_SERVER}).")
-
-
 def ensure_mcp_registered(quiet=True) -> bool:
-    """Idempotent `las bridge install` — True when the entry is (now) present."""
+    """Idempotent `las claude register` — True when the entry is (now) present."""
     path = claude_config_path()
     try:
         config = json.loads(path.read_text()) if path.exists() else {}
@@ -284,16 +260,86 @@ def _chain(name: str | None, *, widget: bool = True) -> None:
         _reopen_widget(name)
 
 
-@click.command("claude", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
-@click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def claude_cmd(no_widget, args):
-    """Start Claude Code here, connected to LAS: channel on, presence published, widget on this Space. Other arguments pass through."""
+def _launch_claude(args, no_widget=False):
     if not shutil.which("claude"):
         click.echo("Error: claude not found on PATH.", err=True)
         raise SystemExit(1)
     _chain(_agent_name_from_cwd(), widget=not no_widget)
     _exec(["claude", CLAUDE_CHANNEL_FLAG, CLAUDE_CHANNEL_SERVER, *args])
+
+
+class ClaudeGroup(click.Group):
+    """`las claude` is scoped like `las agent`: its own subcommands (register,
+    unregister) are ours; ANY other token — `--resume`, a prompt, `mcp list` —
+    belongs to Claude Code and is passed through untouched. An unknown first
+    token therefore becomes a pass-through launch instead of "No such command"."""
+
+    def get_command(self, ctx, name):
+        cmd = super().get_command(ctx, name)
+        if cmd is not None:
+            return cmd
+
+        @click.command(name, add_help_option=False, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+        @click.argument("rest", nargs=-1, type=click.UNPROCESSED)
+        @click.pass_context
+        def passthrough(pctx, rest):
+            parent = pctx.parent
+            _launch_claude([*parent.args, name, *rest], (parent.obj or {}).get("no_widget", False))
+
+        return passthrough
+
+    def list_commands(self, ctx):
+        return sorted(self.commands)
+
+
+@click.group("claude", cls=ClaudeGroup, invoke_without_command=True, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
+@click.pass_context
+def claude_cmd(ctx, no_widget):
+    """Claude Code, connected to LAS: `las claude [claude args]` starts it here with the channel on, presence published and the widget on this Space.
+
+    Everything after `las claude` that isn't one of the subcommands below goes to Claude Code as-is (`--resume`, a prompt, `mcp list`...).
+    """
+    ctx.obj = {"no_widget": no_widget}
+    if ctx.invoked_subcommand is None:
+        _launch_claude(list(ctx.args), no_widget)
+
+
+@claude_cmd.command("register")
+@click.option("--force", is_flag=True, help="Rewrite the entry even if a working one exists.")
+def claude_register(force):
+    """Register the LAS channel server in Claude Code's own config (~/.claude.json). `las claude` does this by itself; use it to repair."""
+    path = claude_config_path()
+    try:
+        config = json.loads(path.read_text()) if path.exists() else {}
+    except ValueError:
+        click.echo(f"Error: {path} is not valid JSON — not touching it.", err=True)
+        raise SystemExit(1)
+    servers = config.setdefault("mcpServers", {})
+    entry = mcp_server_entry()
+    current = servers.get(MCP_SERVER_NAME)
+    if current == entry or (not force and _entry_is_usable(current)):
+        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server already registered -> {current['command']} {' '.join(current['args'])}")
+    else:
+        servers[MCP_SERVER_NAME] = entry
+        path.write_text(json.dumps(config, indent=2) + "\n")
+        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server registered -> {entry['command']} {' '.join(entry['args'])}")
+    click.echo(f"Start sessions with `las claude` (adds {CLAUDE_CHANNEL_FLAG} {CLAUDE_CHANNEL_SERVER}).")
+
+
+@claude_cmd.command("unregister")
+def claude_unregister():
+    """Remove the LAS channel server from Claude Code's config."""
+    path = claude_config_path()
+    try:
+        config = json.loads(path.read_text()) if path.exists() else {}
+    except ValueError:
+        click.echo(f"Error: {path} is not valid JSON — not touching it.", err=True)
+        raise SystemExit(1)
+    servers = config.setdefault("mcpServers", {})
+    removed = servers.pop(MCP_SERVER_NAME, None) is not None
+    path.write_text(json.dumps(config, indent=2) + "\n")
+    click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server {'removed' if removed else 'was not registered'}.")
 
 
 CODEX_DEFAULT_CMD = "codex exec -"

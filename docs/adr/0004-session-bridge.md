@@ -90,11 +90,12 @@ MailboxSource ──▶ Pipeline [interceptor, interceptor, …] ──▶ Sink
 - **CLI**: one command per runtime — `las claude [args]`, `las codex`,
   `las shell` — each chaining MCP registration, presence and the widget
   before handing the terminal over (no alias, no separate steps), over the
-  low-level `las bridge claude|stdout|shell|exec|status|install`.
+  low-level `las bridge claude|stdout|shell|exec|status`.
   `las claude` starts Claude Code with
   `--dangerously-load-development-channels server:las` — mandatory while
   channels are a research preview, and the reason the backend's terminal
-  launchers now run `las claude` instead of `claude`. `las bridge install`
+  launchers now run `las claude` instead of `claude`. `las claude register` (Claude's own scope — the bridge itself is
+  runtime-agnostic, and `las claude` registers by itself)
   registers the server once, user-level, in `~/.claude.json`.
 - **Skill**: `/las-agent` no longer arms anything. At session start it runs
   `las agent register` and `las bridge status`; it polls only when the
