@@ -7,8 +7,18 @@ import os
 
 from click.testing import CliRunner
 
+import pytest
+
 from cli.commands import bridge as bridge_mod
 from cli.main import cli
+
+
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_claude_config(monkeypatch, tmp_path):
+    """Every test here writes ~/.claude.json only through this override — a test
+    once could have registered a fake node path into the real file."""
+    monkeypatch.setenv("LAS_CLAUDE_CONFIG", str(tmp_path / "claude.json"))
+    monkeypatch.setattr(bridge_mod, "_las", lambda: "/Users/me/.local/bin/las")
 
 
 def _capture(monkeypatch):
@@ -72,18 +82,18 @@ def test_status_exit_code_is_the_skill_contract(monkeypatch, tmp_path):
     assert dead.exit_code == 1, "a stale status file from a dead process must not read as delivering"
 
 
-def test_install_registers_the_mcp_server_idempotently_and_uninstall_removes_it(monkeypatch, tmp_path):
+def test_install_registers_las_bridge_claude_idempotently_and_uninstall_removes_it(monkeypatch, tmp_path):
     config = tmp_path / ".claude.json"
     config.write_text(json.dumps({"theme": "dark", "mcpServers": {"other": {"command": "x"}}}))
     monkeypatch.setenv("LAS_CLAUDE_CONFIG", str(config))
-    monkeypatch.setattr(bridge_mod, "_node", lambda: "/usr/local/bin/node")
     runner = CliRunner()
 
     first = runner.invoke(cli, ["bridge", "install"])
     assert first.exit_code == 0, first.output
     data = json.loads(config.read_text())
     assert data["theme"] == "dark" and "other" in data["mcpServers"], "other keys untouched"
-    assert data["mcpServers"]["las"] == {"command": "/usr/local/bin/node", "args": [str(bridge_mod.BRIDGE_BIN), "claude"]}
+    assert data["mcpServers"]["las"] == {"command": "/Users/me/.local/bin/las", "args": ["bridge", "claude"]}, \
+        "the stable `las` shim, never an absolute node path (that depends on the shell that ran it)"
     assert "registered" in first.output and "las claude" in first.output
 
     second = runner.invoke(cli, ["bridge", "install"])
@@ -98,6 +108,46 @@ def test_install_registers_the_mcp_server_idempotently_and_uninstall_removes_it(
     broken = runner.invoke(cli, ["bridge", "install"])
     assert broken.exit_code == 1 and "not touching" in broken.output
     assert config.read_text() == "{not json"
+
+
+def test_a_working_entry_is_never_rewritten_but_a_broken_one_is_repaired(monkeypatch, tmp_path):
+    config = tmp_path / ".claude.json"
+    monkeypatch.setenv("LAS_CLAUDE_CONFIG", str(config))
+    good_node = tmp_path / "node"
+    good_node.write_text("#!/bin/sh\n")
+    good_node.chmod(0o755)
+    older_shape = {"command": str(good_node), "args": [str(bridge_mod.BRIDGE_BIN), "claude"]}
+    config.write_text(json.dumps({"mcpServers": {"las": older_shape}}))
+    assert bridge_mod.ensure_mcp_registered() is True
+    assert json.loads(config.read_text())["mcpServers"]["las"] == older_shape, "an older but working entry stays"
+    assert "already registered" in CliRunner().invoke(cli, ["bridge", "install"]).output
+
+    broken = {"command": "/usr/local/bin/node-that-does-not-exist", "args": [str(bridge_mod.BRIDGE_BIN), "claude"]}
+    config.write_text(json.dumps({"mcpServers": {"las": broken}}))
+    assert bridge_mod.ensure_mcp_registered() is True
+    assert json.loads(config.read_text())["mcpServers"]["las"] == {"command": "/Users/me/.local/bin/las", "args": ["bridge", "claude"]}, "a dead command is repaired"
+
+    config.write_text(json.dumps({"mcpServers": {"las": older_shape}}))
+    forced = CliRunner().invoke(cli, ["bridge", "install", "--force"])
+    assert "registered ->" in forced.output
+    assert json.loads(config.read_text())["mcpServers"]["las"]["args"] == ["bridge", "claude"]
+
+
+def test_node_is_found_on_path_or_in_nvm_and_homebrew_fallbacks(monkeypatch, tmp_path):
+    monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: "/path/node" if name == "node" else None)
+    assert bridge_mod._node() == "/path/node"
+    monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: None)
+    nvm = tmp_path / ".nvm/versions/node"
+    for v in ("v18.18.2", "v20.20.2", "v20.20.1"):
+        d = nvm / v / "bin"
+        d.mkdir(parents=True)
+        (d / "node").write_text("")
+        (d / "node").chmod(0o755)
+    monkeypatch.setattr(bridge_mod.Path, "home", classmethod(lambda cls: tmp_path))
+    assert bridge_mod._node() == str(nvm / "v20.20.2/bin/node"), "newest nvm install wins"
+    monkeypatch.setattr(bridge_mod, "_node_candidates", lambda: ["/nowhere/node"])
+    result = CliRunner().invoke(cli, ["bridge", "stdout", "Robo"])
+    assert result.exit_code == 1 and "node not found" in result.output
 
 
 # ── one command per runtime, chaining everything the session needs ────────────
@@ -121,7 +171,7 @@ def test_las_claude_chains_mcp_registration_presence_and_widget_then_execs(monke
     calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path)
     result = CliRunner().invoke(cli, ["claude", "--resume"])
     assert result.exit_code == 0, result.output
-    assert json.loads(config.read_text())["mcpServers"]["las"]["args"][-1] == "claude", "MCP server registered without a separate install step"
+    assert json.loads(config.read_text())["mcpServers"]["las"] == {"command": "/Users/me/.local/bin/las", "args": ["bridge", "claude"]}, "MCP server registered without a separate install step"
     assert posts == ["/agents/Robo/vortexia/register"], "presence published"
     assert opened == [["open", "localagentsociety://Robo?action=reopen"]], "widget brought to this Space"
     assert calls == [["claude", bridge_mod.CLAUDE_CHANNEL_FLAG, bridge_mod.CLAUDE_CHANNEL_SERVER, "--resume"]]
@@ -170,3 +220,11 @@ def test_las_codex_refuses_clearly_when_codex_is_missing(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli, ["codex"])
     assert result.exit_code == 1 and "codex not found" in result.output
     assert calls == []
+
+
+def test_bridge_claude_outside_an_agent_folder_starts_the_idle_server_instead_of_failing(monkeypatch):
+    calls = _capture(monkeypatch)
+    monkeypatch.setattr(bridge_mod, "_agent_name_from_cwd", lambda: None)
+    result = CliRunner().invoke(cli, ["bridge", "claude"])
+    assert result.exit_code == 0, result.output
+    assert calls == [["/usr/local/bin/node", str(bridge_mod.BRIDGE_BIN), "claude"]], "no --agent: the Node side goes idle"

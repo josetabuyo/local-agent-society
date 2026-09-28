@@ -193,3 +193,20 @@ export class ClaudeChannelSink {
     await this.server.close();
   }
 }
+
+/**
+ * A do-nothing MCP server for a Claude session opened outside any agent
+ * folder: no channel capability, no tools, just a clean connection that
+ * ends when Claude Code closes it. Resolves on close.
+ */
+export async function idleClaudeServer({ transport = new StdioServerTransport(), stdin = process.stdin, version = '0.1.0' } = {}) {
+  const server = new Server({ name: SERVER_NAME, version }, { capabilities: {}, instructions: 'No Local Agent Society agent in this folder; this channel is idle.' });
+  await server.connect(transport);
+  await new Promise((resolve) => {
+    server.onclose = resolve;
+    // The SDK's stdio transport only closes itself on a read error, not when
+    // stdin ends — and a parent that exits closes our stdin. Watch it too.
+    stdin.once('end', resolve);
+    stdin.once('close', resolve);
+  });
+}

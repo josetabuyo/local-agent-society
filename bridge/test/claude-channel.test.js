@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { z } from 'zod';
-import { ClaudeChannelSink, CHANNEL_NOTIFICATION, ACK_TOOL, REPLY_TOOL, STATUS_TOOL, PROBE_PREFIX } from '../src/sinks/claude-channel.js';
+import { PassThrough } from 'node:stream';
+import { ClaudeChannelSink, idleClaudeServer, CHANNEL_NOTIFICATION, ACK_TOOL, REPLY_TOOL, STATUS_TOOL, PROBE_PREFIX } from '../src/sinks/claude-channel.js';
 import { normalize } from '../src/envelope.js';
 
 const ChannelEvent = z.object({ method: z.literal(CHANNEL_NOTIFICATION), params: z.object({ content: z.string(), meta: z.record(z.string()).optional() }) });
@@ -95,4 +96,26 @@ test('closing the transport (Claude Code exiting) fires onclose so the bridge ca
   await client.close();
   await settle();
   assert.equal(closed, true);
+});
+
+test('outside an agent folder the claude sink is an idle server: connected, no channel capability, no tools, ends on close', async () => {
+  const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+  const done = idleClaudeServer({ transport: serverT });
+  const client = new Client({ name: 'fake-claude-code', version: '0' }, { capabilities: {} });
+  await client.connect(clientT);
+  assert.equal(client.getServerCapabilities().experimental, undefined);
+  assert.equal(client.getServerCapabilities().tools, undefined);
+  assert.match(client.getInstructions(), /idle/);
+  await client.close();
+  await done;
+});
+
+test('the idle server also ends when stdin ends (parent gone), not only on a transport close', async () => {
+  const [, serverT] = InMemoryTransport.createLinkedPair();
+  const stdin = new PassThrough();
+  stdin.resume(); // flowing, like process.stdin once the transport listens for 'data' — 'end' only fires when consumed
+  const done = idleClaudeServer({ transport: serverT, stdin });
+  await settle();
+  stdin.end();
+  await done;
 });

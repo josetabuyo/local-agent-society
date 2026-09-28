@@ -15,6 +15,7 @@
  * (first-decision hook, fails open), --port N (broker), --quiet.
  */
 import { parseArgs } from 'node:util';
+import { idleClaudeServer } from '../src/sinks/claude-channel.js';
 import {
   Bridge, MailboxSource, Pipeline, dedupInterceptor, ignoreKindsInterceptor, senderPolicyInterceptor,
   micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, StdoutSink, ShellSink, ExecSink,
@@ -50,6 +51,16 @@ let agent;
 try {
   agent = resolveAgent({ name: opts.agent });
 } catch (err) {
+  if (sinkName === 'claude') {
+    // Registered user-level, this server is spawned for EVERY Claude session,
+    // including ones outside any agent folder. There, stay connected as an
+    // empty server instead of dying: a dead MCP server shows up as a red
+    // "failed" line in every unrelated project, and there is nothing to
+    // deliver anyway.
+    log(`no LAS agent here (${err.message}) — idle, delivering nothing`);
+    await idleClaudeServer();
+    process.exit(0);
+  }
   process.stderr.write(`las-bridge: ${err.message}\n`);
   process.exit(64);
 }
@@ -100,7 +111,14 @@ async function shutdown(code) {
 
 source.on('connect', ({ sessionPresent, port }) => log(`${agent.name}: mailbox attached on :${port} (${sessionPresent ? 'session resumed' : 'new session'})`));
 source.on('takeover', () => shutdown(2));
-if (sink instanceof ClaudeChannelSink) sink.onclose = () => shutdown(0);
+if (sink instanceof ClaudeChannelSink) {
+  sink.onclose = () => shutdown(0);
+  // Claude Code exiting closes our stdin; the SDK's stdio transport does not
+  // turn that into onclose by itself, and the MQTT connection would keep this
+  // process alive — a zombie holding the mailbox. Stdin end == parent gone.
+  process.stdin.once('end', () => shutdown(0));
+  process.stdin.once('close', () => shutdown(0));
+}
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 process.on('SIGHUP', () => shutdown(0));

@@ -53,12 +53,24 @@ def claude_config_path() -> Path:
     return Path(os.environ.get("LAS_CLAUDE_CONFIG") or (Path.home() / ".claude.json"))
 
 
+def _node_candidates() -> list:
+    """Where a Node binary may live when PATH doesn't say (Claude Code spawns
+    MCP servers with whatever PATH its own launcher had — a GUI-launched or
+    non-login shell often has no nvm in it): nvm's newest install, then
+    Homebrew, then the classic /usr/local."""
+    nvm = sorted((Path.home() / ".nvm/versions/node").glob("v*/bin/node"), key=lambda q: [int(x) for x in q.parts[-3][1:].split(".") if x.isdigit()], reverse=True)
+    return [str(q) for q in nvm] + ["/opt/homebrew/bin/node", "/usr/local/bin/node"]
+
+
 def _node() -> str:
     node = shutil.which("node")
-    if not node:
-        click.echo("Error: node not found on PATH — the bridge is a Node program (see bridge/).", err=True)
-        raise SystemExit(1)
-    return node
+    if node:
+        return node
+    for candidate in _node_candidates():
+        if os.access(candidate, os.X_OK):
+            return candidate
+    click.echo("Error: node not found (PATH, nvm, Homebrew) — the bridge is a Node program (see bridge/).", err=True)
+    raise SystemExit(1)
 
 
 def _exec(argv):
@@ -94,9 +106,14 @@ _port = click.option("--port", default=None, type=int, help="Broker MQTT port (d
 @_intercept
 @_port
 def bridge_claude(name, intercept_url, port):
-    """Run the Claude Code channel server by hand (debugging; Claude Code normally starts it)."""
-    name = resolve_agent_name(name)
-    _exec(bridge_argv("claude", name, _common([], intercept_url, port)))
+    """Run the Claude Code channel server (Claude Code starts this itself from ~/.claude.json).
+
+    Outside an agent folder it still starts — as an idle, empty server — so a
+    Claude session in any other project never shows a failed MCP server."""
+    name = name or _agent_name_from_cwd()
+    extra = _common([], intercept_url, port)
+    argv = bridge_argv("claude", name, extra) if name else [_node(), str(BRIDGE_BIN), "claude", *extra]
+    _exec(argv)
 
 
 @bridge.command("stdout")
@@ -166,13 +183,32 @@ def bridge_status(name):
     raise SystemExit(0 if armed else 1)
 
 
+def _las() -> str:
+    """The `las` console script itself — a stable path (pipx shim) that does not
+    depend on which shell ran the registration. Registering an absolute `node`
+    path here once broke every session: the path was whatever `which node`
+    said in the shell that happened to run `las claude`, and a shell without
+    nvm produced a binary that did not exist. `las bridge claude` resolves
+    node at spawn time instead (see _node)."""
+    return shutil.which("las") or sys.argv[0] or "las"
+
+
 def mcp_server_entry() -> dict:
-    return {"command": _node(), "args": [str(BRIDGE_BIN), "claude"]}
+    return {"command": _las(), "args": ["bridge", "claude"]}
+
+
+def _entry_is_usable(entry) -> bool:
+    """An entry we (or an older version of us) wrote, whose command still exists."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("args"), list):
+        return False
+    ours = entry["args"] == ["bridge", "claude"] or (entry["args"][:1] == [str(BRIDGE_BIN)] and entry["args"][-1:] == ["claude"])
+    return ours and os.access(str(entry.get("command", "")), os.X_OK)
 
 
 @bridge.command("install")
 @click.option("--uninstall", is_flag=True, help="Remove the `las` MCP server entry instead.")
-def bridge_install(uninstall):
+@click.option("--force", is_flag=True, help="Rewrite the entry even if a working one exists.")
+def bridge_install(uninstall, force):
     """Register the bridge as the `las` MCP server in ~/.claude.json (user-level, so every agent folder gets it)."""
     path = claude_config_path()
     try:
@@ -187,8 +223,9 @@ def bridge_install(uninstall):
         click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server {'removed' if removed else 'was not registered'}.")
         return
     entry = mcp_server_entry()
-    if servers.get(MCP_SERVER_NAME) == entry:
-        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server already registered.")
+    current = servers.get(MCP_SERVER_NAME)
+    if current == entry or (not force and _entry_is_usable(current)):
+        click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server already registered -> {current['command']} {' '.join(current['args'])}")
     else:
         servers[MCP_SERVER_NAME] = entry
         path.write_text(json.dumps(config, indent=2) + "\n")
@@ -204,10 +241,12 @@ def ensure_mcp_registered(quiet=True) -> bool:
     except ValueError:
         return False
     servers = config.setdefault("mcpServers", {})
-    entry = mcp_server_entry()
-    if servers.get(MCP_SERVER_NAME) == entry:
+    # Leave a working entry alone — even an older-shaped one — so a chain run
+    # from an odd shell can never downgrade a good registration into a broken
+    # one. Only a missing or broken entry gets (re)written.
+    if _entry_is_usable(servers.get(MCP_SERVER_NAME)):
         return True
-    servers[MCP_SERVER_NAME] = entry
+    servers[MCP_SERVER_NAME] = mcp_server_entry()
     path.write_text(json.dumps(config, indent=2) + "\n")
     if not quiet:
         click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server registered.")
