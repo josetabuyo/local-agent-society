@@ -417,9 +417,10 @@ def codex_cmd(command, no_widget, intercept_url, port, codex_args):
         command = command or os.environ.get("LAS_CODEX_CMD")
         _exec(bridge_argv("exec", name, _common(["--exec", command], intercept_url, port)))
         return
-    from cli.path_utils import find_nearest_agent_dir
-    agent_dir = find_nearest_agent_dir(Path.cwd()) or os.getcwd()
-    raise SystemExit(run_codex_interactive(name, agent_dir, codex_args, intercept_url, port))
+    # Codex works where you ARE, not at the agent's root: the agent identity
+    # comes from the nearest .las-agent.json upward, the working directory is
+    # the one you launched from — exactly like running `codex --yolo` by hand.
+    raise SystemExit(run_codex_interactive(name, os.getcwd(), codex_args, intercept_url, port))
 
 
 @click.command("shell")

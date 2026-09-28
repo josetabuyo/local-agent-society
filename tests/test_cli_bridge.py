@@ -304,3 +304,16 @@ def test_las_claude_inside_a_claude_session_guides_instead_of_nesting(monkeypatc
     assert "already inside a Claude session" in result.output
     assert "las claude --resume" in result.output and "las shell" in result.output
     assert calls == [], "nothing launched, nothing chained"
+
+
+def test_las_codex_runs_in_the_current_directory_not_the_agent_root(monkeypatch, tmp_path):
+    """Identity from the nearest .las-agent.json upward; working directory = where you launched it."""
+    _chain_spies(monkeypatch, tmp_path)
+    runs = []
+    monkeypatch.setattr(bridge_mod, "run_codex_interactive", lambda name, agent_dir, *a, **k: (runs.append((name, agent_dir)), 0)[1])
+    monkeypatch.delenv("LAS_CODEX_CMD", raising=False)
+    sub = tmp_path / "RelayRobotics" / "astra-supervisor"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+    assert CliRunner().invoke(cli, ["codex"]).exit_code == 0
+    assert runs == [("Robo", str(sub))]

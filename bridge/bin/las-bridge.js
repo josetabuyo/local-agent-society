@@ -87,14 +87,15 @@ switch (sinkName) {
     sink = new StdoutSink();
     break;
   case 'shell':
-    sink = new ShellSink({ cwd: agent.dir, confirm: !opts.yes, all: opts.all });
+    // Where you launched it, not the agent's root: same as running the shell yourself.
+    sink = new ShellSink({ cwd: process.cwd(), confirm: !opts.yes, all: opts.all });
     break;
   case 'exec':
     if (!opts.exec) {
       process.stderr.write('las-bridge exec: --exec CMD is required\n');
       process.exit(64);
     }
-    sink = new ExecSink({ command: opts.exec, cwd: agent.dir });
+    sink = new ExecSink({ command: opts.exec, cwd: process.cwd() });
     break;
 }
 
@@ -102,7 +103,7 @@ switch (sinkName) {
 // its own inbox, and holds the agent-level one only while it is the default.
 const runtime = opts.runtime || (sinkName === 'exec' ? (opts.exec.trim().split(/\s+/)[0] === 'codex' ? 'codex' : 'exec') : sinkName === 'claude' ? 'claude' : sinkName);
 const sid = newSessionId(runtime);
-const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: agent.dir, log });
+const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), log });
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
 const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });
 const status = new StatusFile({ agent: agent.name, sink: sink.name });
