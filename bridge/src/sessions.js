@@ -110,6 +110,9 @@ export class DefaultWatcher extends EventEmitter {
     const client = this.client;
     this.client = null;
     if (!client) return;
-    await new Promise((resolve) => client.end(false, {}, () => resolve()));
+    // A late packet on a socket we are closing is not an error worth a line.
+    client.removeAllListeners('error');
+    client.on('error', () => {});
+    await new Promise((resolve) => client.end(true, {}, () => resolve()));
   }
 }

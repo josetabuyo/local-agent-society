@@ -60,7 +60,7 @@ cat .las-agent.json 2>/dev/null || cat .agent.json 2>/dev/null
 
 ```bash
 las claude [claude args]   # Claude Code with the LAS channel — THIS session, if it was opened right
-las codex                  # Codex: each mailbox message becomes a `codex exec` run here, answer sent back
+las codex [codex args]     # Codex's own TUI (`codex --yolo`) in a PTY; every mailbox message is typed into it
 las shell [--yes] [--all]  # a terminal with no AI: messages print, kind=command ones run after y/N
 ```
 
@@ -91,7 +91,7 @@ las agent register            # presence — `las claude` would have done this
 las agent poll --timeout 2    # prints anything queued; the mailbox keeps everything until a consumer arms
 ```
 
-**Never start `las agent listen` under a Monitor anymore.** That was the previous delivery path, and its 30-minute re-arm turns — a shell command, a "Monitor started", a "Listener re-armed" and a recap, every half hour, in every session — are exactly the noise the channel removes. `las agent listen` / `las bridge stdout` still exist for plain terminals and scripts; `las bridge shell` for a terminal with no AI in it; `las bridge exec --exec CMD` for any other runtime (Codex, a local model). None of them is for a Claude session.
+**Never start `las agent listen` under a Monitor anymore.** That was the previous delivery path, and its 30-minute re-arm turns — a shell command, a "Monitor started", a "Listener re-armed" and a recap, every half hour, in every session — are exactly the noise the channel removes. `las agent listen` / `las bridge stdout` still exist for plain terminals and scripts; `las bridge shell` for a terminal with no AI in it; `las codex --exec CMD` / `las bridge exec` for a headless runtime (one run per message, answer sent back). None of them is for a Claude session.
 
 ### Mic self-test ping — reply "OK" immediately
 

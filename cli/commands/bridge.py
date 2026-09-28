@@ -10,7 +10,7 @@ One command per runtime, each run from that runtime's own terminal, each
 chaining everything the session needs (MCP registration, presence, the
 widget on this Space) before handing over — see `_chain`:
   las claude [args]   Claude Code with the LAS channel
-  las codex           Codex, fed by `las bridge exec --exec "codex exec --yolo -"`
+  las codex           Codex's own TUI (`codex --yolo`) in a PTY, mailbox messages typed into it
   las shell           a terminal with no AI in it
 
 Claude's own config lives under its own scope: `las claude register|unregister`
@@ -367,27 +367,59 @@ def claude_unregister():
     click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server {'removed' if removed else 'was not registered'}.")
 
 
-# `--yolo` (= --dangerously-bypass-approvals-and-sandbox): a Codex run fed from
-# the mailbox has nobody at the keyboard to approve anything — per the user,
-# the session opened with `las codex` is meant to act, not to ask.
+# `codex --yolo` — the exact command the user runs by hand — opened inside a
+# PTY that `las` owns (cli/pty_session.py), so each mailbox message can be
+# typed into Codex's composer as a paste + Enter. Codex has no channel-like
+# API for an interactive session; its keyboard is the only way in.
+CODEX_ARGV = ["codex", "--yolo"]
+# The headless alternative (`--exec`): one `codex exec` per message, text on
+# stdin, answer sent back to the sender. --yolo there too: nobody is at the
+# keyboard to approve anything in a run driven by the mailbox.
 CODEX_DEFAULT_CMD = "codex exec --yolo -"
 
 
-@click.command("codex")
-@_name_arg
-@click.option("--exec", "command", default=None, help=f'Command fed each message on stdin (default: "{CODEX_DEFAULT_CMD}", or $LAS_CODEX_CMD).')
+def run_codex_interactive(name: str, agent_dir: str, codex_args=(), intercept_url=None, port=None) -> int:
+    """Codex's TUI in front, the bridge behind: `las-bridge stdout` consumes this
+    agent's mailbox as a `codex` session and every JSON line it prints is typed
+    into the TUI. Returns Codex's exit code; the bridge dies with it."""
+    from cli import pty_session
+    bridge = subprocess.Popen(
+        bridge_argv("stdout", name, _common(["--runtime", "codex", "--quiet"], intercept_url, port)),
+        stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
+    )
+    try:
+        return pty_session.run_in_pty([*CODEX_ARGV, *codex_args], inject_fd=bridge.stdout.fileno(), cwd=agent_dir)
+    finally:
+        bridge.terminate()
+        try:
+            bridge.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            bridge.kill()
+
+
+@click.command("codex", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
+@click.option("--exec", "command", default=None, help=f'Headless instead of the TUI: run this command per message, text on stdin (e.g. "{CODEX_DEFAULT_CMD}", or $LAS_CODEX_CMD).')
 @click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
 @_intercept
 @_port
-def codex_cmd(name, command, no_widget, intercept_url, port):
-    """Connect Codex to LAS here: every mailbox message becomes a `codex exec` run in this folder, its answer sent back to the sender."""
-    name = resolve_agent_name(name)
-    command = command or os.environ.get("LAS_CODEX_CMD") or CODEX_DEFAULT_CMD
-    if command == CODEX_DEFAULT_CMD and not shutil.which("codex"):
+@click.argument("codex_args", nargs=-1, type=click.UNPROCESSED)
+def codex_cmd(command, no_widget, intercept_url, port, codex_args):
+    """Codex here, connected to LAS: opens `codex --yolo` (extra args pass through) and types every mailbox message into it.
+
+    With --exec, no TUI: each message becomes a headless `codex exec` run whose answer goes back to the sender.
+    """
+    name = resolve_agent_name(None)
+    if not shutil.which("codex") and not command:
         click.echo("Error: codex not found on PATH (install the Codex CLI, or pass --exec).", err=True)
         raise SystemExit(1)
     _chain(name, widget=not no_widget)
-    _exec(bridge_argv("exec", name, _common(["--exec", command], intercept_url, port)))
+    if command or os.environ.get("LAS_CODEX_CMD"):
+        command = command or os.environ.get("LAS_CODEX_CMD")
+        _exec(bridge_argv("exec", name, _common(["--exec", command], intercept_url, port)))
+        return
+    from cli.path_utils import find_nearest_agent_dir
+    agent_dir = find_nearest_agent_dir(Path.cwd()) or os.getcwd()
+    raise SystemExit(run_codex_interactive(name, agent_dir, codex_args, intercept_url, port))
 
 
 @click.command("shell")

@@ -80,6 +80,12 @@ MailboxSource ──▶ Pipeline [interceptor, interceptor, …] ──▶ Sink
     `kind: "command"` message (or any, with `--all`) is offered to run in the
     agent's folder after a `y` on the TTY (`--yes` skips it), output echoed
     and sent back to the sender.
+  - **Interactive TUIs without any API** (Codex's, first): `cli/pty_session.py`
+    runs the program inside a PTY that `las` owns and types each mailbox
+    message into it as a bracketed paste + Enter — `las codex` is
+    `codex --yolo` behind that PTY, fed by a `codex`-tagged `stdout` bridge
+    session. One-way by nature (the answer stays on screen); the two-way,
+    thread-aware version is Codex's experimental app-server (phase 3).
   - `ExecSink` — runs one configured command per message with the text on
     stdin and `LAS_*` env vars, replies with its stdout. This is the
     multi-AI adapter: `--exec 'codex exec --yolo -'`, an Ollama call, a script.
@@ -87,7 +93,7 @@ MailboxSource ──▶ Pipeline [interceptor, interceptor, …] ──▶ Sink
 - **Status file** `session/bridge-<agent>.json` (pid, sink, armed, counters)
   so `las bridge status` and the skill can ask "is this mailbox being
   delivered right now?" without opening a broker connection.
-- **CLI**: one command per runtime — `las claude [args]`, `las codex`,
+- **CLI**: one command per runtime — `las claude [args]`, `las codex [args]`,
   `las shell` — each chaining MCP registration, presence and the widget
   before handing the terminal over (no alias, no separate steps), over the
   low-level `las bridge claude|stdout|shell|exec|status`.

@@ -11,7 +11,8 @@
  *   exec     run --exec CMD per message with the text on stdin (Codex, a
  *            local model, any tool) and send its output back to the sender
  *
- * Common: --agent NAME (default: nearest .las-agent.json), --intercept-url URL
+ * Common: --agent NAME (default: nearest .las-agent.json), --runtime NAME (what
+ * `las agent sessions` shows; default = the sink), --intercept-url URL
  * (first-decision hook, fails open), --port N (broker), --quiet.
  */
 import { parseArgs } from 'node:util';
@@ -30,6 +31,7 @@ const { values: opts, positionals } = parseArgs({
     port: { type: 'string' },
     'intercept-url': { type: 'string' },
     exec: { type: 'string' },
+    runtime: { type: 'string' },
     yes: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
     quiet: { type: 'boolean', default: false },
@@ -40,7 +42,7 @@ const { values: opts, positionals } = parseArgs({
 const SINKS = ['claude', 'stdout', 'shell', 'exec'];
 const sinkName = positionals[0];
 if (opts.help || !SINKS.includes(sinkName)) {
-  process.stderr.write(`usage: las-bridge <${SINKS.join('|')}> [--agent NAME] [--exec CMD] [--yes] [--all] [--intercept-url URL] [--port N] [--quiet]\n`);
+  process.stderr.write(`usage: las-bridge <${SINKS.join('|')}> [--agent NAME] [--exec CMD] [--runtime NAME] [--yes] [--all] [--intercept-url URL] [--port N] [--quiet]\n`);
   process.exit(opts.help ? 0 : 64);
 }
 
@@ -98,7 +100,7 @@ switch (sinkName) {
 
 // This process is one SESSION of the agent (docs/adr/0004 phase 2): it has
 // its own inbox, and holds the agent-level one only while it is the default.
-const runtime = sinkName === 'exec' ? (opts.exec.trim().split(/\s+/)[0] === 'codex' ? 'codex' : 'exec') : sinkName === 'claude' ? 'claude' : sinkName;
+const runtime = opts.runtime || (sinkName === 'exec' ? (opts.exec.trim().split(/\s+/)[0] === 'codex' ? 'codex' : 'exec') : sinkName === 'claude' ? 'claude' : sinkName);
 const sid = newSessionId(runtime);
 const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: agent.dir, log });
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });

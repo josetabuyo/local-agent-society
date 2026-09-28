@@ -205,7 +205,7 @@ the terminal over. No alias, no `las widget`, no separate register step.
 | Command | What listens | What a message becomes |
 |---|---|---|
 | `las claude [args]` | Claude Code with the LAS channel (`bridge/`, ADR 0004) | a `<channel source="las">` event the model acts on, idle or mid-turn |
-| `las codex` | Codex CLI | a `codex exec` run in this folder; its answer goes back to the sender |
+| `las codex [args]` | Codex's own TUI (`codex --yolo`) inside a PTY `las` owns | typed into Codex as a paste + Enter, tagged `[LAS message from …]`; `--exec` switches to headless `codex exec` runs whose answers go back to the sender |
 | `las shell [--yes] [--all]` | a terminal with no AI | printed; `kind: "command"` ones run after a `y/N`, output goes back |
 
 A bare `claude` still works, only without live delivery: messages wait in the

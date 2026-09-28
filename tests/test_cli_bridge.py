@@ -203,10 +203,23 @@ def test_chain_fails_soft_when_the_backend_is_down(monkeypatch, tmp_path):
     assert len(calls) == 1
 
 
-def test_las_codex_and_las_shell_chain_then_launch_their_sinks(monkeypatch, tmp_path):
+def test_las_codex_opens_the_tui_in_a_pty_with_the_bridge_typing_into_it(monkeypatch, tmp_path):
     calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path)
+    runs = []
+    monkeypatch.setattr(bridge_mod, "run_codex_interactive", lambda name, agent_dir, codex_args=(), intercept_url=None, port=None: (runs.append((name, tuple(codex_args), intercept_url)), 0)[1])
+    monkeypatch.delenv("LAS_CODEX_CMD", raising=False)
     runner = CliRunner()
     assert runner.invoke(cli, ["codex"]).exit_code == 0
+    assert runner.invoke(cli, ["codex", "--model", "gpt-6-astra", "--intercept-url", "http://x/decide"]).exit_code == 0
+    assert runs == [("Robo", (), None), ("Robo", ("--model", "gpt-6-astra"), "http://x/decide")], "codex's own args pass through; ours don't"
+    assert calls == [], "no headless exec sink was launched"
+    assert posts == ["/agents/Robo/vortexia/register"] * 2 and len(opened) == 2, "the chain still runs"
+
+
+def test_las_codex_exec_keeps_the_headless_path_and_las_shell_launches_its_sink(monkeypatch, tmp_path):
+    calls, config, posts, opened = _chain_spies(monkeypatch, tmp_path)
+    runner = CliRunner()
+    assert runner.invoke(cli, ["codex", "--exec", bridge_mod.CODEX_DEFAULT_CMD]).exit_code == 0
     assert runner.invoke(cli, ["shell", "--yes"]).exit_code == 0
     monkeypatch.setenv("LAS_CODEX_CMD", "my-router --stdin")
     assert runner.invoke(cli, ["codex", "--no-widget"]).exit_code == 0
@@ -214,8 +227,30 @@ def test_las_codex_and_las_shell_chain_then_launch_their_sinks(monkeypatch, tmp_
     assert calls[0] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "codex exec --yolo -"]
     assert calls[1] == ["/usr/local/bin/node", bin_path, "shell", "--agent", "Robo", "--yes"]
     assert calls[2] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "my-router --stdin"]
-    assert posts == ["/agents/Robo/vortexia/register"] * 3
     assert len(opened) == 2, "two widget reopens: the third run passed --no-widget"
+
+
+def test_run_codex_interactive_wires_a_codex_session_bridge_into_the_pty(monkeypatch):
+    popens, ptys = [], []
+
+    class FakeProc:
+        def __init__(self, argv, **kw):
+            popens.append(argv)
+            import os as _os
+            r, w = _os.pipe()
+            self.stdout = _os.fdopen(r, "rb")
+            self.terminated = False
+        def terminate(self): self.terminated = True
+        def wait(self, timeout=None): return 0
+
+    monkeypatch.setattr(bridge_mod.subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(bridge_mod, "_node", lambda: "/usr/local/bin/node")
+    from cli import pty_session
+    monkeypatch.setattr(pty_session, "run_in_pty", lambda argv, **kw: (ptys.append((argv, kw["cwd"])), 7)[1])
+    code = bridge_mod.run_codex_interactive("Robo", "/r", ("--model", "m"))
+    assert code == 7
+    assert popens == [["/usr/local/bin/node", str(bridge_mod.BRIDGE_BIN), "stdout", "--agent", "Robo", "--runtime", "codex", "--quiet"]]
+    assert ptys == [(["codex", "--yolo", "--model", "m"], "/r")]
 
 
 def test_las_codex_refuses_clearly_when_codex_is_missing(monkeypatch, tmp_path):
