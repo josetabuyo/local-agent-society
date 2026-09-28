@@ -119,3 +119,22 @@ test('the idle server also ends when stdin ends (parent gone), not only on a tra
   stdin.end();
   await done;
 });
+
+test('unacked probes back off: the first few come every probeIntervalMs, then only every probeBackoffMs', async () => {
+  const sink = new ClaudeChannelSink({ agent: 'Robo', probeIntervalMs: 10, probeBackoffAfter: 2, probeBackoffMs: 1000, randomId: () => 'p' });
+  assert.equal(sink.probeDelayMs(1), 10);
+  assert.equal(sink.probeDelayMs(2), 10);
+  assert.equal(sink.probeDelayMs(3), 1000);
+  const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+  const events = [];
+  const client = new Client({ name: 'fake', version: '0' }, { capabilities: {} });
+  client.setNotificationHandler(ChannelEvent, (n) => events.push(n.params));
+  await sink.start(serverT);
+  await client.connect(clientT);
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(events.length, 3, 'initial probe + 2 quick retries, then the long back-off (not reached in 80ms)');
+  await client.callTool({ name: ACK_TOOL, arguments: { probe_id: 'p' } });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(events.length, 3, 'no probes after arming');
+  await sink.stop();
+});

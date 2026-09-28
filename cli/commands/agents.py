@@ -386,6 +386,30 @@ def poll(name, timeout):
         click.echo(f"  [{sender}]: {text}")
 
 
+def _legacy_listen_stand_down(name: str) -> None:
+    """`las agent listen` is the pre-bridge consumer (docs/adr/0004). A session
+    opened before the migration still re-arms it under a Monitor, and if a
+    bridge session (`las claude|codex|shell`) now holds the same agent's
+    mailbox, the two kick each other off the persistent session until one
+    gives up — seen live on 2026-09-28 (`las codex` in RelayRobotics lost to
+    a stale listener three times and quit). So when the backend lists any
+    connected session for this agent, this process holds NOTHING and just
+    waits quietly until it is killed or its Monitor expires: no fight, no
+    exit-code churn in the old session, and the bridge keeps delivering."""
+    try:
+        view = api.get(f"/agents/{quote(name, safe='')}/sessions") or {}
+    except SystemExit:
+        return  # backend down: nothing to defer to
+    sessions = view.get("sessions") or []
+    if not sessions:
+        return
+    runtimes = ", ".join(sorted({s.get("runtime", "?") for s in sessions}))
+    click.echo(f"{name}: a bridge session already delivers this mailbox ({runtimes}) — `las agent listen` is retired, standing by without consuming anything. Restart this session with `las claude` to get the channel.", err=True)
+    sys.stdout.flush()
+    while True:
+        time.sleep(3600)
+
+
 @agent.command("listen")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def listen(name):
@@ -441,6 +465,7 @@ def listen(name):
     spoken "OK") arrives first.
     """
     name = resolve_agent_name(name)
+    _legacy_listen_stand_down(name)
     ports = api.get("/ports") or {}
 
     # Reuse the backend's vendored vortexia client (topic naming, envelope

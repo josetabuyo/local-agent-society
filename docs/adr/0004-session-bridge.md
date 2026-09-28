@@ -82,7 +82,7 @@ MailboxSource ──▶ Pipeline [interceptor, interceptor, …] ──▶ Sink
     and sent back to the sender.
   - `ExecSink` — runs one configured command per message with the text on
     stdin and `LAS_*` env vars, replies with its stdout. This is the
-    multi-AI adapter: `--exec 'codex exec -'`, an Ollama call, a script.
+    multi-AI adapter: `--exec 'codex exec --yolo -'`, an Ollama call, a script.
   - `StdoutSink` — one JSON line per message; what `listen` printed.
 - **Status file** `session/bridge-<agent>.json` (pid, sink, armed, counters)
   so `las bridge status` and the skill can ask "is this mailbox being

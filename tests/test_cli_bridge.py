@@ -211,7 +211,7 @@ def test_las_codex_and_las_shell_chain_then_launch_their_sinks(monkeypatch, tmp_
     monkeypatch.setenv("LAS_CODEX_CMD", "my-router --stdin")
     assert runner.invoke(cli, ["codex", "--no-widget"]).exit_code == 0
     bin_path = str(bridge_mod.BRIDGE_BIN)
-    assert calls[0] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "codex exec -"]
+    assert calls[0] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "codex exec --yolo -"]
     assert calls[1] == ["/usr/local/bin/node", bin_path, "shell", "--agent", "Robo", "--yes"]
     assert calls[2] == ["/usr/local/bin/node", bin_path, "exec", "--agent", "Robo", "--exec", "my-router --stdin"]
     assert posts == ["/agents/Robo/vortexia/register"] * 3

@@ -2,7 +2,7 @@
  * ExecSink — run ONE configured command per message, with the message on
  * stdin and in LAS_* env vars, and send whatever it prints back to the
  * sender. This is the "any other AI, any other tool" adapter: `--exec
- * 'codex exec -'`, `--exec 'ollama run gemma4:e4b'`, `--exec ./my-router`.
+ * 'codex exec --yolo -'`, `--exec 'ollama run gemma4:e4b'`, `--exec ./my-router`.
  * The bridge doesn't know or care what the command is.
  */
 import { spawn } from 'node:child_process';

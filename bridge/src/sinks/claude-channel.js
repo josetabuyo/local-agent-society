@@ -46,13 +46,15 @@ export function instructionsFor(agent) {
 }
 
 export class ClaudeChannelSink {
-  constructor({ agent, send, log = () => {}, probeIntervalMs = 60_000, version = '0.1.0', randomId = () => crypto.randomBytes(3).toString('hex') }) {
+  constructor({ agent, send, log = () => {}, probeIntervalMs = 60_000, probeBackoffAfter = 3, probeBackoffMs = 300_000, version = '0.1.0', randomId = () => crypto.randomBytes(3).toString('hex') }) {
     if (!agent) throw new TypeError('ClaudeChannelSink needs an agent name');
     this.name = 'claude-channel';
     this.agent = agent;
     this.send = send;
     this.log = log;
     this.probeIntervalMs = probeIntervalMs;
+    this.probeBackoffAfter = probeBackoffAfter;
+    this.probeBackoffMs = probeBackoffMs;
     this.randomId = randomId;
     this.armed = false;
     this.probeId = null;
@@ -137,19 +139,34 @@ export class ClaudeChannelSink {
     return new Promise((resolve) => this._armedWaiters.push(resolve));
   }
 
+  /** Delay before probe number `n` (1-based): quick at first, then rare — an
+   * unacked probe is one visible line in the session every time, and a
+   * session that cannot ack right now (permission prompt stuck, model
+   * busy) must not be nagged every minute forever. */
+  probeDelayMs(n) {
+    return n <= this.probeBackoffAfter ? this.probeIntervalMs : this.probeBackoffMs;
+  }
+
   _onInitialized() {
     this.log(`${this.agent}: Claude Code connected — probing the channel`);
     this.sendProbe().catch((err) => this.log(`probe failed: ${err && err.message ? err.message : err}`));
+    this._scheduleProbe();
+  }
+
+  _scheduleProbe() {
     this._stopProbing();
-    this._probeTimer = setInterval(() => {
-      if (this.armed) return this._stopProbing();
+    if (this.armed) return;
+    this._probeTimer = setTimeout(() => {
+      this._probeTimer = null;
+      if (this.armed) return;
       this.sendProbe().catch((err) => this.log(`probe failed: ${err && err.message ? err.message : err}`));
-    }, this.probeIntervalMs);
+      this._scheduleProbe();
+    }, this.probeDelayMs(this.probesSent));
     this._probeTimer.unref?.();
   }
 
   _stopProbing() {
-    if (this._probeTimer) clearInterval(this._probeTimer);
+    if (this._probeTimer) clearTimeout(this._probeTimer);
     this._probeTimer = null;
   }
 

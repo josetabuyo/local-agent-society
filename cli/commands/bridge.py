@@ -10,7 +10,7 @@ One command per runtime, each run from that runtime's own terminal, each
 chaining everything the session needs (MCP registration, presence, the
 widget on this Space) before handing over — see `_chain`:
   las claude [args]   Claude Code with the LAS channel
-  las codex           Codex, fed by `las bridge exec --exec "codex exec -"`
+  las codex           Codex, fed by `las bridge exec --exec "codex exec --yolo -"`
   las shell           a terminal with no AI in it
 
 Claude's own config lives under its own scope: `las claude register|unregister`
@@ -164,7 +164,7 @@ def bridge_shell(name, yes, run_all, intercept_url, port):
 
 @bridge.command("exec")
 @_name_arg
-@click.option("--exec", "command", required=True, help='Command run per message, text on stdin, e.g. --exec "codex exec -".')
+@click.option("--exec", "command", required=True, help='Command run per message, text on stdin, e.g. --exec "codex exec --yolo -".')
 @_intercept
 @_port
 def bridge_exec(name, command, intercept_url, port):
@@ -367,7 +367,10 @@ def claude_unregister():
     click.echo(f"{path}: `{MCP_SERVER_NAME}` MCP server {'removed' if removed else 'was not registered'}.")
 
 
-CODEX_DEFAULT_CMD = "codex exec -"
+# `--yolo` (= --dangerously-bypass-approvals-and-sandbox): a Codex run fed from
+# the mailbox has nobody at the keyboard to approve anything — per the user,
+# the session opened with `las codex` is meant to act, not to ask.
+CODEX_DEFAULT_CMD = "codex exec --yolo -"
 
 
 @click.command("codex")

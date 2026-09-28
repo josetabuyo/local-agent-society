@@ -45,3 +45,23 @@ def test_send_session_and_all_sessions_flags_reach_the_backend(monkeypatch):
     assert both.exit_code != 0 and "exclusive" in both.output
     no_to = runner.invoke(cli, ["agent", "send", "--scope", "billing", "--session", "x", "hi"])
     assert no_to.exit_code != 0
+
+
+def test_legacy_listen_stands_down_when_a_bridge_session_holds_the_mailbox(monkeypatch):
+    """No fight with `las claude|codex|shell`: with a session registered, `listen` holds nothing and waits."""
+    view = {"agent": "Robo", "default": "codex-1", "sessions": [{"sid": "codex-1", "runtime": "codex", "pid": 1, "cwd": "/r", "lastActiveAt": 0, "default": True}]}
+    monkeypatch.setattr(agents_mod.api, "get", lambda path: view)
+    slept = []
+
+    def fake_sleep(s):
+        slept.append(s)
+        raise KeyboardInterrupt  # the Monitor/purge killing it, in test form
+
+    monkeypatch.setattr(agents_mod.time, "sleep", fake_sleep)
+    result = CliRunner().invoke(cli, ["agent", "listen", "Robo"])
+    assert slept == [3600], "went to sleep instead of connecting as the mailbox consumer"
+    assert "standing by without consuming anything" in result.output
+    assert "las claude" in result.output
+
+    monkeypatch.setattr(agents_mod.api, "get", lambda path: {"agent": "Robo", "default": None, "sessions": []} if path.endswith("/sessions") else {})
+    agents_mod._legacy_listen_stand_down("Robo")  # no sessions: returns, the real consumer path would follow
