@@ -227,6 +227,7 @@ test('preload.js exposes the face-button bridge methods on window.las', () => {
     'sendToSelf',
     'openAgent',
     'getDefaultTerminalApp',
+    'getAgentSessions',
     'focusAgent',
     'getAgentTtys',
     'pinTty',
@@ -244,7 +245,7 @@ test('speaker button toggles the existing mute pref (no new pref key)', () => {
 test('mic dictation publishes via vortexia (sendToSelf), not a direct live write into the linked terminal', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function stopRecordingAndTranscribe()');
-  assert.match(body, /window\.las\.sendToSelf\(agentName,\s*result\.text\)/,
+  assert.match(body, /window\.las\.sendToSelf\(agentName,\s*result\.text(,\s*prefs\.micTarget \|\| 'default')?\)/,
     'mic result must be sent via sendToSelf — direct terminal injection (writeToTty) is iTerm2/AppleScript-specific and not portable, explicitly rejected for dictation in favor of vortexia');
   assert.doesNotMatch(body, /window\.las\.writeToTty/,
     'mic must NOT use writeToTty — that stays reserved for the Clear button\'s "/clear", a different use case (act on a live session now vs. queue for next session start)');
@@ -383,7 +384,7 @@ test('preload/main.js no longer expose the old speak-selftest-ok IPC channel (re
 
 test('main.js vortexia:send handler resolves the sending agent from the window map (reuses the existing per-window VortexiaClient)', () => {
   const src = readSrc('main.js');
-  const body = extractFunctionBody(src, "ipcMain.handle('vortexia:send', async (event, toName, text) => {");
+  const body = extractFunctionBody(src, "ipcMain.handle('vortexia:send', async (event, toName, text, target) => {");
   assert.match(body, /nameForWindow\(win\)/);
   assert.match(body, /vortexiaClients\.get\(fromName\)/);
 });
@@ -1143,4 +1144,44 @@ test("widget.js's speak() still respects the mute pref before doing any synthesi
   const synthCall = body.indexOf('window.las.synthesizeSpeech');
   assert.notEqual(muteCheck, -1);
   assert.ok(muteCheck < synthCall, 'mute must be checked before synthesis is attempted');
+});
+
+// ── mic target: which connected session a dictation goes to (ADR 0004 ph. 2)
+
+test('DEFAULT_PREFS.micTarget defaults to the last-used session', () => {
+  const body = extractFunctionBody(readSrc('main.js'), 'const DEFAULT_PREFS = {');
+  assert.match(body, /micTarget:\s*'default'/);
+});
+
+test('a dictation is sent with prefs.micTarget; the self-test always goes through the agent inbox', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*result\.text,\s*prefs\.micTarget \|\| 'default'\)/);
+  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*MIC_SELFTEST_PING\)/, 'no target on the self-test');
+});
+
+test('vortexia:send routes a non-default target through the backend /agents/send (session or all_sessions), default stays on the agent inbox', () => {
+  const body = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('vortexia:send', async (event, toName, text, target) => {");
+  assert.match(body, /target && target !== 'default'/);
+  assert.match(body, /\/agents\/send/);
+  assert.match(body, /all_sessions: true/);
+  assert.match(body, /session: target/);
+  assert.match(body, /source: 'human'/);
+  assert.match(body, /client\.sendConfirmed\(toName, text/, 'default path unchanged');
+});
+
+test('mic press-and-hold (and right-click) opens the target menu and never toggles recording; the choice persists as micTarget', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const down = extractFunctionBody(src, "micEl.addEventListener('mousedown', (e) => {");
+  assert.match(down, /showMicMenu\(\)/);
+  assert.match(down, /OPEN_LONG_PRESS_MS/);
+  assert.doesNotMatch(down, /startRecording|stopRecordingAndTranscribe/);
+  assert.match(src, /micEl\.addEventListener\('contextmenu'/);
+  const render = extractFunctionBody(src, 'function renderMicMenu()');
+  assert.match(render, /persist\(\{\s*micTarget:\s*row\.value\s*\}\)/);
+  assert.match(render, /value: 'default'/);
+  assert.match(render, /value: 'all'/);
+  assert.match(render, /knownSessions\.map/);
+  const html = readSrc('renderer', 'index.html');
+  assert.match(html, /id="micTarget"/, 'the settings panel offers the same choice');
+  assert.match(html, /id="micMenu"/);
 });

@@ -542,6 +542,10 @@ html, body {
   display: none;
 }
 
+#micMenu {
+  right: 46px; /* above the mic, not the Open button */
+}
+
 .open-row {
   display: flex;
   align-items: center;

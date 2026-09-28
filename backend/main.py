@@ -36,6 +36,7 @@ PORTS_FILE       = DATA_DIR / "ports.json"
 ATTRIBUTION_FILE = DATA_DIR / "attribution.json"
 MUTED_FILE    = DATA_DIR / "muted.json"
 INACTIVE_FILE      = DATA_DIR / "inactive.json"
+SESSIONS_FILE      = DATA_DIR / "sessions.json"
 WAKE_ENABLED_FILE  = DATA_DIR / "wake_enabled.json"
 
 NICE_VOICES = [
@@ -93,6 +94,7 @@ _registry_lock    = threading.Lock()
 _queue_lock       = threading.Lock()
 _muted_lock       = threading.Lock()
 _inactive_lock     = threading.Lock()
+_sessions_lock     = threading.Lock()
 _wake_enabled_lock = threading.Lock()
 _attribution_lock = threading.Lock()
 _pending_links_lock = threading.Lock()
@@ -291,6 +293,20 @@ class SendRequest(BaseModel):
     scope:       Optional[str] = None   # free-text scope/intent for broadcast
     source:      str           = "agent"
     from_agent:  Optional[str] = None
+    # Which of the recipient's connected sessions (docs/adr/0004 phase 2):
+    # unset = the default one (last used) via the agent inbox; a session id
+    # or a runtime name ("claude", "codex", "shell") = that one only;
+    # all_sessions = every live session, one publish each (like --children).
+    session:      Optional[str] = None
+    all_sessions: bool          = False
+
+
+class SessionRegisterRequest(BaseModel):
+    """A bridge announcing one connected runtime session for an agent."""
+    sid:     str = Field(min_length=1, max_length=120)
+    runtime: str = Field(min_length=1, max_length=40)   # claude | codex | shell | stdout | exec
+    pid:     int
+    cwd:     str = ""
 
 
 class TerminalRequest(BaseModel):
@@ -436,6 +452,122 @@ def unregister_agent(name: str):
         del registry[name]
         save_json(REGISTRY_FILE, registry)
     return {"ok": True}
+
+
+# ── connected sessions (docs/adr/0004, phase 2) ──────────────────────────────
+#
+# One agent, several runtimes at once: a Claude session, a Codex session, a
+# plain shell — each registered here by its bridge (bridge/) with a session
+# id, runtime, pid and cwd. The DEFAULT session is the last one used
+# (highest lastActiveAt); it is the one that holds the agent-level mailbox,
+# so a plain `send --to Name` reaches it. The backend publishes the default's
+# id, retained, on las/agent/<name>/default-session every time it changes:
+# that is how a bridge learns whether to hold or release the agent mailbox
+# without any bridge talking to another. Sessions whose process is gone are
+# pruned on every read — a crashed bridge can't hold the default forever.
+
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _load_sessions(name: str) -> dict:
+    """{sid: session}, pruned of dead processes (caller holds _sessions_lock)."""
+    all_sessions = load_json(SESSIONS_FILE, {})
+    sessions = all_sessions.get(name, {})
+    live = {sid: s for sid, s in sessions.items() if _pid_alive(s.get("pid"))}
+    if live != sessions:
+        all_sessions[name] = live
+        save_json(SESSIONS_FILE, all_sessions)
+    return live
+
+
+def _save_sessions(name: str, sessions: dict) -> None:
+    all_sessions = load_json(SESSIONS_FILE, {})
+    if sessions:
+        all_sessions[name] = sessions
+    else:
+        all_sessions.pop(name, None)
+    save_json(SESSIONS_FILE, all_sessions)
+
+
+def _default_sid(sessions: dict) -> str | None:
+    if not sessions:
+        return None
+    return max(sessions.values(), key=lambda s: (s.get("lastActiveAt", 0), s.get("startedAt", 0)))["sid"]
+
+
+def _publish_default_session(name: str, sessions: dict) -> bool:
+    sid = _default_sid(sessions)
+    payload = {"sid": sid, "runtime": sessions[sid]["runtime"] if sid else None, "ts": int(time.time() * 1000)}
+    return _vortexia_publish(vx.default_session_topic(name), payload, retain=True)
+
+
+def _resolve_session(sessions: dict, selector: str) -> dict | None:
+    """`selector` is a session id, or a runtime name (the most recently used session of that runtime)."""
+    if selector in sessions:
+        return sessions[selector]
+    of_runtime = [s for s in sessions.values() if s.get("runtime") == selector]
+    return max(of_runtime, key=lambda s: s.get("lastActiveAt", 0)) if of_runtime else None
+
+
+def _sessions_view(name: str, sessions: dict) -> dict:
+    default = _default_sid(sessions)
+    ordered = sorted(sessions.values(), key=lambda s: s.get("lastActiveAt", 0), reverse=True)
+    return {"agent": name, "default": default, "sessions": [{**s, "default": s["sid"] == default} for s in ordered]}
+
+
+@app.get("/agents/{name}/sessions")
+def list_sessions(name: str):
+    """Connected runtime sessions of `name`, most recently used first; `default` names the one a plain send reaches."""
+    with _sessions_lock:
+        return _sessions_view(name, _load_sessions(name))
+
+
+@app.post("/agents/{name}/sessions")
+def register_session(name: str, body: SessionRegisterRequest):
+    """A bridge connected: it becomes the default (a session you just opened is the one you're using)."""
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    now = int(time.time() * 1000)
+    with _sessions_lock:
+        sessions = _load_sessions(name)
+        sessions[body.sid] = {"sid": body.sid, "agent": name, "runtime": body.runtime, "pid": body.pid, "cwd": body.cwd, "startedAt": now, "lastActiveAt": now}
+        _save_sessions(name, sessions)
+        published = _publish_default_session(name, sessions)
+        view = _sessions_view(name, sessions)
+    return {"ok": True, "published": published, **view}
+
+
+@app.post("/agents/{name}/sessions/{sid}/touch")
+def touch_session(name: str, sid: str):
+    """Activity on a session (a delivery, a reply) — it becomes the default."""
+    with _sessions_lock:
+        sessions = _load_sessions(name)
+        if sid not in sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        was_default = _default_sid(sessions)
+        sessions[sid]["lastActiveAt"] = int(time.time() * 1000)
+        _save_sessions(name, sessions)
+        published = _publish_default_session(name, sessions) if was_default != sid else True
+        view = _sessions_view(name, sessions)
+    return {"ok": True, "published": published, **view}
+
+
+@app.delete("/agents/{name}/sessions/{sid}")
+def unregister_session(name: str, sid: str):
+    """A bridge is leaving; the next most recently used session (if any) becomes the default."""
+    with _sessions_lock:
+        sessions = _load_sessions(name)
+        removed = sessions.pop(sid, None) is not None
+        _save_sessions(name, sessions)
+        published = _publish_default_session(name, sessions)
+        view = _sessions_view(name, sessions)
+    return {"ok": True, "removed": removed, "published": published, **view}
 
 
 @app.get("/agents/{name}/hierarchy")
@@ -981,7 +1113,7 @@ def write_to_tty(name: str, body: TtyWriteRequest):
     return {"ok": True, "written": written, "ttys_found": len(ttys)}
 
 
-def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str) -> dict:
+def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False) -> dict:
     """Single delivery path for both /agents/send and the legacy
     /agents/{name}/inject — one implementation, two request shapes on top
     of it (DRY: this used to be duplicated between the two endpoints).
@@ -1038,9 +1170,31 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
     registry = load_json(REGISTRY_FILE, {})
     if "@" not in to and to in registry:
         envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts}
-        # Not retained: the broker's mailbox for `to` queues it if nobody is
-        # connected as its consumer (see _vortexia_publish).
-        delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=False)
+        mode = "direct"
+        if session or all_sessions:
+            # One of the recipient's connected sessions, or all of them —
+            # each session has its own mailbox topic (see the sessions
+            # endpoints above). No live session matches: 404, never a
+            # publish into a mailbox nobody will ever hold.
+            with _sessions_lock:
+                sessions = _load_sessions(to)
+            if all_sessions:
+                targets = list(sessions.values())
+                if not targets:
+                    raise HTTPException(status_code=404, detail=f"{to} has no connected sessions")
+                mode = "all-sessions"
+            else:
+                found = _resolve_session(sessions, session)
+                if not found:
+                    raise HTTPException(status_code=404, detail=f"{to} has no connected session {session!r}")
+                targets = [found]
+                mode = "session"
+            delivered = all(_vortexia_publish(vx.session_inbox_topic(to, s["sid"]), {**envelope, "session": s["sid"]}, retain=False) for s in targets)
+        else:
+            # Not retained: the broker's mailbox for `to` queues it if nobody is
+            # connected as its consumer (see _vortexia_publish). The DEFAULT
+            # session's bridge holds that mailbox (sessions above).
+            delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=False)
 
         # ── structured inject log (local delivery only — a vortex-relayed `to`
         # has no local registry entry, so no session/ dir to log into) ──
@@ -1053,7 +1207,7 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
             with open(log_path, "a") as f:
                 f.write(f"[{ts_full}] name={to} source={source} from={sender} via=vortexia status={status} msg={preview!r}\n")
 
-        return {"ok": True, "injected": delivered, "mode": "direct", "relayed": False}
+        return {"ok": True, "injected": delivered, "mode": mode, "relayed": False}
 
     if not env_name:
         raise HTTPException(status_code=404, detail="Agent not found (and vortex-relay not configured on this machine)")
@@ -1071,7 +1225,7 @@ def send_message(body: SendRequest):
     if bool(body.to) == bool(body.scope):
         raise HTTPException(status_code=422, detail="exactly one of `to` or `scope` must be set")
     sender = body.from_agent or body.source or "external"
-    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender)
+    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions)
 
 
 @app.post("/agents/{name}/inject")

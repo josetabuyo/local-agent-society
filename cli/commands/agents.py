@@ -239,7 +239,9 @@ def inject(name, message, from_agent):
 @click.option("--children", "to_children", is_flag=True,
               help="Deliver to every subordinate of --to (agents whose folder sits under its folder) instead of to --to itself")
 @click.option("--deep", is_flag=True, help="With --children: the whole subtree, not only direct subordinates")
-def send(message, to, scope, from_agent, to_children, deep):
+@click.option("--session", "session", default=None, help="Only one of the recipient's connected sessions: a session id, or a runtime (claude, codex, shell). Default: the last one used.")
+@click.option("--all-sessions", is_flag=True, help="Every connected session of the recipient, one delivery each (like --children, but across its runtimes).")
+def send(message, to, scope, from_agent, to_children, deep, session, all_sessions):
     """Generic send: point-to-point (--to) or scope broadcast (--scope), local or cross-machine.
 
     Replaces `inject`'s exact-name-only, single-machine model with one
@@ -251,6 +253,8 @@ def send(message, to, scope, from_agent, to_children, deep):
       las agent send --to "System@uy-mac" "..."    # explicit, disambiguates a name collision
       las agent send --scope "facturacion, pagos" "..."   # broadcast; 0, 1, or several may reply
       las agent send --to RelayRobotics --children "..."  # every subordinate of RelayRobotics (see `las agent children`)
+      las agent send --to Robo --session shell "ls -la"    # one connected session of Robo (see `las agent sessions`)
+      las agent send --to Robo --all-sessions "heads up"   # every connected session of Robo
 
     `inject` still works unchanged for existing scripts/skills — this is
     the new generic entry point going forward, not a replacement in place.
@@ -259,6 +263,10 @@ def send(message, to, scope, from_agent, to_children, deep):
         raise click.UsageError("exactly one of --to or --scope is required")
     if (to_children or deep) and not to:
         raise click.UsageError("--children/--deep need --to <ParentAgent>")
+    if (session or all_sessions) and (not to or to_children or scope):
+        raise click.UsageError("--session/--all-sessions need a plain --to <Agent>")
+    if session and all_sessions:
+        raise click.UsageError("--session and --all-sessions are exclusive")
 
     payload = {"message": message, "source": "agent" if from_agent else "external"}
     if from_agent:
@@ -286,6 +294,10 @@ def send(message, to, scope, from_agent, to_children, deep):
 
     if to:
         payload["to"] = to
+        if session:
+            payload["session"] = session
+        if all_sessions:
+            payload["all_sessions"] = True
     else:
         payload["scope"] = scope
 
@@ -296,6 +308,10 @@ def send(message, to, scope, from_agent, to_children, deep):
     target = to or f'scope "{scope}"'
     if injected:
         status = f"sent via vortexia ({mode}{', vortex-relay' if relayed else ''})"
+        if mode == "session":
+            status = f"sent to session {session!r} via vortexia"
+        elif mode == "all-sessions":
+            status = "sent to every connected session via vortexia"
     else:
         status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
     click.echo(f"{target}: {status}")
@@ -523,6 +539,35 @@ def listen(name):
         click.echo(f"vortexia unreachable on :{mqtt_port} ({exc}) — is `vortexia start` running?", err=True)
         sys.exit(1)
     client.loop_forever()
+
+
+@agent.command("sessions")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+@click.option("--use", "use_sid", default=None, help="Make this session (id or runtime) the default — the one a plain `send --to` reaches.")
+def sessions(name, use_sid):
+    """Connected runtime sessions of an agent (a Claude, a Codex, a shell...), most recently used first.
+
+    The default (marked *) is the last one used: a plain `las agent send --to NAME`
+    reaches it, and its bridge holds the agent's mailbox. `--session` / `--all-sessions`
+    on `send` pick one or all. See docs/adr/0004 phase 2.
+    """
+    name = resolve_agent_name(name)
+    view = api.get(f"/agents/{quote(name, safe='')}/sessions")
+    if use_sid:
+        target = next((s for s in view.get("sessions", []) if s["sid"] == use_sid), None) \
+            or next((s for s in view.get("sessions", []) if s.get("runtime") == use_sid), None)
+        if not target:
+            click.echo(f"{name}: no connected session {use_sid!r}")
+            raise SystemExit(1)
+        view = api.post(f"/agents/{quote(name, safe='')}/sessions/{quote(target['sid'], safe='')}/touch", {})
+    rows = view.get("sessions", [])
+    if not rows:
+        click.echo(f"{name}: no connected sessions — open one with `las claude`, `las codex` or `las shell` in its folder.")
+        return
+    for s in rows:
+        mark = "*" if s.get("default") else " "
+        age = int((time.time() * 1000 - s.get("lastActiveAt", 0)) / 1000)
+        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<7} pid {s.get('pid', '?'):<7} used {age}s ago  {s.get('cwd', '')}")
 
 
 @agent.command("rename")

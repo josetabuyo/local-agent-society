@@ -213,6 +213,16 @@ mailbox and the `/las-agent` skill says so in one line. `las bridge status`
 tells whether the current session is armed; `las bridge <sink>` is the
 low-level form behind all three.
 
+Several runtimes can be attached to the same agent at once — each one is a
+**session** (`las agent sessions`). The last one used is the default: a plain
+`las agent send --to NAME` reaches it, `--session claude|codex|shell|<id>`
+picks one, `--all-sessions` reaches every one, `las agent sessions --use X`
+switches the default by hand. The widget mic offers the same choice
+(press-and-hold the mic, or Settings → "Dictation goes to"). Already inside a
+session that was opened without `las`? `las claude` (or `las bridge status`)
+prints the way back in: `las claude --resume` restores the conversation with
+the channel on, and the mailbox kept every message meanwhile.
+
 ## Widget buttons
 
 Each widget (Electron, `widget-electron/`) has a name/log face with a door

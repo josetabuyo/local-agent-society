@@ -35,6 +35,7 @@ const muteEl = document.getElementById('mute');
 const expandWhenHiddenEl = document.getElementById('expandWhenHidden');
 const wakeEnabledEl = document.getElementById('wakeEnabled');
 const micLanguageEl = document.getElementById('micLanguage');
+const micTargetEl = document.getElementById('micTarget');
 const doorEl = document.getElementById('door');
 
 document.title = agentName;
@@ -177,7 +178,7 @@ function updateNameCenterOffset(size, text) {
 // locale — per explicit request: dictation should assume Spanish unless the
 // user picks otherwise, since it's what most agents on this machine are
 // dictated to in regardless of what language their own TTS voice speaks.
-let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: true, micLanguage: 'es' };
+let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: true, micLanguage: 'es', micTarget: 'default' };
 let locale = 'en-US';
 
 /** '#rrggbb' + 0..1 alpha -> 'rgba(r, g, b, a)'. */
@@ -273,6 +274,7 @@ function applyPrefsToDom() {
   muteEl.checked = !!prefs.mute;
   expandWhenHiddenEl.checked = !!prefs.expandWhenHidden;
   micLanguageEl.value = prefs.micLanguage || 'es';
+  syncMicTargetSelect();
   updateSpeakerIcon();
 }
 
@@ -311,6 +313,7 @@ function setSettingsOpen(open) {
   gearEl.classList.toggle('active', open);
   window.las.setExpanded(open, SETTINGS_HEIGHT);
   if (open) {
+    refreshSessions().then(syncMicTargetSelect);
     // Latch the "revealed" state too, so mousemove-driven entrance tracking
     // doesn't undo this the moment settings closes and a mousemove fires.
     revealed = true;
@@ -334,6 +337,7 @@ expandWhenHiddenEl.addEventListener('change', () => {
   if (!expandWhenHiddenEl.checked) setOcclusionExpanded(false);
 });
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
+micTargetEl.addEventListener('change', () => persist({ micTarget: micTargetEl.value }));
 
 // Backend-synced, not electron-store: `las agent focus`'s wake fallback
 // (Python, backend/main.py) reads the same flag this checkbox sets.
@@ -1069,7 +1073,9 @@ async function stopRecordingAndTranscribe() {
       // Don't also appendLogEntry here — this agent is subscribed to its own
       // inbox topic, so the publish loops back through onVortexiaMessage and
       // displays itself; appending it here too would show the line twice.
-      const sendResult = await window.las.sendToSelf(agentName, result.text);
+      // Target: the last-used session (default, via the agent inbox), every
+      // connected session, or one of them — see the mic press-and-hold menu.
+      const sendResult = await window.las.sendToSelf(agentName, result.text, prefs.micTarget || 'default');
       if (!sendResult || !sendResult.ok) {
         window.las.log('error', 'mic', `failed to publish dictation to own inbox: ${sendResult && sendResult.error}`);
         console.warn('[widget] mic: failed to publish dictation to own inbox:', sendResult && sendResult.error);
@@ -1137,6 +1143,144 @@ micEl.addEventListener('dblclick', () => {
     micClickTimer = null;
   }
   runMicSelfTest();
+});
+
+// -- mic target: press-and-hold (or right-click) picks which connected ------
+//    session a dictation goes to (docs/adr/0004 phase 2)
+//
+// An agent can have a Claude, a Codex and a plain shell attached at once
+// (`las agent sessions`). 'default' = the last-used one, through the agent
+// inbox its bridge holds; 'all' = every connected session; or one session.
+// The self-test always goes through the agent inbox — it tests the
+// plumbing, not a choice. Same inline menu pattern as the Open button.
+
+const micMenuEl = document.getElementById('micMenu');
+const MIC_TARGET_LABELS = { default: 'Last used session', all: 'All sessions' };
+let micMenuOpen = false;
+let micLongPressTimer = null;
+let micLongPressFired = false;
+let knownSessions = [];
+
+function syncMicTargetSelect() {
+  const target = prefs.micTarget || 'default';
+  // Keep the settings <select> honest: fixed rows + one per known session.
+  for (const opt of [...micTargetEl.options]) {
+    if (!(opt.value in MIC_TARGET_LABELS)) opt.remove();
+  }
+  for (const s of knownSessions) {
+    const opt = document.createElement('option');
+    opt.value = s.sid;
+    opt.textContent = sessionLabel(s);
+    micTargetEl.appendChild(opt);
+  }
+  if (![...micTargetEl.options].some((o) => o.value === target)) {
+    const opt = document.createElement('option');
+    opt.value = target;
+    opt.textContent = `${target} (not connected)`;
+    micTargetEl.appendChild(opt);
+  }
+  micTargetEl.value = target;
+}
+
+function sessionLabel(s) {
+  return `${s.runtime || '?'} · ${String(s.sid).split('-')[1] || s.sid}${s.default ? ' · last used' : ''}`;
+}
+
+async function refreshSessions() {
+  try {
+    const view = await window.las.getAgentSessions(agentName);
+    knownSessions = Array.isArray(view && view.sessions) ? view.sessions : [];
+  } catch {
+    knownSessions = [];
+  }
+  return knownSessions;
+}
+
+function closeMicMenu() {
+  micMenuOpen = false;
+  micMenuEl.classList.add('hidden');
+}
+
+async function showMicMenu() {
+  micMenuOpen = true;
+  micMenuEl.innerHTML = '<div class="open-row"><span class="open-label">Loading sessions…</span></div>';
+  micMenuEl.classList.remove('hidden');
+  await refreshSessions();
+  syncMicTargetSelect();
+  renderMicMenu();
+}
+
+function renderMicMenu() {
+  const current = prefs.micTarget || 'default';
+  const rows = [
+    { value: 'default', label: MIC_TARGET_LABELS.default },
+    { value: 'all', label: MIC_TARGET_LABELS.all + (knownSessions.length ? ` (${knownSessions.length})` : '') },
+    ...knownSessions.map((s) => ({ value: s.sid, label: sessionLabel(s) })),
+  ];
+  micMenuEl.innerHTML = '';
+  if (!knownSessions.length) {
+    const hint = document.createElement('div');
+    hint.className = 'open-row';
+    hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell</span>';
+    micMenuEl.appendChild(hint);
+  }
+  for (const row of rows) {
+    const el = document.createElement('div');
+    el.className = 'open-row' + (row.value === current ? ' default' : '');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'open-label';
+    btn.textContent = row.label;
+    btn.title = row.value === current ? 'Dictation goes here now' : 'Send dictation here';
+    btn.addEventListener('click', async () => {
+      await persist({ micTarget: row.value });
+      closeMicMenu();
+    });
+    el.appendChild(btn);
+    micMenuEl.appendChild(el);
+  }
+}
+
+function cancelMicLongPress() {
+  if (micLongPressTimer) clearTimeout(micLongPressTimer);
+  micLongPressTimer = null;
+}
+
+micEl.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  micLongPressFired = false;
+  cancelMicLongPress();
+  micLongPressTimer = setTimeout(() => {
+    micLongPressTimer = null;
+    micLongPressFired = true;
+    if (micClickTimer) {
+      clearTimeout(micClickTimer);
+      micClickTimer = null;
+    }
+    showMicMenu();
+  }, OPEN_LONG_PRESS_MS);
+});
+micEl.addEventListener('mouseup', cancelMicLongPress);
+micEl.addEventListener('mouseleave', cancelMicLongPress);
+micEl.addEventListener('click', (e) => {
+  if (!micLongPressFired) return;
+  // The release of a hold: swallow the click so it never toggles recording.
+  micLongPressFired = false;
+  e.stopImmediatePropagation();
+  if (micClickTimer) {
+    clearTimeout(micClickTimer);
+    micClickTimer = null;
+  }
+}, true);
+micEl.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (micMenuOpen) closeMicMenu();
+  else showMicMenu();
+});
+document.addEventListener('mousedown', (e) => {
+  if (!micMenuOpen) return;
+  if (micMenuEl.contains(e.target) || micEl.contains(e.target)) return;
+  closeMicMenu();
 });
 
 // -- focus/scope: tap = focus, right-click/long-press = link a TTY ----------

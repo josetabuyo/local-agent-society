@@ -577,6 +577,10 @@ const DEFAULT_PREFS = {
   // "Open" button actions, in menu order — the FIRST one is what a plain
   // click runs; press-and-hold shows the menu that reorders them.
   openOrder: ['terminal', 'folder'],
+  // Where a mic dictation goes: 'default' (the agent's last-used session,
+  // via its inbox), 'all' (every connected session), or one session id.
+  // Press-and-hold the mic to choose; see docs/adr/0004 phase 2.
+  micTarget: 'default',
 };
 
 function getPrefs(name) {
@@ -969,12 +973,33 @@ function nameForWindow(win) {
   return null;
 }
 
-ipcMain.handle('vortexia:send', async (event, toName, text) => {
+ipcMain.handle('vortexia:send', async (event, toName, text, target) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const fromName = win ? nameForWindow(win) : null;
   if (!fromName) {
     log.error('mic', 'vortexia:send failed: could not resolve sending agent for this window');
     return { ok: false, error: 'could not resolve sending agent for this window' };
+  }
+  if (target && target !== 'default') {
+    // A specific connected session ('all', or a session id / runtime) —
+    // docs/adr/0004 phase 2. Session inboxes are routed by the backend
+    // (it owns the session registry), so this goes over HTTP to the same
+    // /agents/send that `las agent send --session/--all-sessions` uses,
+    // instead of the agent-level inbox publish below.
+    try {
+      const body = { message: text, to: toName, source: 'human', from_agent: fromName, ...(target === 'all' ? { all_sessions: true } : { session: target }) };
+      const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.injected) {
+        log.error('mic', `vortexia:send to session ${target} failed: HTTP ${res.status} ${json.detail || ''}`);
+        return { ok: false, error: json.detail || `HTTP ${res.status}` };
+      }
+      log.info('mic', `vortexia:send ok from=${fromName} to=${toName} session=${target} chars=${text.length}`);
+      return { ok: true, mode: json.mode };
+    } catch (err) {
+      log.error('mic', `vortexia:send to session ${target} failed: ${err && err.message ? err.message : err}`);
+      return { ok: false, error: String(err) };
+    }
   }
   const client = vortexiaClients.get(fromName);
   if (!client) {
@@ -1015,6 +1040,18 @@ ipcMain.handle('vortexia:send', async (event, toName, text) => {
 // Reads the backend's agent registry (voice) and its NICE_VOICES catalogue
 // (voice -> lang), same source of truth as CLAUDE.md rule 7 / rule 3's
 // voice-language table, instead of duplicating that table here.
+
+// Connected sessions of an agent (a Claude, a Codex, a shell — docs/adr/0004
+// phase 2): what the mic's target picker lists. The backend prunes dead ones.
+ipcMain.handle('agent:sessions', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/sessions`);
+    if (!res.ok) return { agent: name, default: null, sessions: [] };
+    return await res.json();
+  } catch {
+    return { agent: name, default: null, sessions: [] };
+  }
+});
 
 ipcMain.handle('agent:info', async (_event, name) => {
   try {

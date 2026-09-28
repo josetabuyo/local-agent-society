@@ -84,7 +84,10 @@ contextBridge.exposeInMainWorld('las', {
 
   /** Mic dictation -> this agent's own inbox (the faithful equivalent of the
    * retired live-TTY injectToSession). Thin wrapper over vortexiaSend. */
-  sendToSelf: (name, text) => ipcRenderer.invoke('vortexia:send', name, text),
+  sendToSelf: (name, text, target) => ipcRenderer.invoke('vortexia:send', name, text, target),
+
+  /** Connected runtime sessions of this agent (mic target picker). */
+  getAgentSessions: (name) => ipcRenderer.invoke('agent:sessions', name),
 
   /** Local Whisper transcription (main.js's "audio transcription" section) —
    * replaces the broken Electron SpeechRecognition/webkitSpeechRecognition.

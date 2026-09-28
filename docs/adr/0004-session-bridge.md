@@ -128,10 +128,34 @@ What the user sees per message in a Claude session: one dim inbound line
   skill and docs; tests (Node: source ack semantics with a fake MQTT client,
   the channel protocol end-to-end with the SDK's in-memory client; Python:
   the launchers and the skill contract).
-- **Phase 2**: the widget shows an unread badge when no bridge holds the
-  mailbox (read `las/agent/<name>/session`), and `las agent listen` is
-  retired in favor of `las bridge stdout`. The Codex adapter gets a
-  documented recipe on top of `exec`.
-- **Phase 3**: Pulpo's first-decision service behind `--intercept-url`,
-  with the `kind: "command"` contract (a message the layer has decided is a
-  shell command, not prose) feeding `ShellSink` directly.
+- **Phase 2 (2026-09-28, done)** — *connected sessions*. An agent may have a
+  Claude, a Codex and a plain shell attached at once, so every bridge is one
+  **session** of its agent (`bridge/src/sessions.js`, backend
+  `/agents/{name}/sessions`): it registers with runtime, pid and cwd, touches
+  its record on every delivery, unregisters on exit; dead pids are pruned on
+  read. Each session has its own inbox
+  (`las/agent/<name>/sessions/<sid>/inbox`, persistent client id
+  `las-agent-<name>-<sid>`); the agent-level inbox keeps meaning "the agent"
+  and is held by the **default** session — the last one used. The backend
+  publishes the default's id retained on `las/agent/<name>/default-session`
+  and every bridge watches it: whoever becomes the default attaches the
+  agent mailbox after a short delay, whoever stops being it releases it — no
+  bridge talks to another, no takeover fight. Backend down: the bridge holds
+  the agent mailbox alone, as before. Addressing: `las agent send --to Name`
+  reaches the default; `--session <sid|runtime>` one session;
+  `--all-sessions` every one (the `--children` pattern, across runtimes);
+  `las agent sessions [--use X]` lists and switches the default. The widget
+  mic has the same choice (press-and-hold the mic, or Settings → "Dictation
+  goes to"): last-used session, all, or one — targeted dictations go through
+  the backend's `/agents/send`, the default keeps the direct inbox publish.
+  Also delivered: `las claude` run *inside* a Claude session (CLAUDECODE is
+  set) prints the way back in (`las claude --resume`) instead of nesting,
+  and so does `las bridge status` when the session has no channel. Still
+  pending from the original phase 2: the widget's unread badge, retiring
+  `las agent listen`.
+- **Phase 3**: intelligent routing. Pulpo's first-decision service behind
+  `--intercept-url` classifies what the mic heard (`kind: "command"` for a
+  shell command, `"message"` for prose, or handled outright) and decides the
+  target session, so a shell session only ever receives commands and a
+  Claude session only prose; the `session`/`all_sessions` routing above is
+  the mechanism it drives. `ShellSink` already runs only `kind: "command"`.

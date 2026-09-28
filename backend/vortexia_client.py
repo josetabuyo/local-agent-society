@@ -148,6 +148,27 @@ def mailbox_client_id(name: str) -> str:
     return f"{MAILBOX_CLIENT_ID_PREFIX}{name}"
 
 
+# ── connected sessions (docs/adr/0004, phase 2) ──────────────────────────────
+# An agent may have several runtimes connected at once (a Claude session, a
+# Codex session, a plain shell). Each is a *session* with its own mailbox
+# topic; the agent-level inbox above keeps meaning "the agent", and is held
+# by whichever session is the DEFAULT (the last one used). The backend
+# publishes the default's id retained on default_session_topic so every
+# bridge can see, without asking anyone, whether it should hold the agent
+# mailbox right now.
+
+def session_inbox_topic(name: str, sid: str) -> str:
+    return f"las/agent/{name}/sessions/{sid}/inbox"
+
+
+def session_mailbox_client_id(name: str, sid: str) -> str:
+    return f"{MAILBOX_CLIENT_ID_PREFIX}{name}-{sid}"
+
+
+def default_session_topic(name: str) -> str:
+    return f"las/agent/{name}/default-session"
+
+
 def build_envelope(from_: str, to: str, text: str, source: str = "agent") -> dict:
     return {
         "id": uuid.uuid4().hex,

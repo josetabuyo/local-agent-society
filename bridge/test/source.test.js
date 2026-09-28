@@ -26,7 +26,7 @@ function fakeMqtt() {
 const packet = (topic, obj) => ({ topic, payload: Buffer.from(JSON.stringify(obj)) });
 const tick = () => new Promise((r) => setImmediate(r));
 
-test('connects as the mailbox consumer (fixed client id, persistent session, no auto-resubscribe) and subscribes only on a NEW session', async () => {
+test('connects as the mailbox consumer (fixed client id, persistent session) and subscribes on every connect', async () => {
   const { connect, clients } = fakeMqtt();
   const src = new MailboxSource({ agent: 'Robo', port: 1999, connect });
   await src.start(async () => {});
@@ -36,9 +36,9 @@ test('connects as the mailbox consumer (fixed client id, persistent session, no 
   assert.equal(c.options.clean, false);
   assert.equal(c.options.resubscribe, false);
   c.emit('connect', { sessionPresent: true });
-  assert.deepEqual(c.subscribed, [], 'existing session: the broker restores the inbox subscription');
+  assert.deepEqual(c.subscribed, [[inboxTopic('Robo'), { qos: 1 }]], 'a resumed session is re-subscribed anyway (idempotent; a restored session was seen delivering nothing until then)');
   c.emit('connect', { sessionPresent: false });
-  assert.deepEqual(c.subscribed, [[inboxTopic('Robo'), { qos: 1 }]]);
+  assert.deepEqual(c.subscribed, [[inboxTopic('Robo'), { qos: 1 }], [inboxTopic('Robo'), { qos: 1 }]]);
 });
 
 test('acks (calls done) only AFTER deliver resolved; drops the connection and does not ack when deliver rejects', async () => {

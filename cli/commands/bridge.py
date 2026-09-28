@@ -52,6 +52,25 @@ MCP_SERVER_NAME = "las"
 CLAUDE_CHANNEL_SERVER = f"server:{MCP_SERVER_NAME}"
 
 
+# What to do from INSIDE a session that has no channel (opened as bare
+# `claude`, or from an IDE): the channel is a launch flag, nothing can add it
+# to a live session — but Claude Code restores a conversation, so the way
+# in is to leave and come back through `las`. Printed by `las bridge status`
+# and by `las claude` when it is (mistakenly) run inside Claude.
+RECONNECT_GUIDE = (
+    "To connect THIS conversation to LAS:\n"
+    "  1. exit Claude (Ctrl+C twice, or /exit)\n"
+    "  2. in the same folder run:  las claude --resume\n"
+    "     (it restores this conversation with the LAS channel on; the mailbox kept every message meanwhile)\n"
+    "  A plain terminal instead?  las shell    Codex?  las codex"
+)
+
+
+def inside_claude_session() -> bool:
+    """Claude Code sets CLAUDECODE in the shells it spawns (its `!` prompt, Bash tool)."""
+    return bool(os.environ.get("CLAUDECODE"))
+
+
 def claude_config_path() -> Path:
     """Claude Code's user-level config (mcpServers live here, not in settings.json)."""
     return Path(os.environ.get("LAS_CLAUDE_CONFIG") or (Path.home() / ".claude.json"))
@@ -177,7 +196,8 @@ def bridge_status(name):
     name = resolve_agent_name(name)
     status = read_status(name)
     if not status or not _pid_alive(status.get("pid")):
-        click.echo(f"{name}: no bridge running — messages wait in the mailbox (start Claude with `las claude`).")
+        click.echo(f"{name}: no bridge running — messages wait in the mailbox.")
+        click.echo(RECONNECT_GUIDE)
         raise SystemExit(1)
     armed = bool(status.get("armed"))
     sink = status.get("sink", "?")
@@ -261,6 +281,11 @@ def _chain(name: str | None, *, widget: bool = True) -> None:
 
 
 def _launch_claude(args, no_widget=False):
+    if inside_claude_session():
+        # Not a launch: nested Claude with no TTY would just error. Guide instead.
+        click.echo("You are already inside a Claude session — `las claude` opens a NEW one from a terminal.")
+        click.echo(RECONNECT_GUIDE)
+        raise SystemExit(0)
     if not shutil.which("claude"):
         click.echo("Error: claude not found on PATH.", err=True)
         raise SystemExit(1)

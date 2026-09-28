@@ -10,3 +10,4 @@ export { resolveAgent, findAgentConfig } from './agent.js';
 export { resolveMqttPort } from './port.js';
 export { StatusFile, readStatus, statusPath, defaultSessionDir } from './status.js';
 export { makeSender } from './send.js';
+export { SessionRegistry, DefaultWatcher, newSessionId, sessionInboxTopic, sessionMailboxClientId, defaultSessionTopic } from './sessions.js';

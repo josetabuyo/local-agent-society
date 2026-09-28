@@ -21,6 +21,7 @@ import {
   micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, StdoutSink, ShellSink, ExecSink,
   KIND, resolveAgent, StatusFile, makeSender,
 } from '../src/index.js';
+import { SessionRegistry, DefaultWatcher, newSessionId, sessionInboxTopic, sessionMailboxClientId } from '../src/sessions.js';
 
 const { values: opts, positionals } = parseArgs({
   allowPositionals: true,
@@ -95,8 +96,15 @@ switch (sinkName) {
     break;
 }
 
+// This process is one SESSION of the agent (docs/adr/0004 phase 2): it has
+// its own inbox, and holds the agent-level one only while it is the default.
+const runtime = sinkName === 'exec' ? (opts.exec.trim().split(/\s+/)[0] === 'codex' ? 'codex' : 'exec') : sinkName === 'claude' ? 'claude' : sinkName;
+const sid = newSessionId(runtime);
+const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: agent.dir, log });
+const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
+const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });
 const status = new StatusFile({ agent: agent.name, sink: sink.name });
-const bridge = new Bridge({ agent: agent.name, source, pipeline: new Pipeline(interceptors), sink, send, status, log });
+const bridge = new Bridge({ agent: agent.name, source, pipeline: new Pipeline(interceptors), sink, send, status, log, session, sessionSource, defaultWatcher });
 
 let exiting = false;
 async function shutdown(code) {
@@ -111,6 +119,7 @@ async function shutdown(code) {
 
 source.on('connect', ({ sessionPresent, port }) => log(`${agent.name}: mailbox attached on :${port} (${sessionPresent ? 'session resumed' : 'new session'})`));
 source.on('takeover', () => shutdown(2));
+sessionSource.on('takeover', () => shutdown(2));
 if (sink instanceof ClaudeChannelSink) {
   sink.onclose = () => shutdown(0);
   // Claude Code exiting closes our stdin; the SDK's stdio transport does not

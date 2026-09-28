@@ -19,6 +19,9 @@ def _never_touch_the_real_claude_config(monkeypatch, tmp_path):
     once could have registered a fake node path into the real file."""
     monkeypatch.setenv("LAS_CLAUDE_CONFIG", str(tmp_path / "claude.json"))
     monkeypatch.setattr(bridge_mod, "_las", lambda: "/Users/me/.local/bin/las")
+    # The suite itself often runs from inside a Claude session (CLAUDECODE set):
+    # that must not turn every `las claude` under test into the reconnect guide.
+    monkeypatch.delenv("CLAUDECODE", raising=False)
 
 
 def _capture(monkeypatch):
@@ -66,6 +69,7 @@ def test_status_exit_code_is_the_skill_contract(monkeypatch, tmp_path):
     absent = runner.invoke(cli, ["bridge", "status", "Robo"])
     assert absent.exit_code == 1
     assert "no bridge running" in absent.output
+    assert "las claude --resume" in absent.output, "the way back in is printed, not just the problem"
 
     (tmp_path / "bridge-Robo.json").write_text(json.dumps({"agent": "Robo", "sink": "claude-channel", "pid": os.getpid(), "armed": False, "delivered": 0}))
     waiting = runner.invoke(cli, ["bridge", "status", "Robo"])
@@ -255,3 +259,13 @@ def test_las_claude_help_lists_only_our_scoped_subcommands():
     assert "register" in out and "unregister" in out
     assert "goes to Claude Code as-is" in out
     assert "No such command" not in out
+
+
+def test_las_claude_inside_a_claude_session_guides_instead_of_nesting(monkeypatch, tmp_path):
+    calls, *_ = _chain_spies(monkeypatch, tmp_path)
+    monkeypatch.setenv("CLAUDECODE", "1")
+    result = CliRunner().invoke(cli, ["claude", "--resume"])
+    assert result.exit_code == 0
+    assert "already inside a Claude session" in result.output
+    assert "las claude --resume" in result.output and "las shell" in result.output
+    assert calls == [], "nothing launched, nothing chained"

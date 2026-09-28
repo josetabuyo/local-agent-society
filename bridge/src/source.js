@@ -33,6 +33,8 @@ export function mailboxClientId(agent) {
 export class MailboxSource extends EventEmitter {
   constructor({
     agent,
+    topic,
+    clientId,
     host = 'localhost',
     port,
     connect = mqtt.connect,
@@ -45,6 +47,8 @@ export class MailboxSource extends EventEmitter {
     super();
     if (!agent) throw new TypeError('MailboxSource needs an agent name');
     this.agent = agent;
+    this._topic = topic || inboxTopic(agent);
+    this._clientId = clientId || mailboxClientId(agent);
     this.host = host;
     this.port = port;
     this.connect = connect;
@@ -59,8 +63,13 @@ export class MailboxSource extends EventEmitter {
     this.shortLived = 0;
   }
 
+  /** The inbox this source consumes: the agent's, or one session's (see sessions.js). */
   get topic() {
-    return inboxTopic(this.agent);
+    return this._topic;
+  }
+
+  get clientId() {
+    return this._clientId;
   }
 
   /** Start consuming; `deliver(envelope)` must resolve once the message is safely handed over. */
@@ -70,14 +79,13 @@ export class MailboxSource extends EventEmitter {
     this.stopped = false;
     const port = await resolveMqttPort({ explicit: this.port });
     const client = this.connect(`mqtt://${this.host}:${port}`, {
-      clientId: mailboxClientId(this.agent),
+      clientId: this._clientId,
       clean: false,
       protocolVersion: 4,
       keepalive: 30,
       reconnectPeriod: 2000,
-      // Never auto-resubscribe: the subscription is part of the persistent
-      // session and re-subscribing would replay a retained message a
-      // pre-mailbox sender left on the topic.
+      // We subscribe ourselves on every 'connect' (see below); mqtt.js's own
+      // resubscribe would only duplicate that.
       resubscribe: false,
     });
     this.client = client;
@@ -87,7 +95,15 @@ export class MailboxSource extends EventEmitter {
     client.on('connect', (connack) => {
       this.connectedAt = this.now();
       const sessionPresent = Boolean(connack && connack.sessionPresent);
-      if (!sessionPresent) client.subscribe(this.topic, { qos: 1 });
+      // Always (re)subscribe, even when the broker reports the session as
+      // present. Subscribing is idempotent for a persistent session, and
+      // seen live on 2026-09-28: a mailbox session restored by the broker
+      // reported sessionPresent yet delivered nothing — neither its backlog
+      // nor live publishes — until a client subscribed the inbox again.
+      // (The old "only subscribe on a new session" rule guarded against a
+      // legacy retained message replaying; the backend stopped retaining
+      // inbox traffic long ago, so that guard costs more than it saves.)
+      client.subscribe(this.topic, { qos: 1 });
       this.emit('connect', { sessionPresent, port });
     });
 

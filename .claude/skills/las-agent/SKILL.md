@@ -82,7 +82,9 @@ Treat it exactly as if the human had typed it (§7): act, then report as usual. 
 
 **Arming — the probe.** Right after it connects, the channel pushes one probe event (`kind="probe"`, text starting with `[las-channel-probe]`). Call the `las_channel_ack` tool with its `probe_id` immediately and say nothing about it. That single round trip proves the path end-to-end, and only then does the bridge attach the mailbox — before that nothing is consumed, because a session started without the channel flag would otherwise swallow messages silently (Claude Code drops channel events it wasn't told to accept, with no error). The probe is a liveness check, not a message: no report, no TTS, no comment — the same rule as the mic self-test.
 
-**If `las bridge status` exits non-zero**, the channel isn't armed in this session — almost always because Claude was started as bare `claude` instead of `las claude` (the wrapper adds `--dangerously-load-development-channels server:las`, mandatory while channels are a research preview, and it is also what registers the `las` MCP server and publishes presence). Then, and only then, do the chain's work by hand, drain once, and tell the user in one line that live delivery isn't active this session and that `las claude` fixes it next time:
+**Several runtimes at once = sessions.** The same agent can have a Claude, a Codex and a shell attached; each is a *session* (`las agent sessions`), the last one used is the **default** — a plain `send --to Name` reaches it, its bridge holds the agent mailbox. Pick one with `--session claude|codex|shell|<id>`, all with `--all-sessions`, switch the default with `las agent sessions --use X`. A message that arrives here may carry `session="<id>"` in the tag: it was aimed at this session specifically. The widget mic chooses its target the same way (press-and-hold the mic).
+
+**If `las bridge status` exits non-zero**, the channel isn't armed in this session — almost always because Claude was started as bare `claude` instead of `las claude` (the wrapper adds `--dangerously-load-development-channels server:las`, mandatory while channels are a research preview, and it is also what registers the `las` MCP server and publishes presence). Then, and only then, do the chain's work by hand, drain once, and tell the user in one line that live delivery isn't active this session and how to get it for THIS conversation: exit and `las claude --resume` (Claude restores the conversation; the mailbox keeps every message meanwhile — `las bridge status` prints the same guide):
 
 ```bash
 las agent register            # presence — `las claude` would have done this
@@ -248,6 +250,11 @@ las agent send --to <AgentName> "<message>" --from <ThisAgent>
 
 # Is my mailbox being delivered live into this session? (exit 0 = channel armed)
 las bridge status [<MyName>]
+
+# Which runtimes are attached to an agent right now (a Claude, a Codex, a shell), which is the default
+las agent sessions [<Name>] [--use <id|runtime>]
+las agent send --to <Name> --session shell "ls -la"     # one session
+las agent send --to <Name> --all-sessions "heads up"     # every session
 
 # Drain my own vortexia inbox by hand (fallback only — the channel does this live)
 las agent poll [<MyName>] --timeout 2

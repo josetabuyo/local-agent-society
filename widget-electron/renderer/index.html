@@ -55,6 +55,13 @@
         <input id="wakeEnabled" type="checkbox" />
       </div>
       <div class="settings-row">
+        <label for="micTarget">Dictation goes to</label>
+        <select id="micTarget">
+          <option value="default">Last used session</option>
+          <option value="all">All sessions</option>
+        </select>
+      </div>
+      <div class="settings-row">
         <label for="micLanguage">Dictation language</label>
         <select id="micLanguage">
           <option value="es">Español</option>
@@ -70,6 +77,8 @@
          one is what a plain click runs. Small inline popover (fixed above
          the button bar), not a full-window overlay — no expand needed. -->
     <div id="openMenu" class="open-menu hidden"></div>
+    <!-- Mic press-and-hold menu: which connected session a dictation goes to. -->
+    <div id="micMenu" class="open-menu hidden"></div>
 
     <div id="resizeHandle" class="resize-handle" title="Drag to resize"></div>
   </div>
