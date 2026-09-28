@@ -386,6 +386,24 @@ def poll(name, timeout):
         click.echo(f"  [{sender}]: {text}")
 
 
+def _bridge_sessions(name: str) -> list:
+    """Connected bridge sessions of `name` per the backend ([] when none, or backend down)."""
+    try:
+        view = api.get(f"/agents/{quote(name, safe='')}/sessions") or {}
+    except SystemExit:
+        return []
+    return view.get("sessions") or []
+
+
+def _stand_by_forever(name: str, sessions: list) -> None:
+    """Hold nothing, say it once, wait to be killed (or for the old session's Monitor to expire)."""
+    runtimes = ", ".join(sorted({s.get("runtime", "?") for s in sessions}))
+    click.echo(f"{name}: a bridge session already delivers this mailbox ({runtimes}) — `las agent listen` is retired, standing by without consuming anything. Restart this session with `las claude` to get the channel.", err=True)
+    sys.stdout.flush()
+    while True:
+        time.sleep(3600)
+
+
 def _legacy_listen_stand_down(name: str) -> None:
     """`las agent listen` is the pre-bridge consumer (docs/adr/0004). A session
     opened before the migration still re-arms it under a Monitor, and if a
@@ -395,19 +413,13 @@ def _legacy_listen_stand_down(name: str) -> None:
     a stale listener three times and quit). So when the backend lists any
     connected session for this agent, this process holds NOTHING and just
     waits quietly until it is killed or its Monitor expires: no fight, no
-    exit-code churn in the old session, and the bridge keeps delivering."""
-    try:
-        view = api.get(f"/agents/{quote(name, safe='')}/sessions") or {}
-    except SystemExit:
-        return  # backend down: nothing to defer to
-    sessions = view.get("sessions") or []
-    if not sessions:
-        return
-    runtimes = ", ".join(sorted({s.get("runtime", "?") for s in sessions}))
-    click.echo(f"{name}: a bridge session already delivers this mailbox ({runtimes}) — `las agent listen` is retired, standing by without consuming anything. Restart this session with `las claude` to get the channel.", err=True)
-    sys.stdout.flush()
-    while True:
-        time.sleep(3600)
+    exit-code churn in the old session, and the bridge keeps delivering.
+    Checked at start here, and again on every unexpected drop (see
+    on_disconnect): a bridge that arrives LATER kicks us once, we look, and
+    we yield instead of kicking back."""
+    sessions = _bridge_sessions(name)
+    if sessions:
+        _stand_by_forever(name, sessions)
 
 
 @agent.command("listen")
@@ -500,6 +512,7 @@ def listen(name):
     # how long a connection actually lived, not what time it is.
     connected_at = [time.monotonic()]
     short_lived = [0]
+    stand_down = [None]  # set by on_disconnect when a bridge session took the mailbox
     FIGHT_DROPS, FIGHT_LIFETIME_S = 3, 15.0
 
     def on_connect(c, userdata, flags, rc, *_args):
@@ -518,6 +531,13 @@ def listen(name):
         # dies within seconds. Three of those in a row — with no long-lived
         # connection in between — and we exit rather than fight forever.
         if rc == 0:
+            return
+        # Kicked? If a bridge session now exists for this agent, that is who
+        # kicked us and who should hold the mailbox: yield, don't fight.
+        sessions = _bridge_sessions(name)
+        if sessions:
+            stand_down[0] = sessions
+            c.disconnect()
             return
         lived = time.monotonic() - connected_at[0]
         short_lived[0] = short_lived[0] + 1 if lived < FIGHT_LIFETIME_S else 0
@@ -564,6 +584,8 @@ def listen(name):
         click.echo(f"vortexia unreachable on :{mqtt_port} ({exc}) — is `vortexia start` running?", err=True)
         sys.exit(1)
     client.loop_forever()
+    if stand_down[0]:
+        _stand_by_forever(name, stand_down[0])
 
 
 @agent.command("sessions")

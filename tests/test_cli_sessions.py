@@ -65,3 +65,58 @@ def test_legacy_listen_stands_down_when_a_bridge_session_holds_the_mailbox(monke
 
     monkeypatch.setattr(agents_mod.api, "get", lambda path: {"agent": "Robo", "default": None, "sessions": []} if path.endswith("/sessions") else {})
     agents_mod._legacy_listen_stand_down("Robo")  # no sessions: returns, the real consumer path would follow
+
+
+def test_legacy_listen_yields_when_a_bridge_session_kicks_it_later(monkeypatch):
+    """The bridge arrives AFTER listen: the first kick makes listen look, see the session, disconnect and stand by — never kick back."""
+    import json as _json
+    import sys as _sys
+    import types as _types
+
+    calls = {"sessions": 0}
+    view_later = {"agent": "Robo", "default": "codex-1", "sessions": [{"sid": "codex-1", "runtime": "codex", "pid": 1, "cwd": "/r", "lastActiveAt": 0, "default": True}]}
+
+    def fake_get(path):
+        if path == "/ports":
+            return {"9012": {"app": "vortexia-mqtt", "port": 9012, "registered_at": "2026-01-01T00:00:00"}}
+        if path.endswith("/sessions"):
+            calls["sessions"] += 1
+            return {"agent": "Robo", "default": None, "sessions": []} if calls["sessions"] == 1 else view_later
+        return {}
+
+    monkeypatch.setattr(agents_mod.api, "get", fake_get)
+    slept = []
+
+    def fake_sleep(s):
+        slept.append(s)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(agents_mod.time, "sleep", fake_sleep)
+
+    class FakeMQTTClient:
+        instances = []
+
+        def __init__(self, *a, **k):
+            self.disconnected = False
+            FakeMQTTClient.instances.append(self)
+
+        def subscribe(self, *a, **k): pass
+        def publish(self, *a, **k): pass
+        def connect(self, *a, **k): pass
+        def disconnect(self): self.disconnected = True
+
+        def loop_forever(self):
+            self.on_connect(self, None, {"session present": 0}, 0)
+            self.on_disconnect(self, None, 7)  # kicked by the bridge taking the client id
+
+    fake_client_mod = _types.SimpleNamespace(Client=FakeMQTTClient, MQTTv311="MQTTv311")
+    pkg = _types.ModuleType("paho.mqtt"); pkg.client = fake_client_mod
+    root = _types.ModuleType("paho"); root.mqtt = pkg
+    monkeypatch.setitem(_sys.modules, "paho", root)
+    monkeypatch.setitem(_sys.modules, "paho.mqtt", pkg)
+    monkeypatch.setitem(_sys.modules, "paho.mqtt.client", fake_client_mod)
+
+    result = CliRunner().invoke(agents_mod.listen, ["Robo"])
+    assert FakeMQTTClient.instances[-1].disconnected is True, "yielded the mailbox instead of reconnecting"
+    assert slept == [3600]
+    assert "standing by" in result.output
