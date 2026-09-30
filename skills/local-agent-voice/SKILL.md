@@ -12,11 +12,10 @@ allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
 ## Steps
 
 ### 1. Read the current agent config
-`.las-agent.json` is the current filename; `.agent.json` is read as a fallback for agents not yet migrated (see `scripts/migrate-agent-json.py`).
 ```bash
 python3 -c "
 import json, os
-p = '.las-agent.json' if os.path.exists('.las-agent.json') else '.agent.json'
+p = '.las-agent.json'
 d = json.load(open(p))
 print(d.get('name'), d.get('voice','Samantha'))
 "
@@ -47,7 +46,7 @@ Write back to whichever filename was read in step 1.
 ```bash
 python3 -c "
 import json, os
-p = '.las-agent.json' if os.path.exists('.las-agent.json') else '.agent.json'
+p = '.las-agent.json'
 d = json.load(open(p))
 d['voice'] = 'VOICE'
 d['locale'] = 'LANG'

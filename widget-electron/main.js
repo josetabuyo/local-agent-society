@@ -109,9 +109,7 @@ function resolveInitialAgentNames(argv) {
 
   const cwdFlag = argv.find((a) => a.startsWith('--cwd='));
   const dir = cwdFlag ? cwdFlag.slice('--cwd='.length) : process.cwd();
-  // ".las-agent.json" is the current convention; ".agent.json" is read as a
-  // fallback for agents not yet migrated (see scripts/migrate-agent-json.py).
-  for (const filename of ['.las-agent.json', '.agent.json']) {
+  for (const filename of ['.las-agent.json']) {
     try {
       const raw = fs.readFileSync(path.join(dir, filename), 'utf8');
       const json = JSON.parse(raw);

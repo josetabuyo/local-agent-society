@@ -87,3 +87,31 @@ def test_the_first_sessions_patch_seeds_the_whole_section_with_its_descriptors()
     assert set(merged["sessions"]["runtimes"]) == {"claude", "codex", "shell"}
     again = merge_config_patch(merged, {"sessions": {"cc_default": True}})
     assert again["sessions"]["target"] == "shell", "a later patch merges, it does not reseed"
+
+
+# ── the whole file: canonical shape, scope_docs ──
+
+from cli.agent_config import discover_scope_docs, normalized_agent_config  # noqa: E402
+
+
+def test_scope_docs_are_discovered_in_ladder_order(tmp_path):
+    (tmp_path / "README.md").write_text("x")
+    (tmp_path / ".vxia-scope.987.md").write_text("x")
+    (tmp_path / ".vxia-scope.144.md").write_text("x")
+    (tmp_path / ".vxia-scope.draft.md").write_text("x")
+    assert discover_scope_docs(tmp_path) == [".vxia-scope.144.md", ".vxia-scope.987.md", "README.md"]
+
+
+def test_normalize_fills_only_what_is_missing_in_a_fixed_order(tmp_path):
+    (tmp_path / "README.md").write_text("x")
+    current = {"voice": "Paulina", "name": "Robo", "ports": [9003], "short_description": "kept",
+               "scope_docs": ["docs/who.md"], "sessions": {"target": "shell", "runtimes": {"shell": {"scope": "mine"}}}}
+    out = normalized_agent_config(current, tmp_path, locale_for=lambda v: "es-MX")
+    assert list(out)[:9] == ["name", "voice", "locale", "pronunciation", "created", "response_length_hint",
+                             "short_description", "long_description", "scope_docs"]
+    assert list(out)[-2:] == ["ports", "sessions"]
+    assert out["locale"] == "es-MX" and out["pronunciation"] == "Robo" and out["short_description"] == "kept"
+    assert out["scope_docs"] == ["docs/who.md"], "an explicit choice of identity docs is never replaced"
+    assert out["sessions"]["target"] == "shell" and out["sessions"]["runtimes"]["shell"] == {"scope": "mine"}
+    assert set(out["sessions"]["runtimes"]) == {"claude", "codex", "shell"}
+    assert normalized_agent_config(out, tmp_path) == out, "idempotent"

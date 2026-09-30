@@ -34,11 +34,13 @@ def test_resolve_agent_name_falls_back_to_cwd(monkeypatch, tmp_path):
     assert _agent_common.resolve_agent_name(None) == "cwd-agent"
 
 
-def test_resolve_agent_name_falls_back_to_legacy_agent_json(monkeypatch, tmp_path):
-    """.agent.json (pre-rename) is still read when .las-agent.json is absent."""
+def test_resolve_agent_name_never_reads_the_retired_agent_json(monkeypatch, tmp_path):
+    """.agent.json (pre-rename) is retired: it no longer identifies an agent."""
     (tmp_path / ".agent.json").write_text(json.dumps({"name": "legacy-agent"}))
     monkeypatch.chdir(tmp_path)
-    assert _agent_common.resolve_agent_name(None) == "legacy-agent"
+    assert not (tmp_path / ".las-agent.json").exists()
+    from cli.path_utils import agent_config_path
+    assert agent_config_path(tmp_path) is None
 
 
 def test_resolve_agent_name_errors_when_no_name_and_no_agent_json(monkeypatch, tmp_path):

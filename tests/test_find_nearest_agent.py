@@ -16,11 +16,12 @@ def write_agent(directory: Path, name: str) -> Path:
     return directory
 
 
-def test_finds_legacy_agent_json(tmp_path):
-    """.agent.json (pre-rename) is still discoverable when .las-agent.json is absent."""
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".agent.json").write_text(json.dumps({"name": "Legacy"}))
-    assert _find_nearest_agent_dir(str(tmp_path)) == str(tmp_path)
+def test_ignores_the_retired_agent_json(tmp_path):
+    """.agent.json (pre-rename) is retired: it is never discovered."""
+    leaf = tmp_path / "leaf"
+    leaf.mkdir(parents=True, exist_ok=True)
+    (leaf / ".agent.json").write_text(json.dumps({"name": "Legacy"}))
+    assert _find_nearest_agent_dir(str(leaf)) != str(leaf)
 
 
 # ── walk-up cases ─────────────────────────────────────────────────────────────

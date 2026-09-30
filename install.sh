@@ -224,7 +224,7 @@ else
 fi
 
 # ── Create .las-agent.json if not present ─────────────────────────────────────
-if [ ! -f "$INSTALL_DIR/.las-agent.json" ] && [ ! -f "$INSTALL_DIR/.agent.json" ]; then
+if [ ! -f "$INSTALL_DIR/.las-agent.json" ]; then
     TODAY=$(date '+%Y-%m-%d')
     cat > "$INSTALL_DIR/.las-agent.json" <<JSON
 {

@@ -980,7 +980,7 @@ from cli.path_utils import find_nearest_agent_dir as _find_nearest_agent_dir
 
 
 def _claude_pids_for_path(agent_path: str) -> list[str]:
-    """Return PIDs of all claude processes whose nearest .agent.json matches agent_path."""
+    """Return PIDs of all claude processes whose nearest .las-agent.json matches agent_path."""
     try:
         ps_out = subprocess.run(
             ["ps", "-ax", "-o", "pid=,command="], capture_output=True, text=True, timeout=5

@@ -11,7 +11,7 @@ import { resolveMqttPort } from '../src/port.js';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'las-bridge-'));
 
-test('resolveAgent walks up to the nearest .las-agent.json (legacy .agent.json as fallback); explicit name wins', () => {
+test('resolveAgent walks up to the nearest .las-agent.json (the retired .agent.json is never read); explicit name wins', () => {
   const root = tmp();
   fs.writeFileSync(path.join(root, '.las-agent.json'), JSON.stringify({ name: 'Parent' }));
   const sub = path.join(root, 'a', 'b');
@@ -21,7 +21,7 @@ test('resolveAgent walks up to the nearest .las-agent.json (legacy .agent.json a
   assert.equal(resolveAgent({ cwd: sub, name: 'Other' }).name, 'Other');
   const legacy = tmp();
   fs.writeFileSync(path.join(legacy, '.agent.json'), JSON.stringify({ name: 'Old' }));
-  assert.equal(resolveAgent({ cwd: legacy }).name, 'Old');
+  assert.equal(findAgentConfig(legacy, { maxDepth: 0 }), null);
   assert.throws(() => resolveAgent({ cwd: tmp() }), /no agent name/);
 });
 

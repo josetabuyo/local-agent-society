@@ -1,12 +1,12 @@
 /**
  * Which agent is this? Walk up from `cwd` to the nearest `.las-agent.json`
- * (or the legacy `.agent.json`) — the same rule the `las` CLI applies
+ * — the same rule the `las` CLI applies
  * (cli/path_utils.py find_nearest_agent_dir / cli/commands/_agent_common.py).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const AGENT_CONFIG_FILENAMES = ['.las-agent.json', '.agent.json'];
+export const AGENT_CONFIG_FILENAMES = ['.las-agent.json'];
 
 export function findAgentConfig(startDir, { maxDepth = 5 } = {}) {
   let dir = path.resolve(startDir);

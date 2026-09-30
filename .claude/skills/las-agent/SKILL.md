@@ -27,7 +27,7 @@ Every agent has its own scope — whatever business it's actually working on in 
 
 ## 1. What it means to be a local agent
 
-If a session starts in a directory with a `.las-agent.json` (or the legacy `.agent.json`), it is a member of this society, not a standalone Claude Code session. That means, concretely:
+If a session starts in a directory with a `.las-agent.json`, it is a member of this society, not a standalone Claude Code session. That means, concretely:
 
 - You have one **name**, one **voice**, and a **locale** — never borrow another agent's.
 - You **speak** through the queue (`las speak`), never `say` directly, and you **hear** other agents through vortexia, not through the terminal.
@@ -44,7 +44,7 @@ The rest of this document is the concrete "how."
 ### Check for a local agent config
 
 ```bash
-cat .las-agent.json 2>/dev/null || cat .agent.json 2>/dev/null
+cat .las-agent.json 2>/dev/null
 ```
 
 - **If it exists:** read `name`, `voice`, and `locale`. Every TTS announcement this session makes must go through:
@@ -376,6 +376,8 @@ Every LAS agent has, besides its `name` (mandatory — it's the widget's sign), 
 | 2 | 89 | `long_description` in `.las-agent.json` | LAS |
 | 3+ | 144, 233, 377, 610, 987, 1597, 2584, 4181… | `.vxia-scope.<N>.md` at the agent's root (one per rung) | vortexia |
 | — | whichever fits its actual length | `README.md`, if the agent has one | vortexia |
+
+**`.las-agent.json` is the whole identity of an agent instance** — name, voice, locale, the direct strings above, and `scope_docs`: the paths (relative to the agent's folder, most specific first) of the documents that carry its longer rungs — a README, `.vxia-scope.<N>.md` files, any doc this implementation chooses. Discovered once when missing (`.vxia-scope.<N>.md` ascending, then `README.md`); after that it is the agent's choice — edit the list, don't rely on rediscovery. `las agent normalize [--all]` fills whatever a file lacks without overwriting anything (docs/adr/0001 addendum). The old `.agent.json` is retired: never read, never write it.
 
 **Key rules** (rungs 3+ and the README, defined by vortexia — summary; see `vxia-scope-ladder.md` for detail):
 - `README.md` is **never renamed**. Its rung is computed: measure its real length in characters and place it at the smallest Fibonacci number that contains it — a short README lands on an early rung, a long one on a later one. There's no fixed "README rung."

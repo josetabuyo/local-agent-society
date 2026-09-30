@@ -154,3 +154,26 @@ These are vortexia's concern, not LAS's — see
   consistently. Automated scanning, the collision warning, and any
   vortexia-side consumption are tracked as future work in the `vortexia`
   repo, not implemented by this ADR.
+
+## Addendum (2026-09-30) — `.las-agent.json` is the whole identity; `scope_docs`
+
+`.las-agent.json` is the one file that identifies an agent instance: name,
+voice, locale, pronunciation, the scope ladder's direct strings
+(`short_description`, `long_description`), the pointers to its longer rungs,
+and its session routing (ADR 0005). The pre-rename `.agent.json` is retired:
+no code reads it any more (a machine that still has one runs
+`scripts/migrate-agent-json.py` once).
+
+- **`scope_docs`** — paths relative to the agent's folder, most specific
+  first: the documents that carry this agent's identity beyond rung 2. Each
+  implementation picks them — a README, vortexia's `.vxia-scope.<N>.md`
+  files, any other doc — or states direct strings only. When the key is
+  absent it is discovered (`.vxia-scope.<N>.md` ascending, then
+  `README.md`, vortexia's scan order); once written, it is the agent's
+  choice and is never rediscovered over. This is a pointer list only: how
+  a document maps to a rung stays vortexia's rule (`vxia-scope-ladder.md`).
+- **One canonical shape** (`cli/agent_config.py`,
+  `normalized_agent_config`): fixed key order, defaults for anything
+  missing, never overwriting a stated value. `las agent new` and `restore`
+  write it; `las agent normalize [--all] [--dry-run]` brings existing files
+  to it. All 30 agents on ba-mac were normalized on 2026-09-30.

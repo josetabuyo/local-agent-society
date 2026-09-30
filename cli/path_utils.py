@@ -4,26 +4,20 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 
-# Canonical agent-config filename. ".agent.json" is the pre-rename name kept
-# only as a read fallback for agents not yet migrated (see
-# scripts/migrate-agent-json.py) — every new write uses AGENT_CONFIG_FILENAME.
+# The one agent-config filename. The pre-rename ".agent.json" is no longer
+# read anywhere: a machine that still has one runs
+# scripts/migrate-agent-json.py once.
 AGENT_CONFIG_FILENAME = ".las-agent.json"
-LEGACY_AGENT_CONFIG_FILENAME = ".agent.json"
-AGENT_CONFIG_FILENAMES = (AGENT_CONFIG_FILENAME, LEGACY_AGENT_CONFIG_FILENAME)
 
 
 def agent_config_path(directory: str | Path) -> Path | None:
-    """Return the agent-config file in `directory`, new name preferred, or None."""
-    directory = Path(directory)
-    for filename in AGENT_CONFIG_FILENAMES:
-        candidate = directory / filename
-        if candidate.exists():
-            return candidate
-    return None
+    """Return the agent-config file in `directory`, or None."""
+    candidate = Path(directory) / AGENT_CONFIG_FILENAME
+    return candidate if candidate.exists() else None
 
 
 def _has_agent_config(directory: Path) -> bool:
-    return any((directory / filename).exists() for filename in AGENT_CONFIG_FILENAMES)
+    return (directory / AGENT_CONFIG_FILENAME).exists()
 
 
 def find_nearest_agent_dir(cwd: str | Path, max_depth: int = 5) -> str | None:

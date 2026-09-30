@@ -14,8 +14,7 @@ from cli.commands.bridge import bridge, claude_cmd, codex_cmd, shell_cmd
 def cli():
     """Local Agent Society — CLI.
 
-    If the current directory has a .las-agent.json (or the legacy
-    .agent.json), you are a local agent of this society. Load the
+    If the current directory has a .las-agent.json, you are a local agent of this society. Load the
     `/las-agent` skill before doing anything else — it covers how to speak
     (`las speak`), how to talk to other agents on this machine or another
     one (`las agent send`), how the widget works, and what's expected of

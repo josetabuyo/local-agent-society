@@ -125,6 +125,80 @@ def accepts_only_commands(descriptor: dict) -> bool:
     return isinstance(accepts, list) and accepts == [KIND_COMMAND]
 
 
+# ── the whole file: one canonical shape for every agent ────────────────────
+#
+# `.las-agent.json` is everything LAS knows about one agent instance: who it
+# is (name, voice, locale, pronunciation), how it speaks (response_length_hint),
+# what it is for — the scope ladder (docs/adr/0001) as direct strings
+# (short_description, long_description) plus `scope_docs`, the documents that
+# carry the longer rungs — and how its sessions are routed (`sessions`).
+#
+# `scope_docs` lists paths relative to the agent's folder, most specific
+# first. Each implementation picks what identifies it: a README, a
+# `.vxia-scope.<N>.md` (vortexia's file convention), any other doc. When the
+# file does not say, it is discovered: `.vxia-scope.<N>.md` ascending, then
+# README.md — the scan order vortexia's ladder uses.
+
+DEFAULT_RESPONSE_LENGTH_HINT = 40
+CANONICAL_KEYS = ("name", "voice", "locale", "pronunciation", "created", "response_length_hint",
+                  "short_description", "long_description", "scope_docs")
+
+
+def discover_scope_docs(agent_dir: str | Path) -> list:
+    """The identity documents present in `agent_dir`, in scope-ladder order (relative paths)."""
+    agent_dir = Path(agent_dir)
+    rungs = []
+    for f in agent_dir.glob(".vxia-scope.*.md"):
+        middle = f.name[len(".vxia-scope."):-len(".md")]
+        if middle.isdigit():
+            rungs.append((int(middle), f.name))
+    docs = [name for _, name in sorted(rungs)]
+    if (agent_dir / "README.md").is_file():
+        docs.append("README.md")
+    return docs
+
+
+def normalized_agent_config(config: dict, agent_dir: str | Path, *, locale_for=lambda voice: "en-US") -> dict:
+    """`config` completed to the canonical shape — never overwriting a value the file already states.
+
+    Canonical keys come first in a fixed order, anything else the agent keeps
+    (e.g. `ports`) after them, `sessions` last. Missing values get their
+    defaults: locale from the voice, pronunciation from the name, empty
+    descriptions, discovered `scope_docs`, the default `sessions` section
+    (a present one keeps its choices and gains any runtime it lacks).
+    """
+    name = config.get("name", "")
+    voice = config.get("voice", "Samantha")
+    defaults = {
+        "name": name,
+        "voice": voice,
+        "locale": None,
+        "pronunciation": name,
+        "created": "",
+        "response_length_hint": DEFAULT_RESPONSE_LENGTH_HINT,
+        "short_description": "",
+        "long_description": "",
+        "scope_docs": None,
+    }
+    out = {}
+    for key in CANONICAL_KEYS:
+        if key in config:
+            out[key] = config[key]
+        elif key == "locale":
+            out[key] = locale_for(voice)
+        elif key == "scope_docs":
+            out[key] = discover_scope_docs(agent_dir)
+        else:
+            out[key] = defaults[key]
+    for key, value in config.items():
+        if key not in out and key != "sessions":
+            out[key] = value
+    base = default_sessions_config()
+    current = _dict(config.get("sessions"))
+    out["sessions"] = {**base, **current, "runtimes": {**base["runtimes"], **_dict(current.get("runtimes"))}}
+    return out
+
+
 def merge_config_patch(config: dict, patch: dict) -> dict:
     """`config` with `patch` applied: top-level keys replaced, `sessions` merged one level deep (its `runtimes` per key)."""
     result = copy.deepcopy(config)

@@ -10,7 +10,8 @@ import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
 from cli.commands._agent_common import infer_locale, resolve_agent_name
-from cli.agent_config import TARGET_ALL, TARGET_DEFAULT, TITLE_SOFT_CAP, default_sessions_config
+from cli.agent_config import (TARGET_ALL, TARGET_DEFAULT, TITLE_SOFT_CAP, BrokenAgentConfig, normalized_agent_config,
+                              read_agent_config, write_agent_config)
 from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
 from cli.hierarchy import tree_lines
 
@@ -87,28 +88,12 @@ def new(name, voice, target_dir):
     locale = infer_locale(chosen_voice)
 
     # Write .las-agent.json
-    agent_data = {
-        "name": name,
-        "voice": chosen_voice,
-        "locale": locale,
-        "pronunciation": name,
-        "created": str(datetime.date.today()),
-        # A soft target for the LENGTH of THIS agent's own spoken
-        # summary/acknowledge responses (report/closing lines) — never a hard
-        # truncation, and never applied to text the agent RECEIVES (mic
-        # dictation, other agents' messages). Named response_length_hint,
-        # not *_limit or *_max, precisely so it reads as a suggestion.
-        "response_length_hint": 40,
-        # Empty by design — filled in over time, and meant to eventually back
-        # a vortexia intent-filter broadcast (who this agent is, what it
-        # offers, what it needs).
-        "short_description": "",
-        "long_description": "",
-        # Where a plain send / the widget mic lands among this agent's
-        # connected runtimes, and how each runtime is described to a router
-        # — see cli/agent_config.py and `las agent target`.
-        "sessions": default_sessions_config(),
-    }
+    # The canonical shape (cli/agent_config.py normalized_agent_config):
+    # response_length_hint is a soft target for this agent's own spoken
+    # lines, never a truncation; the descriptions start empty and scope_docs
+    # lists whatever identity docs the folder already has (README, ...).
+    agent_data = normalized_agent_config(
+        {"name": name, "voice": chosen_voice, "locale": locale, "created": str(datetime.date.today())}, cwd)
     try:
         agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
     except OSError as exc:
@@ -160,13 +145,13 @@ def restore(name):
 
     target = cwd / AGENT_CONFIG_FILENAME
     voice = info.get("voice", "Samantha")
-    data = {
+    data = normalized_agent_config({
         "name": name,
         "voice": voice,
         "locale": info.get("locale") or infer_locale(voice),
         "pronunciation": info.get("pronunciation") or name,
         "created": info.get("registered_at", "")[:10],
-    }
+    }, cwd)
     try:
         target.write_text(json.dumps(data, indent=2, ensure_ascii=False))
     except OSError as exc:
@@ -191,6 +176,44 @@ def sync():
     }
     api.post("/agents", payload)
     click.echo(f"Synced '{d['name']}' to backend.")
+
+
+@agent.command("normalize")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+@click.option("--all", "every", is_flag=True, help="Every registered agent on this machine.")
+@click.option("--dry-run", is_flag=True, help="Only say which files would change.")
+def normalize(name, every, dry_run):
+    """Bring .las-agent.json to the canonical shape — fill what is missing, never overwrite what is there.
+
+    Adds any missing locale, pronunciation, response_length_hint, descriptions,
+    scope_docs (discovered: .vxia-scope.<N>.md, then README.md) and the
+    sessions section, in one fixed key order. A file that is not valid JSON is
+    reported and left alone.
+    """
+    registry = api.get("/agents") or {}
+    names = sorted(registry) if every else [resolve_agent_name(name)]
+    changed = 0
+    for n in names:
+        path = registry.get(n, {}).get("path")
+        file = agent_config_path(path) if path else None
+        if not file:
+            click.echo(f"  {n}: no {AGENT_CONFIG_FILENAME} at {path or '?'}")
+            continue
+        try:
+            current = read_agent_config(file, strict=True)
+        except BrokenAgentConfig as exc:
+            click.echo(f"  {n}: {exc} — fix it by hand")
+            continue
+        fixed = normalized_agent_config(current, file.parent, locale_for=infer_locale)
+        if fixed == current and list(fixed) == list(current):
+            click.echo(f"  {n}: ok")
+            continue
+        added = [k for k in fixed if k not in current]
+        changed += 1
+        click.echo(f"  {n}: {'would add' if dry_run else 'added'} {', '.join(added) or 'key order'}")
+        if not dry_run:
+            write_agent_config(file, fixed)
+    click.echo(f"{changed} file(s) {'to change' if dry_run else 'changed'} of {len(names)}.")
 
 
 @agent.command("delete")
