@@ -64,23 +64,43 @@ def default_sessions_config() -> dict:
     return {"target": TARGET_DEFAULT, "cc_default": False, "runtimes": copy.deepcopy(DEFAULT_RUNTIMES)}
 
 
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
 def sessions_config(config: dict | None) -> dict:
-    """The effective `sessions` section of `config`: defaults filled in, runtimes merged per key."""
+    """The effective `sessions` section of `config`: defaults filled in, runtimes merged per key.
+
+    Tolerant of a hand-edited file: anything that is not the expected shape
+    is ignored (a typo in one agent's file must never take a send down)."""
     merged = default_sessions_config()
-    declared = (config or {}).get("sessions") or {}
+    declared = _dict(_dict(config).get("sessions"))
     if isinstance(declared.get("target"), str) and declared["target"]:
         merged["target"] = declared["target"]
     merged["cc_default"] = bool(declared.get("cc_default", False))
-    for runtime, descriptor in (declared.get("runtimes") or {}).items():
+    for runtime, descriptor in _dict(declared.get("runtimes")).items():
         if isinstance(descriptor, dict):
             merged["runtimes"][runtime] = {**merged["runtimes"].get(runtime, {}), **descriptor}
     return merged
 
 
+UNKNOWN_RUNTIME = {"intelligent": True, "accepts": [KIND_MESSAGE, KIND_COMMAND], "scope": ""}
+
+
+def descriptor_for(policy: dict, runtime: str) -> dict:
+    """{intelligent, accepts, scope} for one runtime kind out of an effective `sessions` policy — an unknown runtime is assumed intelligent, accepting everything."""
+    known = policy["runtimes"].get(runtime)
+    return dict(known) if known else dict(UNKNOWN_RUNTIME)
+
+
 def runtime_descriptor(config: dict | None, runtime: str) -> dict:
-    """{intelligent, accepts, scope} for one runtime kind — an unknown runtime is assumed intelligent, accepting everything."""
-    known = sessions_config(config)["runtimes"].get(runtime)
-    return dict(known) if known else {"intelligent": True, "accepts": [KIND_MESSAGE, KIND_COMMAND], "scope": ""}
+    return descriptor_for(sessions_config(config), runtime)
+
+
+def accepts_only_commands(descriptor: dict) -> bool:
+    """A child that understands nothing but commands: whatever it is handed IS a command (the shell)."""
+    accepts = descriptor.get("accepts")
+    return isinstance(accepts, list) and accepts == [KIND_COMMAND]
 
 
 def merge_config_patch(config: dict, patch: dict) -> dict:
@@ -103,12 +123,28 @@ def merge_config_patch(config: dict, patch: dict) -> dict:
     return result
 
 
-def read_agent_config(path: Path) -> dict:
-    try:
-        data = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
+class BrokenAgentConfig(ValueError):
+    """The file exists but is not a JSON object — nothing may overwrite it."""
+
+
+def read_agent_config(path: Path, *, strict: bool = False) -> dict:
+    """The file as a dict. A missing file is {}. A broken one is {} too — unless
+    `strict`, which raises BrokenAgentConfig so a writer never replaces a
+    hand-edited file that merely has a trailing comma with the patch alone."""
+    path = Path(path)
+    if not path.exists():
         return {}
-    return data if isinstance(data, dict) else {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        if strict:
+            raise BrokenAgentConfig(f"{path} is not valid JSON: {exc}") from exc
+        return {}
+    if not isinstance(data, dict):
+        if strict:
+            raise BrokenAgentConfig(f"{path} is not a JSON object")
+        return {}
+    return data
 
 
 def write_agent_config(path: Path, data: dict) -> None:

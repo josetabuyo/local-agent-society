@@ -95,10 +95,22 @@ Concretely:
   last-used session", bound to the same write. The widget also watches the
   session inboxes as a viewer, so a dictation aimed at the shell still
   shows in its log; `cc` copies are not shown (the original already is).
-- **Bridge**: `kind: "cc"` is a known kind; the channel's instructions
-  tell the model it is informational — note it, no action, no reply, no
-  closing report. `ShellSink` prints it and never runs it (not a
-  `command`).
+- **Kinds follow the child's contract.** A child whose descriptor accepts
+  nothing but commands (the shell) is handed whatever it gets *as* a
+  command (`kind: "command"`), so choosing the shell means "run what I
+  say" — a wrong sentence is just a failed command, as asked. A sender
+  can also mark one explicitly (`las agent send --command`, `kind` on
+  `/agents/send`), e.g. to make a Claude session run something.
+- **Bridge**: `kind: "cc"` is a known kind. Only the Claude channel ever
+  receives it (its instructions say: note it, no action, no reply, no
+  closing report); every other sink — Codex's TUI, `las shell`, `--exec`
+  — drops it in the pipeline, because typed into Codex or handed to a
+  shell it would be acted on. `ShellSink` additionally refuses to run a
+  `cc` even under `--all`.
+- **A broken `.las-agent.json` is never overwritten.** `PATCH /config`
+  answers 409 when the file exists but is not valid JSON, instead of
+  replacing it with the patch alone; reads stay tolerant (a typo in one
+  agent's file never takes a send or a session register down).
 
 ## What a communication-systems expert would flag (and what we did)
 
@@ -132,7 +144,18 @@ Concretely:
   `fallback_from` is the only safe choice; the widget logs it, the CLI
   prints it.
 - **Two sources of truth would drift.** The Electron pref `micTarget` was
-  removed rather than mirrored: one file, read by everyone.
+  removed rather than mirrored: one file, read by everyone. The widget and
+  the CLI also write the same *vocabulary*: a runtime name (`shell`),
+  which survives that terminal being reopened with a new session id; a
+  session id only when two sessions of one runtime are connected.
+- **The widget must never republish.** Its send goes through the backend;
+  a direct inbox publish happens only when the backend could not be
+  reached at all — any HTTP answer, even a 500, means it may already have
+  published, and a hung backend is a bounded timeout, not a duplicate.
+- **`las agent new` writes the full descriptors.** Deliberately (the user
+  wants the list in the file, editable per agent): the file is the truth
+  and `DEFAULT_RUNTIMES` only fills what a file leaves out — a refined
+  default does not reach a file that already states its own.
 
 ## What was asked of Vortexia (protocol owner)
 

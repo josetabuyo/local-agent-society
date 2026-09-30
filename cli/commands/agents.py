@@ -247,7 +247,8 @@ def inject(name, message, from_agent):
 @click.option("--session", "session", default=None, help="Only one of the recipient's connected sessions: a session id, or a runtime (claude, codex, shell). Default: the last one used.")
 @click.option("--all-sessions", is_flag=True, help="Every connected session of the recipient, one delivery each (like --children, but across its runtimes).")
 @click.option("--cc", is_flag=True, help="Also hand the recipient's last-used session a for-the-record copy (kind cc) when the message goes to another session — e.g. a command for its shell that its Claude should know about.")
-def send(message, to, scope, from_agent, to_children, deep, session, all_sessions, cc):
+@click.option("--command", "as_command", is_flag=True, help="Mark the message as a command (kind command): a shell session runs it after y/N. A shell session is handed everything as a command anyway; use this to make an intelligent session run it too.")
+def send(message, to, scope, from_agent, to_children, deep, session, all_sessions, cc, as_command):
     """Generic send: point-to-point (--to) or scope broadcast (--scope), local or cross-machine.
 
     Replaces `inject`'s exact-name-only, single-machine model with one
@@ -261,7 +262,7 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
       las agent send --to RelayRobotics --children "..."  # every subordinate of RelayRobotics (see `las agent children`)
       las agent send --to Robo --session shell "ls -la"    # one connected session of Robo (see `las agent sessions`)
       las agent send --to Robo --all-sessions "heads up"   # every connected session of Robo
-      las agent send --to Robo --session shell --cc "make test"   # the shell runs it, Robo's Claude gets a cc
+      las agent send --to Robo --session shell --cc "make test"   # the shell runs it (after y/N), Robo's Claude gets a cc
 
     With no --session/--all-sessions the recipient's own choice applies
     (`las agent target`): its last-used session, all of them, or one.
@@ -314,6 +315,8 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
             payload["cc"] = True
     else:
         payload["scope"] = scope
+    if as_command:
+        payload["kind"] = "command"
 
     result = api.post("/agents/send", payload)
     injected = result.get("injected", False)

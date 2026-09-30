@@ -25,8 +25,8 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (TARGET_ALL, TARGET_DEFAULT, merge_config_patch, read_agent_config,
-                              runtime_descriptor, sessions_config, write_agent_config)
+from cli.agent_config import (KIND_COMMAND, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands, descriptor_for,
+                              merge_config_patch, read_agent_config, sessions_config, write_agent_config)
 from cli.path_utils import agent_config_path
 
 app = FastAPI(title="Local Agent Society", version="1.0.0")
@@ -404,6 +404,11 @@ class SendRequest(BaseModel):
     # all_sessions = every live session, one publish each (like --children).
     session:      Optional[str] = None
     all_sessions: bool          = False
+    # Envelope kind: "message" (prose) or "command" (something a shell runs —
+    # ShellSink only ever runs kind=command). Unset: prose, except that a
+    # child which accepts nothing but commands (its runtime descriptor) is
+    # handed everything as a command.
+    kind:         Optional[str] = None
     # Also hand the recipient's DEFAULT session a for-the-record copy
     # (kind "cc") when the message went to another session — e.g. a command
     # sent to the shell that the Claude session should know about. The
@@ -631,13 +636,14 @@ def _resolve_session(sessions: dict, selector: str) -> dict | None:
 # one process that knows every agent's path, so the widget and `las agent
 # target` read and patch it through here instead of each finding the file.
 
-def _agent_config_file(name: str) -> Path | None:
-    path = load_json(REGISTRY_FILE, {}).get(name, {}).get("path")
+def _agent_config_file(name: str, registry: dict | None = None) -> Path | None:
+    registry = load_json(REGISTRY_FILE, {}) if registry is None else registry
+    path = registry.get(name, {}).get("path")
     return agent_config_path(path) if path else None
 
 
-def _agent_config(name: str) -> dict:
-    file = _agent_config_file(name)
+def _agent_config(name: str, registry: dict | None = None) -> dict:
+    file = _agent_config_file(name, registry)
     return read_agent_config(file) if file else {}
 
 
@@ -667,17 +673,21 @@ def patch_agent_config(name: str, patch: dict):
     if sessions is not None and (not isinstance(sessions, dict) or ("target" in sessions and not (isinstance(sessions["target"], str) and sessions["target"]))):
         raise HTTPException(status_code=422, detail="sessions.target must be a non-empty string: default, all, a runtime or a session id")
     with _sessions_lock:
-        write_agent_config(file, merge_config_patch(read_agent_config(file), patch))
+        try:
+            current = read_agent_config(file, strict=True)
+        except BrokenAgentConfig as exc:
+            # Never replace a hand-edited file with the patch alone.
+            raise HTTPException(status_code=409, detail=f"{exc} — fix it by hand, then retry")
+        write_agent_config(file, merge_config_patch(current, patch))
     return _config_view(name)
 
 
 def _sessions_view(name: str, sessions: dict) -> dict:
     """The sessions (children) of `name`, each carrying its runtime's descriptor, plus where the agent wants a plain send to land."""
     default = _default_sid(sessions)
-    config = _agent_config(name)
-    policy = sessions_config(config)
+    policy = sessions_config(_agent_config(name))
     ordered = sorted(sessions.values(), key=lambda s: s.get("lastActiveAt", 0), reverse=True)
-    rows = [{**s, **runtime_descriptor(config, s.get("runtime", "")), "default": s["sid"] == default} for s in ordered]
+    rows = [{**s, **descriptor_for(policy, s.get("runtime", "")), "default": s["sid"] == default} for s in ordered]
     return {"agent": name, "default": default, "target": policy["target"], "cc_default": policy["cc_default"], "sessions": rows}
 
 
@@ -1313,7 +1323,14 @@ def _resolve_targets(to: str, sessions: dict, *, session: str | None, all_sessio
     return [], "direct", selector
 
 
-def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False, cc: bool = False) -> dict:
+def _kind_for(kind: str | None, target_session: dict, policy: dict) -> str | None:
+    """The envelope kind for one target: the sender's, else "command" for a child that accepts nothing else."""
+    if kind:
+        return kind
+    return KIND_COMMAND if accepts_only_commands(descriptor_for(policy, target_session.get("runtime", ""))) else None
+
+
+def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False, cc: bool = False, kind: str | None = None) -> dict:
     """Single delivery path for both /agents/send and the legacy
     /agents/{name}/inject — one implementation, two request shapes on top
     of it (DRY: this used to be duplicated between the two endpoints).
@@ -1369,14 +1386,19 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
 
     registry = load_json(REGISTRY_FILE, {})
     if "@" not in to and to in registry:
-        envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts}
-        policy = sessions_config(_agent_config(to))
+        envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts, **({"kind": kind} if kind else {})}
+        policy = sessions_config(_agent_config(to, registry))
         with _sessions_lock:
             sessions = _load_sessions(to)
         targets, mode, fallback_from = _resolve_targets(to, sessions, session=session, all_sessions=all_sessions, policy=policy)
         if targets:
-            # Each session has its own mailbox topic (see the sessions endpoints above).
-            delivered = all(_vortexia_publish(vx.session_inbox_topic(to, s["sid"]), {**envelope, "session": s["sid"]}, retain=False) for s in targets)
+            # Each session has its own mailbox topic (see the sessions endpoints
+            # above). A child that only understands commands (the shell) is
+            # handed the text AS a command — that is what choosing it means.
+            delivered = all(
+                _vortexia_publish(vx.session_inbox_topic(to, s["sid"]), {**envelope, "session": s["sid"], **({"kind": k} if (k := _kind_for(kind, s, policy)) else {})}, retain=False)
+                for s in targets
+            )
         else:
             # Not retained: the broker's mailbox for `to` queues it if nobody is
             # connected as its consumer (see _vortexia_publish). The DEFAULT
@@ -1400,8 +1422,14 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
             ts_full = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             preview = message[:60].replace("\n", " ") + ("…" if len(message) > 60 else "")
             status  = "OK" if delivered else "FAIL(vortexia unreachable)"
-            with open(log_path, "a") as f:
-                f.write(f"[{ts_full}] name={to} source={source} from={sender} via=vortexia status={status} msg={preview!r}\n")
+            try:
+                with open(log_path, "a") as f:
+                    f.write(f"[{ts_full}] name={to} source={source} from={sender} via=vortexia status={status} msg={preview!r}\n")
+            except OSError as exc:
+                # The message is already published: a log that can't be
+                # written must not turn a delivered send into a 500 (which a
+                # caller would retry — and deliver twice).
+                logger.warning("inject.log write failed for %s: %s", to, exc)
 
         return {"ok": True, "injected": delivered, "mode": mode, "relayed": False, "targets": [s["sid"] for s in targets], "fallback_from": fallback_from, "cc": bool(cc_sent)}
 
@@ -1421,7 +1449,7 @@ def send_message(body: SendRequest):
     if bool(body.to) == bool(body.scope):
         raise HTTPException(status_code=422, detail="exactly one of `to` or `scope` must be set")
     sender = body.from_agent or body.source or "external"
-    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions, cc=body.cc)
+    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions, cc=body.cc, kind=body.kind)
 
 
 @app.post("/agents/{name}/inject")

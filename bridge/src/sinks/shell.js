@@ -34,6 +34,7 @@ export class ShellSink {
   }
 
   isRunnable(envelope) {
+    if (envelope.kind === KIND.CC) return false; // a for-the-record copy, even with --all
     return this.all || envelope.kind === KIND.COMMAND;
   }
 

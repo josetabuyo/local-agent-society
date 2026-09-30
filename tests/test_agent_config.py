@@ -54,3 +54,27 @@ def test_read_and_write_round_trip_and_a_broken_file_reads_as_empty(tmp_path):
     file.write_text("{not json")
     assert read_agent_config(file) == {}
     assert read_agent_config(tmp_path / "missing.json") == {}
+
+
+def test_sessions_config_ignores_a_hand_edited_file_of_the_wrong_shape():
+    assert sessions_config({"sessions": "shell"})["target"] == "default"
+    assert sessions_config({"sessions": {"runtimes": ["shell"], "target": "all"}})["target"] == "all"
+    assert sessions_config({"sessions": {"runtimes": {"shell": "nope"}}})["runtimes"]["shell"]["accepts"] == ["command"]
+    assert sessions_config("garbage")["target"] == "default"
+
+
+def test_strict_read_refuses_a_broken_file_but_not_a_missing_one(tmp_path):
+    from cli.agent_config import BrokenAgentConfig, accepts_only_commands, descriptor_for
+    import pytest
+    file = tmp_path / ".las-agent.json"
+    assert read_agent_config(file, strict=True) == {}, "missing: nothing to protect"
+    file.write_text('{"name": "Robo",}')
+    with pytest.raises(BrokenAgentConfig):
+        read_agent_config(file, strict=True)
+    file.write_text('[1, 2]')
+    with pytest.raises(BrokenAgentConfig):
+        read_agent_config(file, strict=True)
+    policy = sessions_config({})
+    assert accepts_only_commands(descriptor_for(policy, "shell")) is True
+    assert accepts_only_commands(descriptor_for(policy, "claude")) is False
+    assert accepts_only_commands({"accepts": "command"}) is False

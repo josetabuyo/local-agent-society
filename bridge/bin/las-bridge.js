@@ -72,7 +72,10 @@ const send = makeSender({ from: agent.name });
 const source = new MailboxSource({ agent: agent.name, port: opts.port, log });
 const interceptors = [
   dedupInterceptor(),
-  ignoreKindsInterceptor([KIND.MIC_SELFTEST_PONG, KIND.PROBE]),
+  // A kind=cc copy is for the record: only the Claude channel can carry it
+  // as such (the kind attribute + its instructions). Typed into Codex or
+  // handed to a shell/exec it would be acted on, so those never see it.
+  ignoreKindsInterceptor([KIND.MIC_SELFTEST_PONG, KIND.PROBE, ...(sinkName === 'claude' ? [] : [KIND.CC])]),
   senderPolicyInterceptor({ log }),
   micSelfTestInterceptor({ agent: agent.name }),
 ];

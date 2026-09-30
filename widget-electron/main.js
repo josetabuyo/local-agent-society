@@ -965,6 +965,8 @@ ipcMain.handle('terminal:default-app', () => resolveTerminalApp());
 // per-window VortexiaClient in `vortexiaClients` — does not open a second
 // connection.
 
+const SEND_TIMEOUT_MS = 8000;
+
 function nameForWindow(win) {
   for (const [name, w] of windows) {
     if (w === win) return name;
@@ -984,21 +986,33 @@ ipcMain.handle('vortexia:send', async (event, toName, text) => {
   // (.las-agent.json, docs/adr/0005): last-used session, all of them, or
   // one, plus the for-the-record cc. The same routing `las agent send`
   // gets; this window never decides where a dictation lands.
+  // The direct publish below is ONLY for a backend that could not be
+  // reached at all. Any HTTP answer — even a 500 — means the backend ran
+  // and may already have published; publishing again would deliver the
+  // dictation twice. A hung backend is bounded by the timeout and reported
+  // as an error, for the same reason.
+  let reachedBackend = false;
   try {
     const body = { message: text, to: toName, source: 'human', from_agent: fromName };
-    const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+    reachedBackend = true;
     const json = await res.json().catch(() => ({}));
     if (res.ok && json.injected) {
       log.info('mic', `vortexia:send ok from=${fromName} to=${toName} mode=${json.mode} targets=${(json.targets || []).join(',') || '-'}${json.fallback_from ? ` fallback_from=${json.fallback_from}` : ''}${json.cc ? ' cc' : ''} chars=${text.length}`);
       return { ok: true, mode: json.mode, targets: json.targets || [], fallback_from: json.fallback_from || null, cc: Boolean(json.cc) };
     }
-    log.warn('mic', `vortexia:send via backend failed (HTTP ${res.status} ${json.detail || ''}) — publishing to the agent inbox directly`);
+    log.error('mic', `vortexia:send failed: backend answered HTTP ${res.status} ${json.detail || ''}`);
+    return { ok: false, error: json.detail || `HTTP ${res.status}` };
   } catch (err) {
+    if (reachedBackend || (err && err.name === 'TimeoutError')) {
+      log.error('mic', `vortexia:send failed after reaching the backend (${err && err.message ? err.message : err}) — not republishing, it may already be delivered`);
+      return { ok: false, error: String(err) };
+    }
     log.warn('mic', `vortexia:send via backend unreachable (${err && err.message ? err.message : err}) — publishing to the agent inbox directly`);
   }
-  // Backend down: the agent-level inbox is still a mailbox the broker
-  // queues for whoever holds it (the default session's bridge), so a
-  // dictation is never lost — only the session choice is skipped.
+  // Backend unreachable: the agent-level inbox is still a mailbox the
+  // broker queues for whoever holds it (the default session's bridge), so
+  // a dictation is never lost — only the session choice is skipped.
   const client = vortexiaClients.get(fromName);
   if (!client) {
     log.error('mic', `vortexia:send failed: no vortexia client connected for ${fromName}`);
@@ -1043,12 +1057,14 @@ ipcMain.handle('vortexia:send', async (event, toName, text) => {
 // lists, with the agent's own `target`/`cc_default` choice. The backend
 // prunes dead ones.
 ipcMain.handle('agent:sessions', async (_event, name) => {
+  // On any failure the policy is UNKNOWN (target: null), never a made-up
+  // default — the renderer keeps showing the agent's last known choice.
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/sessions`);
-    if (!res.ok) return { agent: name, default: null, target: 'default', cc_default: false, sessions: [] };
+    if (!res.ok) return { agent: name, default: null, target: null, cc_default: null, sessions: [] };
     return await res.json();
   } catch {
-    return { agent: name, default: null, target: 'default', cc_default: false, sessions: [] };
+    return { agent: name, default: null, target: null, cc_default: null, sessions: [] };
   }
 });
 

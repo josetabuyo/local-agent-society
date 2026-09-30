@@ -224,7 +224,9 @@ pin where unqualified messages (and the widget mic) land — `las agent target
 shell|all|default|<id>`, written to its `.las-agent.json` as `sessions.target`
 — and ask for a for-the-record copy to its last-used session whenever a
 message went elsewhere (`--cc` on one send, `las agent target --cc` for all):
-the shell runs the command, the Claude session knows it happened. The widget's
+the shell runs the command (a shell is handed everything as a `command`, so
+choosing it means "run what I say"; `--command` marks one explicitly for an
+intelligent session), the Claude session knows it happened. The widget's
 👥 children button offers the same list (click or hold), and Settings →
 "Dictation goes to". See `docs/adr/0005-nested-mailboxes.md`. Already inside
 a session that was opened without `las`? `las claude` (or `las bridge

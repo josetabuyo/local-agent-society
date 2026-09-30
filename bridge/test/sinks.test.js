@@ -53,3 +53,11 @@ test('ShellSink prints every message, runs only kind=command (or --all), and nev
   await asking.deliver(ctxFor({ from: 'A', text: 'rm -rf /', kind: 'command' }));
   assert.match(printed, /skipped/);
 });
+
+test('ShellSink never runs a kind=cc copy, not even with --all', async () => {
+  const { ShellSink } = await import('../src/sinks/shell.js');
+  const { normalize } = await import('../src/envelope.js');
+  const all = new ShellSink({ shell: '/bin/sh', confirm: false, all: true, output: new PassThrough() });
+  assert.equal(all.isRunnable(normalize({ text: '[cc → shell] rm -rf x', kind: 'cc' })), false);
+  assert.equal(all.isRunnable(normalize({ text: 'ls', kind: 'command' })), true);
+});

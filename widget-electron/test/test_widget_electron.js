@@ -1160,6 +1160,16 @@ test('vortexia:send goes through the backend /agents/send (source human, no sess
   const direct = body.indexOf('client.sendConfirmed(toName, text');
   assert.ok(backendCall !== -1 && direct !== -1 && backendCall < direct, 'backend first, direct publish as the fallback');
   assert.match(body, /fallback_from/, 'reports when the configured target was not connected');
+  assert.match(body, /reachedBackend/, 'any HTTP answer means the backend may have published: never republish');
+  assert.match(body, /AbortSignal\.timeout\(SEND_TIMEOUT_MS\)/, 'a hung backend is bounded, and a timeout is an error, not a fallback');
+});
+
+test('agent:sessions reports an UNKNOWN policy (target: null) on failure and the renderer keeps its last known choice', () => {
+  const body = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('agent:sessions', async (_event, name) => {");
+  assert.doesNotMatch(body, /target: 'default'/);
+  assert.match(body, /target: null/);
+  const refresh = extractFunctionBody(readSrc('renderer', 'widget.js'), 'async function refreshSessions()');
+  assert.match(refresh, /typeof view\.target === 'string'/);
 });
 
 test('the children button lists the sessions on click, hold or right-click; a row writes sessions.target to .las-agent.json via the backend; a cc toggle writes cc_default', () => {
@@ -1172,9 +1182,13 @@ test('the children button lists the sessions on click, hold or right-click; a ro
   assert.match(click, /showChildrenMenu\(\)/);
   const render = extractFunctionBody(src, 'function renderChildrenMenu()');
   assert.match(render, /setSessionsConfig\(\{\s*target:\s*row\.value\s*\}\)/);
-  assert.match(render, /value: 'default'/);
-  assert.match(render, /value: 'all'/);
-  assert.match(render, /knownSessions\.map/);
+  assert.match(render, /targetRows\(\)/);
+  const rows = extractFunctionBody(src, 'function targetRows()');
+  assert.match(rows, /value: 'default'/);
+  assert.match(rows, /value: 'all'/);
+  assert.match(rows, /value: runtime/, 'a row per connected RUNTIME — the same vocabulary `las agent target shell` writes, stable across a terminal being reopened');
+  assert.match(rows, /sessions\.length > 1/, 'session ids only when a runtime has more than one session');
+  assert.match(extractFunctionBody(src, 'function syncMicTargetSelect()'), /targetRows\(\)/, 'the settings select shows the same rows');
   assert.match(render, /setSessionsConfig\(\{\s*cc_default:\s*ccBox\.checked\s*\}\)/);
   const save = extractFunctionBody(src, 'async function setSessionsConfig(patch)');
   assert.match(save, /window\.las\.setSessionsConfig\(agentName,\s*patch\)/);

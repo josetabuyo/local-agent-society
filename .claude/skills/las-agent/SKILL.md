@@ -254,7 +254,8 @@ las bridge status [<MyName>]
 # Which runtimes are attached to an agent right now (a Claude, a Codex, a shell), which is the default
 las agent sessions [<Name>] [--use <id|runtime>]
 las agent target [default|all|<runtime>|<sid>] [--cc/--no-cc]   # where messages + the mic land among MY sessions (.las-agent.json)
-las agent send --to <Name> --session shell --cc "make test"     # the shell runs it, the last-used session gets a cc
+las agent send --to <Name> --session shell --cc "make test"     # the shell runs it (a shell is handed everything as a command), the last-used session gets a cc
+las agent send --to <Name> --command "make test"                # mark it a command for an intelligent session
 las agent send --to <Name> --session shell "ls -la"     # one session
 las agent send --to <Name> --all-sessions "heads up"     # every session
 

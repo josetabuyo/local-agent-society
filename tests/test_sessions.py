@@ -210,3 +210,36 @@ def test_cc_hands_the_default_session_a_for_the_record_copy_only_when_it_was_not
     assert _send(client)["cc"] is True, "the agent's own cc_default applies to a plain send"
     _write_config(tmp_path, target="shell", cc_default=False)
     assert _send(client)["cc"] is False
+
+
+def test_patch_refuses_to_overwrite_a_broken_file(app, tmp_path):
+    main, client = app
+    (tmp_path / ".las-agent.json").write_text('{"name": "Robo", "voice": "Samantha",}')
+    r = client.patch("/agents/Robo/config", json={"sessions": {"target": "shell"}})
+    assert r.status_code == 409 and "fix it by hand" in r.json()["detail"]
+    assert (tmp_path / ".las-agent.json").read_text() == '{"name": "Robo", "voice": "Samantha",}', "untouched"
+
+
+def test_a_shell_child_is_handed_everything_as_a_command_and_an_explicit_kind_passes_through(app, tmp_path):
+    main, client = app
+    _register(client, "shell-1", "shell")
+    _register(client, "claude-1", "claude")
+    _send(client, session="shell")
+    assert _session_publishes(main)[-1][1]["kind"] == "command", "a child that accepts nothing but commands gets a command"
+    _send(client, session="claude")
+    assert "kind" not in _session_publishes(main)[-1][1], "prose stays prose for an intelligent child"
+    _send(client, session="claude", kind="command")
+    assert _session_publishes(main)[-1][1]["kind"] == "command"
+    _send(client, kind="command")
+    assert _inbox_publishes(main)[-1]["kind"] == "command", "the agent mailbox carries the sender's kind too"
+    _write_config(tmp_path, target="all")
+    _send(client)
+    kinds = {sid: e.get("kind") for sid, e in _session_publishes(main)[-2:]}
+    assert kinds == {"shell-1": "command", "claude-1": None}
+
+
+def test_a_broken_config_file_never_takes_a_send_or_a_session_register_down(app, tmp_path):
+    main, client = app
+    (tmp_path / ".las-agent.json").write_text('{"sessions": "shell"}')
+    assert _register(client, "claude-1", "claude")["target"] == "default"
+    assert _send(client)["mode"] == "direct"

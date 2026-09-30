@@ -1243,29 +1243,54 @@ function sessionLabel(s) {
   return `${s.runtime || '?'} · ${String(s.sid).split('-')[1] || s.sid}${brain}${s.default ? ' · last used' : ''}`;
 }
 
-/** Human label of a target value: a fixed row, a connected session, or "not connected". */
+/**
+ * The choices, as {value, label, scope?}: the two fixed ones, then one per
+ * connected RUNTIME (value = the runtime name — what `las agent target
+ * shell` writes: it survives that terminal being reopened with a new
+ * session id, which a sid never would), plus one per session id only when
+ * a runtime has more than one session connected (then the id is the only
+ * way to tell them apart). The same list feeds the menu and the settings
+ * <select>, so both always agree.
+ */
+function targetRows() {
+  const rows = [
+    { value: 'default', label: TARGET_LABELS.default },
+    { value: 'all', label: TARGET_LABELS.all + (knownSessions.length ? ` (${knownSessions.length})` : '') },
+  ];
+  const byRuntime = new Map();
+  for (const s of knownSessions) {
+    const runtime = s.runtime || '?';
+    if (!byRuntime.has(runtime)) byRuntime.set(runtime, []);
+    byRuntime.get(runtime).push(s);
+  }
+  for (const [runtime, sessions] of byRuntime) {
+    const brain = sessions[0].intelligent === false ? ' · commands only' : '';
+    const used = sessions.some((s) => s.default) ? ' · last used' : '';
+    const count = sessions.length > 1 ? ` (${sessions.length})` : '';
+    rows.push({ value: runtime, label: `${runtime}${count}${brain}${used}`, scope: sessions[0].scope });
+    if (sessions.length > 1) {
+      for (const s of sessions) rows.push({ value: s.sid, label: `  ${sessionLabel(s)}`, scope: s.scope });
+    }
+  }
+  return rows;
+}
+
+/** Human label of a target value: one of the rows, or "not connected". */
 function targetLabel(target) {
-  if (target in TARGET_LABELS) return TARGET_LABELS[target];
-  const s = knownSessions.find((k) => k.sid === target || k.runtime === target);
-  return s ? sessionLabel(s) : `${target} (not connected)`;
+  const row = targetRows().find((r) => r.value === target);
+  return row ? row.label.trim() : `${target} (not connected)`;
 }
 
 function syncMicTargetSelect() {
   const target = sessionsPolicy.target || 'default';
-  // Keep the settings <select> honest: fixed rows + one per known session.
-  for (const opt of [...micTargetEl.options]) {
-    if (!(opt.value in TARGET_LABELS)) opt.remove();
-  }
-  for (const s of knownSessions) {
+  // Keep the settings <select> honest: exactly the rows the menu shows.
+  micTargetEl.innerHTML = '';
+  const rows = targetRows();
+  if (!rows.some((r) => r.value === target)) rows.push({ value: target, label: targetLabel(target) });
+  for (const row of rows) {
     const opt = document.createElement('option');
-    opt.value = s.sid;
-    opt.textContent = sessionLabel(s);
-    micTargetEl.appendChild(opt);
-  }
-  if (![...micTargetEl.options].some((o) => o.value === target)) {
-    const opt = document.createElement('option');
-    opt.value = target;
-    opt.textContent = targetLabel(target);
+    opt.value = row.value;
+    opt.textContent = row.label.trim();
     micTargetEl.appendChild(opt);
   }
   micTargetEl.value = target;
@@ -1285,6 +1310,7 @@ async function refreshSessions() {
   try {
     const view = await window.las.getAgentSessions(agentName);
     knownSessions = Array.isArray(view && view.sessions) ? view.sessions : [];
+    // target: null = the backend could not be asked; keep the last known choice.
     if (view && typeof view.target === 'string') sessionsPolicy = { target: view.target, cc_default: !!view.cc_default };
   } catch {
     knownSessions = [];
@@ -1319,11 +1345,7 @@ async function showChildrenMenu() {
 
 function renderChildrenMenu() {
   const current = sessionsPolicy.target || 'default';
-  const rows = [
-    { value: 'default', label: TARGET_LABELS.default },
-    { value: 'all', label: TARGET_LABELS.all + (knownSessions.length ? ` (${knownSessions.length})` : '') },
-    ...knownSessions.map((s) => ({ value: s.sid, label: sessionLabel(s), scope: s.scope })),
-  ];
+  const rows = targetRows();
   childrenMenuEl.innerHTML = '';
   if (!knownSessions.length) {
     const hint = document.createElement('div');

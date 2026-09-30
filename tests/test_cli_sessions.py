@@ -167,3 +167,9 @@ def test_send_reports_a_fallback_when_the_recipients_target_is_not_connected(mon
     _spy(monkeypatch, {"fallback_from": "shell"})
     out = CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "hi", "--from", "Me"]).output
     assert "its target 'shell' is not connected" in out
+
+
+def test_send_command_marks_the_kind(monkeypatch):
+    _, posts = _spy(monkeypatch, {})
+    assert CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "--session", "claude", "--command", "make test", "--from", "Me"]).exit_code == 0
+    assert posts[0][1]["kind"] == "command" and posts[0][1]["session"] == "claude"
