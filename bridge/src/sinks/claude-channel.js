@@ -41,7 +41,9 @@ export function instructionsFor(agent) {
     'Treat them as if the human had typed them, per the /las-agent skill: act, then report as usual. ' +
     `To answer another agent, call the "${REPLY_TOOL}" tool with to=<sender> — never assume the sender reads this terminal. ` +
     `An event with kind="probe" is a liveness check, not a message: immediately call the "${ACK_TOOL}" tool with its probe_id ` +
-    'and say nothing about it. Until that ack, no mailbox message is delivered to this session.'
+    'and say nothing about it. Until that ack, no mailbox message is delivered to this session. ' +
+    'An event with kind="cc" is a for-the-record copy of something that went to another session of this agent (its shell, its Codex): ' +
+    'take note of it, do not act on it, do not reply, no closing report.'
   );
 }
 

@@ -25,6 +25,9 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
+from cli.agent_config import (TARGET_ALL, TARGET_DEFAULT, merge_config_patch, read_agent_config,
+                              runtime_descriptor, sessions_config, write_agent_config)
+from cli.path_utils import agent_config_path
 
 app = FastAPI(title="Local Agent Society", version="1.0.0")
 
@@ -401,6 +404,12 @@ class SendRequest(BaseModel):
     # all_sessions = every live session, one publish each (like --children).
     session:      Optional[str] = None
     all_sessions: bool          = False
+    # Also hand the recipient's DEFAULT session a for-the-record copy
+    # (kind "cc") when the message went to another session — e.g. a command
+    # sent to the shell that the Claude session should know about. The
+    # recipient's own `sessions.cc_default` (its .las-agent.json) turns this
+    # on for every send; this flag turns it on for this one.
+    cc:           bool          = False
 
 
 class SessionRegisterRequest(BaseModel):
@@ -616,10 +625,60 @@ def _resolve_session(sessions: dict, selector: str) -> dict | None:
     return max(of_runtime, key=lambda s: s.get("lastActiveAt", 0)) if of_runtime else None
 
 
+# ── the agent's own file: .las-agent.json (cli/agent_config.py) ─────────────
+#
+# The backend never owns this file — the agent's folder does — but it is the
+# one process that knows every agent's path, so the widget and `las agent
+# target` read and patch it through here instead of each finding the file.
+
+def _agent_config_file(name: str) -> Path | None:
+    path = load_json(REGISTRY_FILE, {}).get(name, {}).get("path")
+    return agent_config_path(path) if path else None
+
+
+def _agent_config(name: str) -> dict:
+    file = _agent_config_file(name)
+    return read_agent_config(file) if file else {}
+
+
+def _config_view(name: str) -> dict:
+    file = _agent_config_file(name)
+    config = read_agent_config(file) if file else {}
+    return {"agent": name, "file": str(file) if file else None, "config": config, "sessions": sessions_config(config)}
+
+
+@app.get("/agents/{name}/config")
+def get_agent_config(name: str):
+    """`name`'s .las-agent.json as written, plus its effective `sessions` section (defaults filled in)."""
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return _config_view(name)
+
+
+@app.patch("/agents/{name}/config")
+def patch_agent_config(name: str, patch: dict):
+    """Merge `patch` into `name`'s .las-agent.json (top-level keys replaced, `sessions` merged one level deep)."""
+    file = _agent_config_file(name)
+    if file is None:
+        raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
+    if "name" in patch:
+        raise HTTPException(status_code=422, detail="rename with `las agent rename`, not a config patch")
+    sessions = patch.get("sessions")
+    if sessions is not None and (not isinstance(sessions, dict) or ("target" in sessions and not (isinstance(sessions["target"], str) and sessions["target"]))):
+        raise HTTPException(status_code=422, detail="sessions.target must be a non-empty string: default, all, a runtime or a session id")
+    with _sessions_lock:
+        write_agent_config(file, merge_config_patch(read_agent_config(file), patch))
+    return _config_view(name)
+
+
 def _sessions_view(name: str, sessions: dict) -> dict:
+    """The sessions (children) of `name`, each carrying its runtime's descriptor, plus where the agent wants a plain send to land."""
     default = _default_sid(sessions)
+    config = _agent_config(name)
+    policy = sessions_config(config)
     ordered = sorted(sessions.values(), key=lambda s: s.get("lastActiveAt", 0), reverse=True)
-    return {"agent": name, "default": default, "sessions": [{**s, "default": s["sid"] == default} for s in ordered]}
+    rows = [{**s, **runtime_descriptor(config, s.get("runtime", "")), "default": s["sid"] == default} for s in ordered]
+    return {"agent": name, "default": default, "target": policy["target"], "cc_default": policy["cc_default"], "sessions": rows}
 
 
 @app.get("/agents/{name}/sessions")
@@ -1226,7 +1285,35 @@ def write_to_tty(name: str, body: TtyWriteRequest):
     return {"ok": True, "written": written, "ttys_found": len(ttys)}
 
 
-def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False) -> dict:
+def _resolve_targets(to: str, sessions: dict, *, session: str | None, all_sessions: bool, policy: dict) -> tuple[list, str, str | None]:
+    """Which of `to`'s sessions a message goes to: (targets, mode, fallback_from).
+
+    The sender's explicit choice wins (`session` / `all_sessions`; a choice
+    nothing is connected for is a 404 — never a publish into a mailbox
+    nobody will hold). Otherwise the recipient's own `sessions.target`
+    applies — the same rule one level down: "default" is the agent mailbox
+    (held by the last-used session), "all" fans out, a runtime or id picks
+    one. A configured target that is not connected right now falls back to
+    the agent mailbox (queued, never lost) and says so in `fallback_from`.
+    """
+    explicit = bool(session) or all_sessions
+    selector = session or (TARGET_ALL if all_sessions else None) if explicit else policy["target"]
+    if not selector or selector == TARGET_DEFAULT:
+        return [], "direct", None
+    if selector == TARGET_ALL:
+        targets, mode = list(sessions.values()), "all-sessions"
+    else:
+        found = _resolve_session(sessions, selector)
+        targets, mode = ([found] if found else []), "session"
+    if targets:
+        return targets, mode, None
+    if explicit:
+        detail = f"{to} has no connected sessions" if selector == TARGET_ALL else f"{to} has no connected session {selector!r}"
+        raise HTTPException(status_code=404, detail=detail)
+    return [], "direct", selector
+
+
+def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False, cc: bool = False) -> dict:
     """Single delivery path for both /agents/send and the legacy
     /agents/{name}/inject — one implementation, two request shapes on top
     of it (DRY: this used to be duplicated between the two endpoints).
@@ -1283,31 +1370,27 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
     registry = load_json(REGISTRY_FILE, {})
     if "@" not in to and to in registry:
         envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts}
-        mode = "direct"
-        if session or all_sessions:
-            # One of the recipient's connected sessions, or all of them —
-            # each session has its own mailbox topic (see the sessions
-            # endpoints above). No live session matches: 404, never a
-            # publish into a mailbox nobody will ever hold.
-            with _sessions_lock:
-                sessions = _load_sessions(to)
-            if all_sessions:
-                targets = list(sessions.values())
-                if not targets:
-                    raise HTTPException(status_code=404, detail=f"{to} has no connected sessions")
-                mode = "all-sessions"
-            else:
-                found = _resolve_session(sessions, session)
-                if not found:
-                    raise HTTPException(status_code=404, detail=f"{to} has no connected session {session!r}")
-                targets = [found]
-                mode = "session"
+        policy = sessions_config(_agent_config(to))
+        with _sessions_lock:
+            sessions = _load_sessions(to)
+        targets, mode, fallback_from = _resolve_targets(to, sessions, session=session, all_sessions=all_sessions, policy=policy)
+        if targets:
+            # Each session has its own mailbox topic (see the sessions endpoints above).
             delivered = all(_vortexia_publish(vx.session_inbox_topic(to, s["sid"]), {**envelope, "session": s["sid"]}, retain=False) for s in targets)
         else:
             # Not retained: the broker's mailbox for `to` queues it if nobody is
             # connected as its consumer (see _vortexia_publish). The DEFAULT
             # session's bridge holds that mailbox (sessions above).
             delivered = _vortexia_publish(vx.inbox_topic(to), envelope, retain=False)
+        # For the record: the default session (usually the intelligent one)
+        # gets a copy of what went to another child — a cc, never something
+        # to act on (the bridge's sinks and the las-agent skill treat kind
+        # "cc" as informational).
+        default_sid = _default_sid(sessions)
+        cc_sent = False
+        if targets and (cc or policy["cc_default"]) and all(s["sid"] != default_sid for s in targets):
+            went_to = ", ".join(sorted({s.get("runtime", "?") for s in targets}))
+            cc_sent = _vortexia_publish(vx.inbox_topic(to), {**envelope, "kind": "cc", "text": f"[cc → {went_to}] {message}"}, retain=False)
 
         # ── structured inject log (local delivery only — a vortex-relayed `to`
         # has no local registry entry, so no session/ dir to log into) ──
@@ -1320,7 +1403,7 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
             with open(log_path, "a") as f:
                 f.write(f"[{ts_full}] name={to} source={source} from={sender} via=vortexia status={status} msg={preview!r}\n")
 
-        return {"ok": True, "injected": delivered, "mode": mode, "relayed": False}
+        return {"ok": True, "injected": delivered, "mode": mode, "relayed": False, "targets": [s["sid"] for s in targets], "fallback_from": fallback_from, "cc": bool(cc_sent)}
 
     if not env_name:
         raise HTTPException(status_code=404, detail="Agent not found (and vortex-relay not configured on this machine)")
@@ -1338,7 +1421,7 @@ def send_message(body: SendRequest):
     if bool(body.to) == bool(body.scope):
         raise HTTPException(status_code=422, detail="exactly one of `to` or `scope` must be set")
     sender = body.from_agent or body.source or "external"
-    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions)
+    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions, cc=body.cc)
 
 
 @app.post("/agents/{name}/inject")

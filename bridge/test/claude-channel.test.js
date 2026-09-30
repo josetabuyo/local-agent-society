@@ -138,3 +138,11 @@ test('unacked probes back off: the first few come every probeIntervalMs, then on
   assert.equal(events.length, 3, 'no probes after arming');
   await sink.stop();
 });
+
+test('the channel instructions tell the model a kind="cc" event is informational: note it, no action, no reply', async () => {
+  const { instructionsFor } = await import('../src/sinks/claude-channel.js');
+  const text = instructionsFor('Robo');
+  assert.match(text, /kind="cc"/);
+  assert.match(text, /do not act on it/);
+  assert.match(text, /do not reply/);
+});

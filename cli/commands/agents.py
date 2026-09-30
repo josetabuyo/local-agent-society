@@ -10,6 +10,7 @@ import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
 from cli.commands._agent_common import infer_locale, resolve_agent_name
+from cli.agent_config import TARGET_ALL, TARGET_DEFAULT, default_sessions_config
 from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
 from cli.hierarchy import tree_lines
 
@@ -103,6 +104,10 @@ def new(name, voice, target_dir):
         # offers, what it needs).
         "short_description": "",
         "long_description": "",
+        # Where a plain send / the widget mic lands among this agent's
+        # connected runtimes, and how each runtime is described to a router
+        # — see cli/agent_config.py and `las agent target`.
+        "sessions": default_sessions_config(),
     }
     try:
         agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
@@ -241,7 +246,8 @@ def inject(name, message, from_agent):
 @click.option("--deep", is_flag=True, help="With --children: the whole subtree, not only direct subordinates")
 @click.option("--session", "session", default=None, help="Only one of the recipient's connected sessions: a session id, or a runtime (claude, codex, shell). Default: the last one used.")
 @click.option("--all-sessions", is_flag=True, help="Every connected session of the recipient, one delivery each (like --children, but across its runtimes).")
-def send(message, to, scope, from_agent, to_children, deep, session, all_sessions):
+@click.option("--cc", is_flag=True, help="Also hand the recipient's last-used session a for-the-record copy (kind cc) when the message goes to another session — e.g. a command for its shell that its Claude should know about.")
+def send(message, to, scope, from_agent, to_children, deep, session, all_sessions, cc):
     """Generic send: point-to-point (--to) or scope broadcast (--scope), local or cross-machine.
 
     Replaces `inject`'s exact-name-only, single-machine model with one
@@ -255,6 +261,10 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
       las agent send --to RelayRobotics --children "..."  # every subordinate of RelayRobotics (see `las agent children`)
       las agent send --to Robo --session shell "ls -la"    # one connected session of Robo (see `las agent sessions`)
       las agent send --to Robo --all-sessions "heads up"   # every connected session of Robo
+      las agent send --to Robo --session shell --cc "make test"   # the shell runs it, Robo's Claude gets a cc
+
+    With no --session/--all-sessions the recipient's own choice applies
+    (`las agent target`): its last-used session, all of them, or one.
 
     `inject` still works unchanged for existing scripts/skills — this is
     the new generic entry point going forward, not a replacement in place.
@@ -267,6 +277,8 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
         raise click.UsageError("--session/--all-sessions need a plain --to <Agent>")
     if session and all_sessions:
         raise click.UsageError("--session and --all-sessions are exclusive")
+    if cc and (not to or to_children or scope or all_sessions):
+        raise click.UsageError("--cc needs a plain --to <Agent> (it copies the last-used session; with --all-sessions it already gets the message)")
 
     payload = {"message": message, "source": "agent" if from_agent else "external"}
     if from_agent:
@@ -298,6 +310,8 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
             payload["session"] = session
         if all_sessions:
             payload["all_sessions"] = True
+        if cc:
+            payload["cc"] = True
     else:
         payload["scope"] = scope
 
@@ -309,9 +323,13 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
     if injected:
         status = f"sent via vortexia ({mode}{', vortex-relay' if relayed else ''})"
         if mode == "session":
-            status = f"sent to session {session!r} via vortexia"
+            status = f"sent to session {session or result.get('targets', ['?'])[0]!r} via vortexia"
         elif mode == "all-sessions":
             status = "sent to every connected session via vortexia"
+        if result.get("fallback_from"):
+            status += f" (its target {result['fallback_from']!r} is not connected — went to the last-used session)"
+        if result.get("cc"):
+            status += " + cc to the last-used session"
     else:
         status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
     click.echo(f"{target}: {status}")
@@ -608,6 +626,10 @@ def sessions(name, use_sid):
             click.echo(f"{name}: no connected session {use_sid!r}")
             raise SystemExit(1)
         view = api.post(f"/agents/{quote(name, safe='')}/sessions/{quote(target['sid'], safe='')}/touch", {})
+    _print_sessions(name, view)
+
+
+def _print_sessions(name: str, view: dict) -> None:
     rows = view.get("sessions", [])
     if not rows:
         click.echo(f"{name}: no connected sessions — open one with `las claude`, `las codex` or `las shell` in its folder.")
@@ -615,7 +637,39 @@ def sessions(name, use_sid):
     for s in rows:
         mark = "*" if s.get("default") else " "
         age = int((time.time() * 1000 - s.get("lastActiveAt", 0)) / 1000)
-        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<7} pid {s.get('pid', '?'):<7} used {age}s ago  {s.get('cwd', '')}")
+        brain = "" if s.get("intelligent", True) else "  [not intelligent: commands only]"
+        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<7} pid {s.get('pid', '?'):<7} used {age}s ago  {s.get('cwd', '')}{brain}")
+
+
+@agent.command("target")
+@click.argument("target", required=False)
+@click.option("--name", "name", default=None, shell_complete=complete_agent_names, help="Which agent (default: the one in the current directory).")
+@click.option("--cc/--no-cc", "cc_default", default=None, help="Also hand the last-used session a for-the-record copy whenever a message goes to another session.")
+def target(target, name, cc_default):
+    """Where messages to this agent land among its connected sessions (its children) — show, or set.
+
+    \b
+      las agent target              # current choice + connected sessions
+      las agent target shell        # a runtime: the shell gets what the mic says
+      las agent target all          # every connected session
+      las agent target default      # back to the last-used session
+      las agent target shell --cc   # ...and the last-used session keeps a record
+
+    The choice is the agent's own, written to its .las-agent.json (`sessions.target`),
+    and applies to the widget mic and to any `las agent send --to NAME` that does not
+    pick a session itself. The widget's children button offers the same list.
+    """
+    name = resolve_agent_name(name)
+    if target or cc_default is not None:
+        patch = {"sessions": {**({"target": target} if target else {}), **({"cc_default": cc_default} if cc_default is not None else {})}}
+        api.patch(f"/agents/{quote(name, safe='')}/config", patch)
+    view = api.get(f"/agents/{quote(name, safe='')}/sessions")
+    chosen = view.get("target", TARGET_DEFAULT)
+    label = {TARGET_DEFAULT: "the last-used session", TARGET_ALL: "every connected session"}.get(chosen, f"session {chosen!r}")
+    connected = chosen in (TARGET_DEFAULT, TARGET_ALL) or any(chosen in (s.get("sid"), s.get("runtime")) for s in view.get("sessions", []))
+    note = "" if connected else " (not connected — falls back to the last-used session)"
+    click.echo(f"{name}: messages go to {label}{note}" + (", cc to the last-used session" if view.get("cc_default") else ""))
+    _print_sessions(name, view)
 
 
 @agent.command("rename")

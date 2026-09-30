@@ -577,10 +577,9 @@ const DEFAULT_PREFS = {
   // "Open" button actions, in menu order — the FIRST one is what a plain
   // click runs; press-and-hold shows the menu that reorders them.
   openOrder: ['terminal', 'folder'],
-  // Where a mic dictation goes: 'default' (the agent's last-used session,
-  // via its inbox), 'all' (every connected session), or one session id.
-  // Press-and-hold the mic to choose; see docs/adr/0004 phase 2.
-  micTarget: 'default',
+  // Where a mic dictation goes is NOT a window pref: it is the agent's own
+  // `sessions.target` in its .las-agent.json (children button), read and
+  // written through the backend — see agent:config-sessions below.
 };
 
 function getPrefs(name) {
@@ -621,7 +620,7 @@ ipcMain.on('window:resize-by', (event, dw, dh) => {
   });
 });
 
-// Auto-expand for overlay panels (settings / TTY picker):
+// Auto-expand for overlay panels (settings):
 // those panels are `position: fixed; width:100vw; height:100vh` (see
 // widget.css .settings), so they're only as big as the compact widget
 // window (300x160 by default) unless the window itself grows to fit them.
@@ -973,34 +972,33 @@ function nameForWindow(win) {
   return null;
 }
 
-ipcMain.handle('vortexia:send', async (event, toName, text, target) => {
+ipcMain.handle('vortexia:send', async (event, toName, text) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const fromName = win ? nameForWindow(win) : null;
   if (!fromName) {
     log.error('mic', 'vortexia:send failed: could not resolve sending agent for this window');
     return { ok: false, error: 'could not resolve sending agent for this window' };
   }
-  if (target && target !== 'default') {
-    // A specific connected session ('all', or a session id / runtime) —
-    // docs/adr/0004 phase 2. Session inboxes are routed by the backend
-    // (it owns the session registry), so this goes over HTTP to the same
-    // /agents/send that `las agent send --session/--all-sessions` uses,
-    // instead of the agent-level inbox publish below.
-    try {
-      const body = { message: text, to: toName, source: 'human', from_agent: fromName, ...(target === 'all' ? { all_sessions: true } : { session: target }) };
-      const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.injected) {
-        log.error('mic', `vortexia:send to session ${target} failed: HTTP ${res.status} ${json.detail || ''}`);
-        return { ok: false, error: json.detail || `HTTP ${res.status}` };
-      }
-      log.info('mic', `vortexia:send ok from=${fromName} to=${toName} session=${target} chars=${text.length}`);
-      return { ok: true, mode: json.mode };
-    } catch (err) {
-      log.error('mic', `vortexia:send to session ${target} failed: ${err && err.message ? err.message : err}`);
-      return { ok: false, error: String(err) };
+  // First choice: the backend's /agents/send — the one place that knows the
+  // recipient's connected sessions and its own `sessions.target` choice
+  // (.las-agent.json, docs/adr/0005): last-used session, all of them, or
+  // one, plus the for-the-record cc. The same routing `las agent send`
+  // gets; this window never decides where a dictation lands.
+  try {
+    const body = { message: text, to: toName, source: 'human', from_agent: fromName };
+    const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json.injected) {
+      log.info('mic', `vortexia:send ok from=${fromName} to=${toName} mode=${json.mode} targets=${(json.targets || []).join(',') || '-'}${json.fallback_from ? ` fallback_from=${json.fallback_from}` : ''}${json.cc ? ' cc' : ''} chars=${text.length}`);
+      return { ok: true, mode: json.mode, targets: json.targets || [], fallback_from: json.fallback_from || null, cc: Boolean(json.cc) };
     }
+    log.warn('mic', `vortexia:send via backend failed (HTTP ${res.status} ${json.detail || ''}) — publishing to the agent inbox directly`);
+  } catch (err) {
+    log.warn('mic', `vortexia:send via backend unreachable (${err && err.message ? err.message : err}) — publishing to the agent inbox directly`);
   }
+  // Backend down: the agent-level inbox is still a mailbox the broker
+  // queues for whoever holds it (the default session's bridge), so a
+  // dictation is never lost — only the session choice is skipped.
   const client = vortexiaClients.get(fromName);
   if (!client) {
     log.error('mic', `vortexia:send failed: no vortexia client connected for ${fromName}`);
@@ -1016,8 +1014,8 @@ ipcMain.handle('vortexia:send', async (event, toName, text, target) => {
     // sendConfirmed() rejects if the broker never PUBACKs, so a dead
     // connection now surfaces as a real error instead of a lost message.
     await client.sendConfirmed(toName, text, { from: fromName, source: 'human' });
-    log.info('mic', `vortexia:send ok from=${fromName} to=${toName} chars=${text.length}`);
-    return { ok: true };
+    log.info('mic', `vortexia:send ok (direct) from=${fromName} to=${toName} chars=${text.length}`);
+    return { ok: true, mode: 'direct', targets: [], fallback_from: null, cc: false };
   } catch (err) {
     log.error('mic', `vortexia:send failed from=${fromName} to=${toName}: ${err && err.stack ? err.stack : err}`);
     // The connection is confirmed dead — drop it and reconnect immediately
@@ -1025,7 +1023,6 @@ ipcMain.handle('vortexia:send', async (event, toName, text, target) => {
     // that died without a clean FIN) so the next send has a fresh client.
     if (vortexiaClients.get(fromName) === client) {
       vortexiaClients.delete(fromName);
-      const win = BrowserWindow.fromWebContents(event.sender);
       if (win && !win.isDestroyed()) {
         win.webContents.send('vortexia:status', { connected: false, error: 'connection confirmed dead' });
         connectVortexia(fromName, win);
@@ -1041,15 +1038,50 @@ ipcMain.handle('vortexia:send', async (event, toName, text, target) => {
 // (voice -> lang), same source of truth as CLAUDE.md rule 7 / rule 3's
 // voice-language table, instead of duplicating that table here.
 
-// Connected sessions of an agent (a Claude, a Codex, a shell — docs/adr/0004
-// phase 2): what the mic's target picker lists. The backend prunes dead ones.
+// Connected sessions of an agent — its children (a Claude, a Codex, a
+// shell; docs/adr/0004 phase 2, docs/adr/0005): what the children button
+// lists, with the agent's own `target`/`cc_default` choice. The backend
+// prunes dead ones.
 ipcMain.handle('agent:sessions', async (_event, name) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/sessions`);
-    if (!res.ok) return { agent: name, default: null, sessions: [] };
+    if (!res.ok) return { agent: name, default: null, target: 'default', cc_default: false, sessions: [] };
     return await res.json();
   } catch {
-    return { agent: name, default: null, sessions: [] };
+    return { agent: name, default: null, target: 'default', cc_default: false, sessions: [] };
+  }
+});
+
+// The agent's own file, .las-agent.json, through the backend (it knows the
+// path; this app never looks for the file itself). The children button
+// writes `sessions.target` / `sessions.cc_default` here — the same file
+// `las agent target` writes, so CLI and widget can never disagree.
+ipcMain.handle('agent:config', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessions: patch || {} }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('children', `config patch failed for ${name}: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('children', `${name}: sessions config -> ${JSON.stringify(json.sessions && { target: json.sessions.target, cc_default: json.sessions.cc_default })}`);
+    return json;
+  } catch (err) {
+    log.error('children', `config patch failed for ${name}: ${err && err.message ? err.message : err}`);
+    return null;
   }
 });
 
@@ -1064,21 +1096,6 @@ ipcMain.handle('agent:info', async (_event, name) => {
     return { voice, locale: data.lang || 'en-US' };
   } catch {
     return { voice: null, locale: 'en-US' };
-  }
-});
-
-// ── face buttons: TTY link (focus / pin-tty) — proxied so renderer stays ────
-// sandboxed with no assumptions about the registry URL baked into its code.
-// (The focus/ttys/pin-tty backend endpoints are the pre-existing,
-// AppleScript-based-on-the-BACKEND-side focus mechanism — untouched, see
-// CLAUDE.md; this app only calls them over plain HTTP, no AppleScript here.)
-
-ipcMain.handle('agent:focus', async (_event, name) => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/focus`, { method: 'POST' });
-    return await res.json();
-  } catch (err) {
-    return { ok: false, error: String(err) };
   }
 });
 
@@ -1120,30 +1137,8 @@ ipcMain.handle('agent:get-wake-enabled', async (_event, name) => {
   }
 });
 
-ipcMain.handle('agent:ttys', async (_event, name) => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/ttys`);
-    return await res.json();
-  } catch (err) {
-    return { ttys: [], error: String(err) };
-  }
-});
-
-ipcMain.handle('agent:pin-tty', async (_event, name, tty) => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/pin-tty`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tty }),
-    });
-    return await res.json();
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
-});
-
 // Raw terminal write (types `text` into the agent's live linked terminal(s),
-// same AppleScript-via-iTerm mechanism as agent:focus — see backend
+// the backend's AppleScript-via-iTerm mechanism — see backend
 // POST /agents/{name}/tty-write). Used by the Clear button to send "/clear",
 // matching the retired Swift widget's clearSession() exactly.
 ipcMain.handle('agent:tty-write', async (_event, name, text) => {
@@ -1449,6 +1444,12 @@ async function connectVortexia(name, win) {
 
   try {
     await client.register(name);
+    // register() watches the agent-level inbox as a viewer. A message aimed
+    // at ONE session (a dictation for the shell, `send --session`) goes to
+    // las/agent/<name>/sessions/<sid>/inbox instead and would never show in
+    // the log — watch those too. Still a viewer (clean session): it never
+    // consumes anything, the session's own bridge does.
+    client.mqttClient.subscribe(`las/agent/${name}/sessions/+/inbox`, { qos: 1 });
     if (!win.isDestroyed()) {
       win.webContents.send('vortexia:status', { connected: true });
     }

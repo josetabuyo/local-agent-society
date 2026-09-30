@@ -36,6 +36,7 @@ const expandWhenHiddenEl = document.getElementById('expandWhenHidden');
 const wakeEnabledEl = document.getElementById('wakeEnabled');
 const micLanguageEl = document.getElementById('micLanguage');
 const micTargetEl = document.getElementById('micTarget');
+const ccDefaultEl = document.getElementById('ccDefault');
 const doorEl = document.getElementById('door');
 
 document.title = agentName;
@@ -178,7 +179,7 @@ function updateNameCenterOffset(size, text) {
 // locale — per explicit request: dictation should assume Spanish unless the
 // user picks otherwise, since it's what most agents on this machine are
 // dictated to in regardless of what language their own TTS voice speaks.
-let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: true, micLanguage: 'es', micTarget: 'default' };
+let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: true, micLanguage: 'es' };
 let locale = 'en-US';
 
 /** '#rrggbb' + 0..1 alpha -> 'rgba(r, g, b, a)'. */
@@ -231,10 +232,10 @@ function relativeLuminance(hex) {
  * --widget-bg (a placeholder green) and only switches to the real color
  * once that IPC call returns, which reads as a startup flash/glitch.
  *
- * Set on the root, not widgetEl: #settings/#openMenu/
- * #ttyPicker are siblings of #widget in the DOM (not descendants), so a
- * CSS custom property set on widgetEl's own inline style wouldn't inherit
- * into them — :root is the shared ancestor all of them do inherit from.
+ * Set on the root, not widgetEl: #settings/#openMenu/#childrenMenu are
+ * not all descendants of #widget's own inline style scope, so a CSS custom
+ * property set on widgetEl wouldn't reliably inherit into them — :root is
+ * the shared ancestor all of them do inherit from.
  */
 function applyColorVars(color, opacity) {
   // --widget-bg bakes the opacity into the background color's alpha channel
@@ -281,6 +282,9 @@ function applyPrefsToDom() {
 async function init() {
   prefs = await window.las.getPrefs(agentName);
   applyPrefsToDom();
+  // The mic's target is the agent's own choice (its .las-agent.json), not a
+  // window pref — see the children button section.
+  refreshSessions().then(syncMicTargetSelect);
   try {
     const info = await window.las.getAgentInfo(agentName);
     if (info && info.locale) locale = info.locale;
@@ -337,7 +341,8 @@ expandWhenHiddenEl.addEventListener('change', () => {
   if (!expandWhenHiddenEl.checked) setOcclusionExpanded(false);
 });
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
-micTargetEl.addEventListener('change', () => persist({ micTarget: micTargetEl.value }));
+micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value }));
+ccDefaultEl.addEventListener('change', () => setSessionsConfig({ cc_default: ccDefaultEl.checked }));
 
 // Backend-synced, not electron-store: `las agent focus`'s wake fallback
 // (Python, backend/main.py) reads the same flag this checkbox sets.
@@ -743,6 +748,12 @@ window.las.onVortexiaMessage((envelope) => {
       pendingMicSelfTestResolve(true);
       pendingMicSelfTestResolve = null;
     }
+  } else if (envelope && envelope.kind === 'cc') {
+    // A for-the-record copy handed to the last-used session of something
+    // that went to another session (docs/adr/0005). The original already
+    // shows in this log (session inboxes are watched too, see main.js's
+    // connectVortexia); showing the copy would double it.
+    return;
   } else if (envelope) {
     appendLogEntry(envelope);
   }
@@ -786,9 +797,10 @@ window.addEventListener('mouseup', () => {
 // Restores the buttons the retired Swift widget (widget/tray.swift) had on
 // its compact face: speaker (mute toggle), mic (dictation), clear (log),
 // open (terminal window / folder at the agent's path — it replaced the
-// command palette), focus/scope (focus + link a TTY). The gear
-// button/settings panel above are untouched — this section is purely
-// additive.
+// command palette), and children (which connected session hears the mic —
+// it replaced the focus/scope button, whose focus + link-a-TTY job made no
+// sense once delivery stopped being a TTY). The gear button/settings panel
+// above are untouched — this section is purely additive.
 
 // -- speaker: one-click mute toggle ------------------------------------------
 
@@ -1124,12 +1136,16 @@ async function stopRecordingAndTranscribe() {
       // Don't also appendLogEntry here — this agent is subscribed to its own
       // inbox topic, so the publish loops back through onVortexiaMessage and
       // displays itself; appending it here too would show the line twice.
-      // Target: the last-used session (default, via the agent inbox), every
-      // connected session, or one of them — see the mic press-and-hold menu.
-      const sendResult = await window.las.sendToSelf(agentName, result.text, prefs.micTarget || 'default');
+      // No target here: WHICH of this agent's sessions hears it (the
+      // last-used one, all, or one — the children button) is the agent's
+      // own `sessions.target` in its .las-agent.json, applied by the
+      // backend when it routes the send (docs/adr/0005).
+      const sendResult = await window.las.sendToSelf(agentName, result.text);
       if (!sendResult || !sendResult.ok) {
         window.las.log('error', 'mic', `failed to publish dictation to own inbox: ${sendResult && sendResult.error}`);
         console.warn('[widget] mic: failed to publish dictation to own inbox:', sendResult && sendResult.error);
+      } else if (sendResult.fallback_from) {
+        window.las.log('warn', 'mic', `target ${sendResult.fallback_from} is not connected — the dictation went to the last-used session`);
       }
     } else if (result && !result.ok) {
       window.las.log('error', 'mic', `transcription failed: ${result.error}`);
@@ -1196,27 +1212,49 @@ micEl.addEventListener('dblclick', () => {
   runMicSelfTest();
 });
 
-// -- mic target: press-and-hold (or right-click) picks which connected ------
-//    session a dictation goes to (docs/adr/0004 phase 2)
+// -- children: which connected session (Claude, Codex, shell) hears the mic -
 //
-// An agent can have a Claude, a Codex and a plain shell attached at once
-// (`las agent sessions`). 'default' = the last-used one, through the agent
-// inbox its bridge holds; 'all' = every connected session; or one session.
-// The self-test always goes through the agent inbox — it tests the
-// plumbing, not a choice. Same inline menu pattern as the Open button.
+// An agent's connected runtimes are its children (docs/adr/0005, ADR 0004
+// phase 2): a Claude, a Codex, a plain shell — each a session (`las agent
+// sessions`). Click, hold or right-click the button for the list: 'default'
+// = the last-used one (through the agent mailbox its bridge holds), 'all' =
+// every connected session, or one of them; plus a "copy the last-used
+// session" toggle — a for-the-record cc when the mic talks to the shell, so
+// the intelligent session keeps track. The choice is the AGENT's, not this
+// window's: it is written to its .las-agent.json (`sessions.target`,
+// `sessions.cc_default`) through the backend — the same file `las agent
+// target` writes and the backend reads when it routes a plain send — so the
+// mic sends with no target of its own (see stopRecordingAndTranscribe). The
+// self-test goes the same way: it tests the path the mic actually takes.
+// Same inline menu pattern as the Open button. It replaced the focus/scope
+// button (focus a TTY, link a TTY): delivery is vortexia, not a TTY.
 
-const micMenuEl = document.getElementById('micMenu');
-const MIC_TARGET_LABELS = { default: 'Last used session', all: 'All sessions' };
-let micMenuOpen = false;
-let micLongPressTimer = null;
-let micLongPressFired = false;
+const childrenEl = document.getElementById('children');
+const childrenMenuEl = document.getElementById('childrenMenu');
+const TARGET_LABELS = { default: 'Last used session', all: 'All sessions' };
+let childrenMenuOpen = false;
+let childrenLongPressTimer = null;
+let childrenLongPressFired = false;
 let knownSessions = [];
+let sessionsPolicy = { target: 'default', cc_default: false };
+
+function sessionLabel(s) {
+  const brain = s.intelligent === false ? ' · commands only' : '';
+  return `${s.runtime || '?'} · ${String(s.sid).split('-')[1] || s.sid}${brain}${s.default ? ' · last used' : ''}`;
+}
+
+/** Human label of a target value: a fixed row, a connected session, or "not connected". */
+function targetLabel(target) {
+  if (target in TARGET_LABELS) return TARGET_LABELS[target];
+  const s = knownSessions.find((k) => k.sid === target || k.runtime === target);
+  return s ? sessionLabel(s) : `${target} (not connected)`;
+}
 
 function syncMicTargetSelect() {
-  const target = prefs.micTarget || 'default';
+  const target = sessionsPolicy.target || 'default';
   // Keep the settings <select> honest: fixed rows + one per known session.
   for (const opt of [...micTargetEl.options]) {
-    if (!(opt.value in MIC_TARGET_LABELS)) opt.remove();
+    if (!(opt.value in TARGET_LABELS)) opt.remove();
   }
   for (const s of knownSessions) {
     const opt = document.createElement('option');
@@ -1227,53 +1265,71 @@ function syncMicTargetSelect() {
   if (![...micTargetEl.options].some((o) => o.value === target)) {
     const opt = document.createElement('option');
     opt.value = target;
-    opt.textContent = `${target} (not connected)`;
+    opt.textContent = targetLabel(target);
     micTargetEl.appendChild(opt);
   }
   micTargetEl.value = target;
+  ccDefaultEl.checked = !!sessionsPolicy.cc_default;
+  updateChildrenButton();
 }
 
-function sessionLabel(s) {
-  return `${s.runtime || '?'} · ${String(s.sid).split('-')[1] || s.sid}${s.default ? ' · last used' : ''}`;
+function updateChildrenButton() {
+  const target = sessionsPolicy.target || 'default';
+  childrenEl.classList.toggle('active', target !== 'default');
+  const cc = sessionsPolicy.cc_default ? ', cc to the last-used session' : '';
+  childrenEl.title = `Children: the mic talks to ${targetLabel(target)}${cc} — click or hold to choose`;
 }
 
+/** Refresh the connected sessions AND the agent's target/cc choice (same backend view). */
 async function refreshSessions() {
   try {
     const view = await window.las.getAgentSessions(agentName);
     knownSessions = Array.isArray(view && view.sessions) ? view.sessions : [];
+    if (view && typeof view.target === 'string') sessionsPolicy = { target: view.target, cc_default: !!view.cc_default };
   } catch {
     knownSessions = [];
   }
   return knownSessions;
 }
 
-function closeMicMenu() {
-  micMenuOpen = false;
-  micMenuEl.classList.add('hidden');
+/** Write {target?, cc_default?} to the agent's .las-agent.json (via the backend) and re-sync every view of it. */
+async function setSessionsConfig(patch) {
+  const view = await window.las.setSessionsConfig(agentName, patch);
+  if (view && view.sessions && typeof view.sessions.target === 'string') {
+    sessionsPolicy = { target: view.sessions.target, cc_default: !!view.sessions.cc_default };
+  } else {
+    window.las.log('warn', 'children', `could not save sessions config ${JSON.stringify(patch)} — is the backend up?`);
+  }
+  syncMicTargetSelect();
 }
 
-async function showMicMenu() {
-  micMenuOpen = true;
-  micMenuEl.innerHTML = '<div class="open-row"><span class="open-label">Loading sessions…</span></div>';
-  micMenuEl.classList.remove('hidden');
+function closeChildrenMenu() {
+  childrenMenuOpen = false;
+  childrenMenuEl.classList.add('hidden');
+}
+
+async function showChildrenMenu() {
+  childrenMenuOpen = true;
+  childrenMenuEl.innerHTML = '<div class="open-row"><span class="open-label">Loading sessions…</span></div>';
+  childrenMenuEl.classList.remove('hidden');
   await refreshSessions();
   syncMicTargetSelect();
-  renderMicMenu();
+  renderChildrenMenu();
 }
 
-function renderMicMenu() {
-  const current = prefs.micTarget || 'default';
+function renderChildrenMenu() {
+  const current = sessionsPolicy.target || 'default';
   const rows = [
-    { value: 'default', label: MIC_TARGET_LABELS.default },
-    { value: 'all', label: MIC_TARGET_LABELS.all + (knownSessions.length ? ` (${knownSessions.length})` : '') },
-    ...knownSessions.map((s) => ({ value: s.sid, label: sessionLabel(s) })),
+    { value: 'default', label: TARGET_LABELS.default },
+    { value: 'all', label: TARGET_LABELS.all + (knownSessions.length ? ` (${knownSessions.length})` : '') },
+    ...knownSessions.map((s) => ({ value: s.sid, label: sessionLabel(s), scope: s.scope })),
   ];
-  micMenuEl.innerHTML = '';
+  childrenMenuEl.innerHTML = '';
   if (!knownSessions.length) {
     const hint = document.createElement('div');
     hint.className = 'open-row';
     hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell</span>';
-    micMenuEl.appendChild(hint);
+    childrenMenuEl.appendChild(hint);
   }
   for (const row of rows) {
     const el = document.createElement('div');
@@ -1282,136 +1338,64 @@ function renderMicMenu() {
     btn.type = 'button';
     btn.className = 'open-label';
     btn.textContent = row.label;
-    btn.title = row.value === current ? 'Dictation goes here now' : 'Send dictation here';
+    btn.title = (row.scope ? `${row.scope} — ` : '') + (row.value === current ? 'the mic talks here now' : 'send the mic here');
     btn.addEventListener('click', async () => {
-      await persist({ micTarget: row.value });
-      closeMicMenu();
+      await setSessionsConfig({ target: row.value });
+      closeChildrenMenu();
     });
     el.appendChild(btn);
-    micMenuEl.appendChild(el);
+    childrenMenuEl.appendChild(el);
   }
+  const ccRow = document.createElement('div');
+  ccRow.className = 'open-row';
+  const ccLabel = document.createElement('label');
+  ccLabel.className = 'open-label';
+  const ccBox = document.createElement('input');
+  ccBox.type = 'checkbox';
+  ccBox.checked = !!sessionsPolicy.cc_default;
+  ccBox.title = 'When the mic talks to another session, the last-used one gets a copy for the record';
+  ccBox.addEventListener('change', () => setSessionsConfig({ cc_default: ccBox.checked }));
+  ccLabel.appendChild(ccBox);
+  ccLabel.appendChild(document.createTextNode(' Copy last-used session'));
+  ccRow.appendChild(ccLabel);
+  childrenMenuEl.appendChild(ccRow);
 }
 
-function cancelMicLongPress() {
-  if (micLongPressTimer) clearTimeout(micLongPressTimer);
-  micLongPressTimer = null;
+function cancelChildrenLongPress() {
+  if (childrenLongPressTimer) clearTimeout(childrenLongPressTimer);
+  childrenLongPressTimer = null;
 }
 
-micEl.addEventListener('mousedown', (e) => {
+childrenEl.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
-  micLongPressFired = false;
-  cancelMicLongPress();
-  micLongPressTimer = setTimeout(() => {
-    micLongPressTimer = null;
-    micLongPressFired = true;
-    if (micClickTimer) {
-      clearTimeout(micClickTimer);
-      micClickTimer = null;
-    }
-    showMicMenu();
+  childrenLongPressFired = false;
+  cancelChildrenLongPress();
+  childrenLongPressTimer = setTimeout(() => {
+    childrenLongPressTimer = null;
+    childrenLongPressFired = true;
+    showChildrenMenu();
   }, OPEN_LONG_PRESS_MS);
 });
-micEl.addEventListener('mouseup', cancelMicLongPress);
-micEl.addEventListener('mouseleave', cancelMicLongPress);
-micEl.addEventListener('click', (e) => {
-  if (!micLongPressFired) return;
-  // The release of a hold: swallow the click so it never toggles recording.
-  micLongPressFired = false;
-  e.stopImmediatePropagation();
-  if (micClickTimer) {
-    clearTimeout(micClickTimer);
-    micClickTimer = null;
+childrenEl.addEventListener('mouseup', cancelChildrenLongPress);
+childrenEl.addEventListener('mouseleave', cancelChildrenLongPress);
+childrenEl.addEventListener('click', () => {
+  if (childrenLongPressFired) {
+    // The release of a hold that already opened the menu: keep it open.
+    childrenLongPressFired = false;
+    return;
   }
-}, true);
-micEl.addEventListener('contextmenu', (e) => {
+  if (childrenMenuOpen) closeChildrenMenu();
+  else showChildrenMenu();
+});
+childrenEl.addEventListener('contextmenu', (e) => {
   e.preventDefault();
-  if (micMenuOpen) closeMicMenu();
-  else showMicMenu();
+  if (childrenMenuOpen) closeChildrenMenu();
+  else showChildrenMenu();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!micMenuOpen) return;
-  if (micMenuEl.contains(e.target) || micEl.contains(e.target)) return;
-  closeMicMenu();
-});
-
-// -- focus/scope: tap = focus, right-click/long-press = link a TTY ----------
-//
-// True native OS drag-and-drop (dragging the button onto an arbitrary
-// terminal window, as the Swift ScopeDragButton did via NSDraggingSource +
-// a pasteboard string) is out of scope for this pass — see report. This
-// implements the task's documented fallback instead: a press-and-hold (or
-// right-click) opens a small picker of this agent's candidate TTYs
-// (GET /agents/{name}/ttys), and picking one calls POST
-// /agents/{name}/pin-tty to link it, matching what a completed drag would
-// have done on the backend side.
-
-const focusEl = document.getElementById('focus');
-const ttyPickerEl = document.getElementById('ttyPicker');
-const ttyListEl = document.getElementById('ttyList');
-const closeTtyPickerEl = document.getElementById('closeTtyPicker');
-
-focusEl.addEventListener('click', async () => {
-  try {
-    await window.las.focusAgent(agentName);
-  } catch (err) {
-    console.warn('[widget] focus: request failed:', err);
-  }
-});
-
-let longPressTimer = null;
-focusEl.addEventListener('mousedown', () => {
-  longPressTimer = setTimeout(() => openTtyPicker(), 600);
-});
-focusEl.addEventListener('mouseup', () => {
-  if (longPressTimer) clearTimeout(longPressTimer);
-});
-focusEl.addEventListener('mouseleave', () => {
-  if (longPressTimer) clearTimeout(longPressTimer);
-});
-focusEl.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  openTtyPicker();
-});
-
-async function openTtyPicker() {
-  ttyListEl.innerHTML = '<div class="command-row">Loading…</div>';
-  ttyPickerEl.classList.remove('hidden');
-  window.las.setExpanded(true);
-  let result;
-  try {
-    result = await window.las.getAgentTtys(agentName);
-  } catch (err) {
-    ttyListEl.innerHTML = `<div class="command-row">Error: ${String(err)}</div>`;
-    return;
-  }
-  const ttys = (result && result.ttys) || [];
-  if (!ttys.length) {
-    ttyListEl.innerHTML = '<div class="command-row">No candidate TTYs found for this agent.</div>';
-    return;
-  }
-  ttyListEl.innerHTML = '';
-  for (const tty of ttys) {
-    const row = document.createElement('div');
-    row.className = 'command-row';
-    const label = document.createElement('span');
-    label.className = 'command-label';
-    label.textContent = tty;
-    row.appendChild(label);
-    const pinBtn = document.createElement('button');
-    pinBtn.textContent = 'Link';
-    pinBtn.addEventListener('click', async () => {
-      await window.las.pinTty(agentName, tty);
-      ttyPickerEl.classList.add('hidden');
-      window.las.setExpanded(false);
-    });
-    row.appendChild(pinBtn);
-    ttyListEl.appendChild(row);
-  }
-}
-
-closeTtyPickerEl.addEventListener('click', () => {
-  ttyPickerEl.classList.add('hidden');
-  window.las.setExpanded(false);
+  if (!childrenMenuOpen) return;
+  if (childrenMenuEl.contains(e.target) || childrenEl.contains(e.target)) return;
+  closeChildrenMenu();
 });
 
 // -- open: a NEW terminal window, or the folder, at this agent's path -------

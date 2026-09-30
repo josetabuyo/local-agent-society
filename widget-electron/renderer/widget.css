@@ -470,43 +470,6 @@ html, body {
   100% { opacity: 0; transform: translate(-50%, -28px) scale(0.9); }
 }
 
-/* TTY picker rows (the class names date from the retired command palette,
- * which used the same list look), reusing the full-overlay .settings look
- * for visual consistency with the gear panel. */
-.commands-list {
-  flex: 1;
-  overflow-y: auto;
-  margin-bottom: 8px;
-}
-
-.command-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-}
-
-.command-row .command-label {
-  flex: 1;
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.command-row .command-kind {
-  font-size: 10px;
-  opacity: 0.6;
-  margin-right: 4px;
-}
-
-.command-row button {
-  padding: 2px 6px;
-  font-size: 11px;
-  cursor: pointer;
-}
-
 .settings input[type="text"] {
   flex: 1;
   min-width: 0;
@@ -518,7 +481,8 @@ html, body {
 
 /* "Open" button press-and-hold menu: a small popover pinned above the
  * button bar's right end (fixed = window coords; the window IS the widget),
- * NOT a full-window overlay like the TTY picker, so no expand round-trip.
+ * NOT a full-window overlay, so no expand round-trip. The children button's
+ * menu (#childrenMenu) uses the same look.
  * Top row is the default click action; ▲/▼ reorder and persist. Same fill
  * and ink as .settings so it reads as part of the widget. */
 .open-menu {
@@ -540,10 +504,6 @@ html, body {
 
 .open-menu.hidden {
   display: none;
-}
-
-#micMenu {
-  right: 46px; /* above the mic, not the Open button */
 }
 
 .open-row {
@@ -633,8 +593,7 @@ html, body {
   display: none;
 }
 
-/* The gear panel only — NOT #ttyPicker, which stays
- * full-screen overlays. Normal flow inside #widget, below the buttonbar, so
+/* The gear panel: normal flow inside #widget, below the buttonbar, so
  * the real name/log above it stay visible (see setSettingsOpen in
  * widget.js) instead of being covered by a full-window opaque panel. */
 .settings.settings-inline {

@@ -77,6 +77,7 @@ las completion [--shell zsh|bash|fish] [--install]  # set up shell tab completio
 las agents                              # list all registered agents
 las agent new NAME [--voice V] [--dir D]  # write .las-agent.json, register, launch widget
 las agent sync                          # sync .las-agent.json → backend
+las agent target [T] [--cc/--no-cc]     # where messages/mic land among its sessions: default | all | <runtime> | <sid>
 las agent restore [NAME]                # recover .las-agent.json from backend
 las agent rename [OLD] NEW [--pronunciation P]  # rename in backend + update .las-agent.json
 las agent focus [NAME]                  # bring the agent's iTerm2 window to the front
@@ -215,14 +216,21 @@ tells whether the current session is armed; `las bridge <sink>` is the
 low-level form behind all three.
 
 Several runtimes can be attached to the same agent at once — each one is a
-**session** (`las agent sessions`). The last one used is the default: a plain
-`las agent send --to NAME` reaches it, `--session claude|codex|shell|<id>`
-picks one, `--all-sessions` reaches every one, `las agent sessions --use X`
-switches the default by hand. The widget mic offers the same choice
-(press-and-hold the mic, or Settings → "Dictation goes to"). Already inside a
-session that was opened without `las`? `las claude` (or `las bridge status`)
-prints the way back in: `las claude --resume` restores the conversation with
-the channel on, and the mailbox kept every message meanwhile.
+**session** (`las agent sessions`), the agent's *children*. The last one used
+is the default: a plain `las agent send --to NAME` reaches it, `--session
+claude|codex|shell|<id>` picks one, `--all-sessions` reaches every one, `las
+agent sessions --use X` switches the default by hand. The agent itself can
+pin where unqualified messages (and the widget mic) land — `las agent target
+shell|all|default|<id>`, written to its `.las-agent.json` as `sessions.target`
+— and ask for a for-the-record copy to its last-used session whenever a
+message went elsewhere (`--cc` on one send, `las agent target --cc` for all):
+the shell runs the command, the Claude session knows it happened. The widget's
+👥 children button offers the same list (click or hold), and Settings →
+"Dictation goes to". See `docs/adr/0005-nested-mailboxes.md`. Already inside
+a session that was opened without `las`? `las claude` (or `las bridge
+status`) prints the way back in: `las claude --resume` restores the
+conversation with the channel on, and the mailbox kept every message
+meanwhile.
 
 ## Widget buttons
 
@@ -237,7 +245,7 @@ button top-right, and a row of face buttons at the bottom:
 | ⧉ Open | Open a new terminal window (or the folder) at the agent's path — click runs the default, hold/right-click picks and reorders |
 | 🔊 Speaker | Toggle mute |
 | 🎙 Mic | Toggle dictation (click to start/stop; local Whisper transcription) |
-| ⌦ Focus | Focus the linked terminal (right-click, or long-press, to link a new TTY) |
+| 👥 Children | Which connected session (Claude, Codex, shell) the mic talks to — click, hold or right-click to pick one, all, or the last used, plus a "copy last-used session" toggle; the choice is the agent's own (`sessions.target` in `.las-agent.json`, same as `las agent target`) |
 
 ## Open button
 

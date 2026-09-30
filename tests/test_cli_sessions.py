@@ -119,3 +119,51 @@ def test_legacy_listen_yields_when_a_bridge_session_kicks_it_later(monkeypatch):
     result = CliRunner().invoke(agents_mod.listen, ["Robo"])
     assert slept == [3600], "blocked inside the disconnect callback — paho must never get to reconnect"
     assert "standing by" in result.output
+
+
+# ── docs/adr/0005: `las agent target` and `send --cc` ──
+
+def test_target_shows_the_agents_choice_and_the_connected_sessions(monkeypatch):
+    view = {"agent": "Robo", "default": "claude-1", "target": "shell", "cc_default": True, "sessions": [
+        {"sid": "claude-1", "runtime": "claude", "pid": 1, "cwd": "/r", "lastActiveAt": 0, "default": True, "intelligent": True},
+        {"sid": "shell-2", "runtime": "shell", "pid": 2, "cwd": "/r", "lastActiveAt": 0, "default": False, "intelligent": False},
+    ]}
+    gets, _ = _spy(monkeypatch, view)
+    patches = []
+    monkeypatch.setattr(agents_mod.api, "patch", lambda path, data=None: (patches.append((path, data)), view)[1])
+    out = CliRunner().invoke(cli, ["agent", "target", "--name", "Robo"]).output
+    assert "messages go to session 'shell'" in out and "cc to the last-used session" in out
+    assert "[not intelligent: commands only]" in out
+    assert patches == [] and gets == ["/agents/Robo/sessions"]
+
+
+def test_target_sets_target_and_cc_through_the_config_patch(monkeypatch):
+    view = {"agent": "Robo", "default": None, "target": "codex", "cc_default": False, "sessions": []}
+    _spy(monkeypatch, view)
+    patches = []
+    monkeypatch.setattr(agents_mod.api, "patch", lambda path, data=None: (patches.append((path, data)), view)[1])
+    runner = CliRunner()
+    out = runner.invoke(cli, ["agent", "target", "codex", "--name", "Robo"]).output
+    assert patches == [("/agents/Robo/config", {"sessions": {"target": "codex"}})]
+    assert "not connected — falls back to the last-used session" in out
+    runner.invoke(cli, ["agent", "target", "--name", "Robo", "--no-cc"])
+    assert patches[-1] == ("/agents/Robo/config", {"sessions": {"cc_default": False}})
+    runner.invoke(cli, ["agent", "target", "all", "--cc", "--name", "Robo"])
+    assert patches[-1] == ("/agents/Robo/config", {"sessions": {"target": "all", "cc_default": True}})
+
+
+def test_send_cc_reaches_the_backend_and_needs_a_plain_to(monkeypatch):
+    gets, posts = _spy(monkeypatch, {"cc": True})
+    runner = CliRunner()
+    result = runner.invoke(cli, ["agent", "send", "--to", "Robo", "--session", "shell", "--cc", "make test", "--from", "Me"])
+    assert result.exit_code == 0, result.output
+    assert posts[0] == ("/agents/send", {"message": "make test", "source": "agent", "from_agent": "Me", "to": "Robo", "session": "shell", "cc": True})
+    assert "+ cc to the last-used session" in result.output
+    assert runner.invoke(cli, ["agent", "send", "--to", "Robo", "--all-sessions", "--cc", "hi"]).exit_code != 0
+    assert runner.invoke(cli, ["agent", "send", "--scope", "billing", "--cc", "hi"]).exit_code != 0
+
+
+def test_send_reports_a_fallback_when_the_recipients_target_is_not_connected(monkeypatch):
+    _spy(monkeypatch, {"fallback_from": "shell"})
+    out = CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "hi", "--from", "Me"]).output
+    assert "its target 'shell' is not connected" in out

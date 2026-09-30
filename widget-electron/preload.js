@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld('las', {
   /** Grow/shrink this window by (dw, dh) pixels — see .resize-handle in widget.css. */
   resizeBy: (dw, dh) => ipcRenderer.send('window:resize-by', dw, dh),
 
-  /** Grow the window to fit an overlay panel (settings/TTY picker),
+  /** Grow the window to fit an overlay panel (settings),
    * or shrink it back to its remembered compact size. Idempotent.
    * `height` optionally overrides the default expanded height — the settings
    * panel is short and fixed (no scrolling list), so it asks for a smaller
@@ -87,12 +87,23 @@ contextBridge.exposeInMainWorld('las', {
   /** Generalized "publish `text` to `toName`'s vortexia inbox" primitive. */
   vortexiaSend: (toName, text) => ipcRenderer.invoke('vortexia:send', toName, text),
 
-  /** Mic dictation -> this agent's own inbox (the faithful equivalent of the
-   * retired live-TTY injectToSession). Thin wrapper over vortexiaSend. */
-  sendToSelf: (name, text, target) => ipcRenderer.invoke('vortexia:send', name, text, target),
+  /** Mic dictation -> this agent (the faithful equivalent of the retired
+   * live-TTY injectToSession). No target here: WHICH of the agent's
+   * sessions hears it is the agent's own `sessions.target`
+   * (.las-agent.json, the children button), applied by the backend. */
+  sendToSelf: (name, text) => ipcRenderer.invoke('vortexia:send', name, text),
 
-  /** Connected runtime sessions of this agent (mic target picker). */
+  /** Connected runtime sessions of this agent — its children — with the
+   * agent's `target`/`cc_default` choice (children button, settings). */
   getAgentSessions: (name) => ipcRenderer.invoke('agent:sessions', name),
+
+  /** This agent's .las-agent.json as the backend reads it. */
+  getAgentConfig: (name) => ipcRenderer.invoke('agent:config', name),
+
+  /** Patch the `sessions` section of this agent's .las-agent.json
+   * ({target?, cc_default?}) through the backend — the same file
+   * `las agent target` writes. Resolves to the backend's config view. */
+  setSessionsConfig: (name, patch) => ipcRenderer.invoke('agent:config-sessions', name, patch),
 
   /** Local Whisper transcription (main.js's "audio transcription" section) —
    * replaces the broken Electron SpeechRecognition/webkitSpeechRecognition.
@@ -116,15 +127,9 @@ contextBridge.exposeInMainWorld('las', {
   /** Name of the terminal app the 'terminal' open action launches (menu label). */
   getDefaultTerminalApp: () => ipcRenderer.invoke('terminal:default-app'),
 
-  /** Focus/scope button: proxied backend calls (still AppleScript-based on
-   * the backend side, untouched — see CLAUDE.md). */
-  focusAgent: (name) => ipcRenderer.invoke('agent:focus', name),
-  getAgentTtys: (name) => ipcRenderer.invoke('agent:ttys', name),
-  pinTty: (name, tty) => ipcRenderer.invoke('agent:pin-tty', name, tty),
-
   /** Clear button: types `text` (literally "/clear") into the agent's live
-   * linked terminal(s) — same AppleScript-via-iTerm write the Focus button
-   * uses to bring a terminal forward, not vortexia messaging. */
+   * linked terminal(s) — the backend's AppleScript-via-iTerm write, not
+   * vortexia messaging. */
   writeToTty: (name, text) => ipcRenderer.invoke('agent:tty-write', name, text),
 
   /** Door button: mark this agent inactive on the backend and close this

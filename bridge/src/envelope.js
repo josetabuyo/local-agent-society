@@ -13,6 +13,10 @@ export const KIND = Object.freeze({
   MIC_SELFTEST: 'mic-selftest',
   MIC_SELFTEST_PONG: 'mic-selftest-pong',
   PROBE: 'probe',
+  // A for-the-record copy handed to the agent's default session of a message
+  // that went to another of its sessions (backend _route_send, docs/adr/0005).
+  // Informational: shown, never acted on, never replied to.
+  CC: 'cc',
 });
 
 export const SOURCE = Object.freeze({ HUMAN: 'human', AGENT: 'agent', SYSTEM: 'system' });

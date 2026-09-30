@@ -22,3 +22,10 @@ test('the mic self-test sentinel is classified by text, and the pong mirrors the
   const pong = micSelfTestPong('X', { now: () => 5 });
   assert.deepEqual(pong, { from: 'X', to: 'X', source: 'system', kind: KIND.MIC_SELFTEST_PONG, text: 'OK', ts: 5 });
 });
+
+test('kind "cc" is a known kind and survives normalize() untouched (a for-the-record copy, never re-typed as a message)', () => {
+  assert.equal(KIND.CC, 'cc');
+  const env = normalize({ from: 'Robo', to: 'Robo', source: 'human', kind: 'cc', text: '[cc → shell] make test', ts: 1 });
+  assert.equal(env.kind, KIND.CC);
+  assert.equal(env.text, '[cc → shell] make test');
+});

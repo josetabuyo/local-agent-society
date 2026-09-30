@@ -22,13 +22,12 @@
         <button id="open" class="facebtn" title="Open: terminal window / folder at this agent's path (click = default, hold or right-click = choose and reorder)">&#10697;</button>
         <button id="speaker" class="facebtn" title="Mute/unmute">&#128266;</button>
         <button id="mic" class="facebtn" title="Dictate (click to start/stop, double-click to test mic)">&#127908;</button>
-        <button id="focus" class="facebtn" title="Focus terminal (right-click to link a TTY)">&#8982;</button>
+        <button id="children" class="facebtn" title="Children: which connected session (Claude, Codex, shell) hears the mic — click or hold to choose">&#128101;</button>
       </div>
     </div>
 
-    <!-- Inline, NOT a full-screen overlay (unlike #ttyPicker below) —
-         settings mode keeps the real name/log visible above it. See
-         widget.js's setSettingsOpen. -->
+    <!-- Inline, NOT a full-screen overlay — settings mode keeps the real
+         name/log visible above it. See widget.js's setSettingsOpen. -->
     <div id="settings" class="settings settings-inline hidden">
       <div class="settings-row">
         <label for="color">Color</label>
@@ -62,6 +61,10 @@
         </select>
       </div>
       <div class="settings-row">
+        <label for="ccDefault">Copy last-used session</label>
+        <input id="ccDefault" type="checkbox" />
+      </div>
+      <div class="settings-row">
         <label for="micLanguage">Dictation language</label>
         <select id="micLanguage">
           <option value="es">Español</option>
@@ -77,17 +80,11 @@
          one is what a plain click runs. Small inline popover (fixed above
          the button bar), not a full-window overlay — no expand needed. -->
     <div id="openMenu" class="open-menu hidden"></div>
-    <!-- Mic press-and-hold menu: which connected session a dictation goes to. -->
-    <div id="micMenu" class="open-menu hidden"></div>
+    <!-- Children menu: which connected session (this agent's children) the
+         mic talks to — the agent's own sessions.target in .las-agent.json. -->
+    <div id="childrenMenu" class="open-menu hidden"></div>
 
     <div id="resizeHandle" class="resize-handle" title="Drag to resize"></div>
-  </div>
-
-  <div id="ttyPicker" class="settings hidden">
-    <div id="ttyList" class="commands-list"></div>
-    <div class="settings-row">
-      <button id="closeTtyPicker">Cancel</button>
-    </div>
   </div>
 
   <script src="widget.js"></script>

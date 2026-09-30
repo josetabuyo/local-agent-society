@@ -212,11 +212,22 @@ test('widget/ (Swift) has been removed — this Electron app is the sole widget'
 
 // ── face buttons (restored from widget/tray.swift) ──────────────────────────
 
-test('index.html renders all 6 face buttons (gear + 5 restored ones, "open" in the retired palette\'s slot)', () => {
+test('index.html renders all 6 face buttons (gear + 5, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot)', () => {
   const html = readSrc('renderer', 'index.html');
-  for (const id of ['gear', 'clear', 'open', 'speaker', 'mic', 'focus']) {
+  for (const id of ['gear', 'clear', 'open', 'speaker', 'mic', 'children']) {
     assert.match(html, new RegExp(`id="${id}"`), `missing button #${id}`);
   }
+});
+
+test('the focus/scope button and its TTY picker are gone from every layer (delivery is vortexia, not a TTY)', () => {
+  assert.doesNotMatch(readSrc('renderer', 'index.html'), /id="focus"|ttyPicker|ttyList/);
+  const widget = stripComments(readSrc('renderer', 'widget.js'));
+  assert.doesNotMatch(widget, /focusAgent|getAgentTtys|pinTty|openTtyPicker/);
+  const preload = stripComments(readSrc('preload.js'));
+  assert.doesNotMatch(preload, /focusAgent|getAgentTtys|pinTty|agent:focus|agent:ttys|agent:pin-tty/);
+  const main = stripComments(readSrc('main.js'));
+  assert.doesNotMatch(main, /agent:focus|agent:ttys|agent:pin-tty/);
+  assert.match(main, /agent:tty-write/, 'the Clear button\'s raw "/clear" write stays');
 });
 
 test('preload.js exposes the face-button bridge methods on window.las', () => {
@@ -228,9 +239,8 @@ test('preload.js exposes the face-button bridge methods on window.las', () => {
     'openAgent',
     'getDefaultTerminalApp',
     'getAgentSessions',
-    'focusAgent',
-    'getAgentTtys',
-    'pinTty',
+    'getAgentConfig',
+    'setSessionsConfig',
   ]) {
     assert.match(src, new RegExp(`${method}\\s*:`), `preload.js missing window.las.${method}`);
   }
@@ -245,7 +255,7 @@ test('speaker button toggles the existing mute pref (no new pref key)', () => {
 test('mic dictation publishes via vortexia (sendToSelf), not a direct live write into the linked terminal', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function stopRecordingAndTranscribe()');
-  assert.match(body, /window\.las\.sendToSelf\(agentName,\s*result\.text(,\s*prefs\.micTarget \|\| 'default')?\)/,
+  assert.match(body, /window\.las\.sendToSelf\(agentName,\s*result\.text\)/,
     'mic result must be sent via sendToSelf — direct terminal injection (writeToTty) is iTerm2/AppleScript-specific and not portable, explicitly rejected for dictation in favor of vortexia');
   assert.doesNotMatch(body, /window\.las\.writeToTty/,
     'mic must NOT use writeToTty — that stays reserved for the Clear button\'s "/clear", a different use case (act on a live session now vs. queue for next session start)');
@@ -384,7 +394,7 @@ test('preload/main.js no longer expose the old speak-selftest-ok IPC channel (re
 
 test('main.js vortexia:send handler resolves the sending agent from the window map (reuses the existing per-window VortexiaClient)', () => {
   const src = readSrc('main.js');
-  const body = extractFunctionBody(src, "ipcMain.handle('vortexia:send', async (event, toName, text, target) => {");
+  const body = extractFunctionBody(src, "ipcMain.handle('vortexia:send', async (event, toName, text) => {");
   assert.match(body, /nameForWindow\(win\)/);
   assert.match(body, /vortexiaClients\.get\(fromName\)/);
 });
@@ -491,22 +501,7 @@ test('currentOpenOrder sanitizes the pref: drops unknown entries, collapses dupl
   assert.deepEqual(run('garbage'), ['terminal', 'folder'], 'a non-array pref falls back to the default');
 });
 
-test('focus button click calls focusAgent(agentName); a separate contextmenu/long-press opens the TTY picker (documented simplified route, not native drag)', () => {
-  const src = readSrc('renderer', 'widget.js');
-  const clickBody = extractFunctionBody(src, "focusEl.addEventListener('click', async () => {");
-  assert.match(clickBody, /window\.las\.focusAgent\(agentName\)/);
-  assert.match(src, /openTtyPicker/, 'expected a TTY-picker fallback for linking, since true native drag-and-drop is out of scope for this pass');
-});
-
-test('TTY picker links via pinTty(agentName, tty), matching the backend pin-tty body shape {tty}', () => {
-  const src = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(src, 'async function openTtyPicker() {');
-  assert.match(body, /window\.las\.getAgentTtys\(agentName\)/);
-  const fullSrc = readSrc('renderer', 'widget.js');
-  assert.match(fullSrc, /window\.las\.pinTty\(agentName,\s*tty\)/);
-});
-
-// ── auto-expand for overlay panels (settings/commands/TTY picker) ──────────
+// ── auto-expand for overlay panels (settings) ──────────────────────────────
 
 test('main.js exposes an idempotent window:set-expanded handler that remembers collapsed bounds', () => {
   const src = readSrc('main.js');
@@ -526,13 +521,6 @@ test('gear button toggles settings mode, which expands the window open and shrin
   const body = extractFunctionBody(src, 'function setSettingsOpen(open) {');
   assert.match(body, /window\.las\.setExpanded\(open,\s*SETTINGS_HEIGHT\)/, 'must pass open through, covering both the expand and the shrink-back-closed path');
   assert.match(body, /gearEl\.classList\.toggle\('active', open\)/, "gear must visually show 'pressed' while settings is open");
-});
-
-test('every panel that calls setExpanded(true, ...) has a corresponding path back to setExpanded(false)', () => {
-  const src = readSrc('renderer', 'widget.js');
-  const trueCount = [...src.matchAll(/setExpanded\(true\b/g)].length;
-  const falseCount = [...src.matchAll(/setExpanded\(false\)/g)].length;
-  assert.ok(trueCount > 0 && falseCount > 0, 'expected both expand and collapse call sites');
 });
 
 test('window:set-expanded accepts an optional height override, falling back to EXPANDED_HEIGHT', () => {
@@ -1146,44 +1134,81 @@ test("widget.js's speak() still respects the mute pref before doing any synthesi
   assert.ok(muteCheck < synthCall, 'mute must be checked before synthesis is attempted');
 });
 
-// ── mic target: which connected session a dictation goes to (ADR 0004 ph. 2)
+// ── children: which connected session hears the mic (docs/adr/0005) ────────
+// The target is the AGENT's choice, in its .las-agent.json, applied by the
+// backend — never a window pref, never decided in this app.
 
-test('DEFAULT_PREFS.micTarget defaults to the last-used session', () => {
+test('the mic target is not a window pref: DEFAULT_PREFS has no micTarget and the renderer never persists one', () => {
   const body = extractFunctionBody(readSrc('main.js'), 'const DEFAULT_PREFS = {');
-  assert.match(body, /micTarget:\s*'default'/);
+  assert.doesNotMatch(body, /micTarget/);
+  assert.doesNotMatch(stripComments(readSrc('renderer', 'widget.js')), /prefs\.micTarget|persist\(\{\s*micTarget/);
 });
 
-test('a dictation is sent with prefs.micTarget; the self-test always goes through the agent inbox', () => {
+test('a dictation and the self-test are sent with NO target — the backend applies the agent\'s sessions.target', () => {
   const src = readSrc('renderer', 'widget.js');
-  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*result\.text,\s*prefs\.micTarget \|\| 'default'\)/);
-  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*MIC_SELFTEST_PING\)/, 'no target on the self-test');
+  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*result\.text\)/);
+  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*MIC_SELFTEST_PING\)/);
+  assert.match(readSrc('preload.js'), /sendToSelf:\s*\(name,\s*text\)\s*=>\s*ipcRenderer\.invoke\('vortexia:send',\s*name,\s*text\)/);
 });
 
-test('vortexia:send routes a non-default target through the backend /agents/send (session or all_sessions), default stays on the agent inbox', () => {
-  const body = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('vortexia:send', async (event, toName, text, target) => {");
-  assert.match(body, /target && target !== 'default'/);
+test('vortexia:send goes through the backend /agents/send (source human, no session choice of its own) and falls back to a direct agent-inbox publish only when the backend is unreachable', () => {
+  const body = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('vortexia:send', async (event, toName, text) => {");
   assert.match(body, /\/agents\/send/);
-  assert.match(body, /all_sessions: true/);
-  assert.match(body, /session: target/);
   assert.match(body, /source: 'human'/);
-  assert.match(body, /client\.sendConfirmed\(toName, text/, 'default path unchanged');
+  assert.doesNotMatch(body, /all_sessions|session: target/, 'the window never picks a session — that is the agent\'s sessions.target, read by the backend');
+  const backendCall = body.indexOf('/agents/send');
+  const direct = body.indexOf('client.sendConfirmed(toName, text');
+  assert.ok(backendCall !== -1 && direct !== -1 && backendCall < direct, 'backend first, direct publish as the fallback');
+  assert.match(body, /fallback_from/, 'reports when the configured target was not connected');
 });
 
-test('mic press-and-hold (and right-click) opens the target menu and never toggles recording; the choice persists as micTarget', () => {
+test('the children button lists the sessions on click, hold or right-click; a row writes sessions.target to .las-agent.json via the backend; a cc toggle writes cc_default', () => {
   const src = readSrc('renderer', 'widget.js');
-  const down = extractFunctionBody(src, "micEl.addEventListener('mousedown', (e) => {");
-  assert.match(down, /showMicMenu\(\)/);
+  const down = extractFunctionBody(src, "childrenEl.addEventListener('mousedown', (e) => {");
+  assert.match(down, /showChildrenMenu\(\)/);
   assert.match(down, /OPEN_LONG_PRESS_MS/);
-  assert.doesNotMatch(down, /startRecording|stopRecordingAndTranscribe/);
-  assert.match(src, /micEl\.addEventListener\('contextmenu'/);
-  const render = extractFunctionBody(src, 'function renderMicMenu()');
-  assert.match(render, /persist\(\{\s*micTarget:\s*row\.value\s*\}\)/);
+  assert.match(src, /childrenEl\.addEventListener\('contextmenu'/);
+  const click = extractFunctionBody(src, "childrenEl.addEventListener('click', () => {");
+  assert.match(click, /showChildrenMenu\(\)/);
+  const render = extractFunctionBody(src, 'function renderChildrenMenu()');
+  assert.match(render, /setSessionsConfig\(\{\s*target:\s*row\.value\s*\}\)/);
   assert.match(render, /value: 'default'/);
   assert.match(render, /value: 'all'/);
   assert.match(render, /knownSessions\.map/);
+  assert.match(render, /setSessionsConfig\(\{\s*cc_default:\s*ccBox\.checked\s*\}\)/);
+  const save = extractFunctionBody(src, 'async function setSessionsConfig(patch)');
+  assert.match(save, /window\.las\.setSessionsConfig\(agentName,\s*patch\)/);
+  const patch = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {");
+  assert.match(patch, /method: 'PATCH'/);
+  assert.match(patch, /\/config`/);
+  assert.match(patch, /sessions: patch/);
+});
+
+test('the settings panel offers the same choice (Dictation goes to + Copy last-used session), bound to the same backend write', () => {
   const html = readSrc('renderer', 'index.html');
-  assert.match(html, /id="micTarget"/, 'the settings panel offers the same choice');
-  assert.match(html, /id="micMenu"/);
+  assert.match(html, /id="micTarget"/);
+  assert.match(html, /id="ccDefault"/);
+  assert.match(html, /id="childrenMenu"/);
+  assert.doesNotMatch(html, /id="micMenu"/);
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /micTargetEl\.addEventListener\('change',\s*\(\)\s*=>\s*setSessionsConfig\(\{\s*target:\s*micTargetEl\.value\s*\}\)\)/);
+  assert.match(src, /ccDefaultEl\.addEventListener\('change',\s*\(\)\s*=>\s*setSessionsConfig\(\{\s*cc_default:\s*ccDefaultEl\.checked\s*\}\)\)/);
+});
+
+test('the mic button itself has no press-and-hold menu any more — click toggles recording, double-click self-tests, nothing else', () => {
+  const src = stripComments(readSrc('renderer', 'widget.js'));
+  assert.doesNotMatch(src, /micEl\.addEventListener\('(mousedown|contextmenu|mouseup|mouseleave)'/);
+  assert.match(src, /micEl\.addEventListener\('click'/);
+  assert.match(src, /micEl\.addEventListener\('dblclick'/);
+});
+
+test('session-targeted messages show in the log (viewer subscription to the session inboxes) and cc copies do not', () => {
+  const main = extractFunctionBody(readSrc('main.js'), 'async function connectVortexia(name, win) {');
+  assert.match(main, /client\.mqttClient\.subscribe\(`las\/agent\/\$\{name\}\/sessions\/\+\/inbox`/);
+  const handler = extractFunctionBody(readSrc('renderer', 'widget.js'), 'window.las.onVortexiaMessage((envelope) => {');
+  assert.match(handler, /envelope\.kind === 'cc'/);
+  const ccBranch = handler.slice(handler.indexOf("envelope.kind === 'cc'"));
+  assert.ok(ccBranch.indexOf('return;') < ccBranch.indexOf('appendLogEntry('), 'a cc copy returns before any appendLogEntry');
 });
 
 // ── speak-queue handshake: never two agents talking at once ────────────────
