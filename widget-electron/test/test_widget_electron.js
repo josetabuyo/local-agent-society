@@ -563,6 +563,22 @@ test('main.js grows the window down only (same x/y/width) and re-fits an already
   assert.match(body, /if \(!expandedWindows\.has\(win\)\) \{\s*collapsedBounds\.set\(win, win\.getBounds\(\)\)/, 'compact bounds remembered once, on the first expand');
 });
 
+// ── packaging: the sibling vortexia checkout is a `file:` dependency, so
+// `node_modules/vortexia` is a symlink to the WHOLE repo of a broker that is
+// running while we build. Packing its live log (20MB and growing) and its
+// mailbox snapshot shifted every asar data offset after them (seen twice on
+// 2026-09-30: main.js began with the tail of another file, the app exited 1
+// with no output). Its env file holds secrets, and its port file read from
+// inside the asar would shadow the live port registry. Only src + package.json
+// + its own node_modules belong in the bundle.
+
+test('electron-builder never packs vortexia\'s live data, logs, secrets or port file', () => {
+  const files = JSON.parse(readSrc('package.json')).build.files;
+  assert.ok(files.some((f) => /^!node_modules\/vortexia\/\{[^}]*\blogs\b[^}]*\}\/\*\*\/\*$/.test(f)), 'logs/ excluded');
+  assert.ok(files.some((f) => /^!node_modules\/vortexia\/\{[^}]*\bdata\b[^}]*\}\/\*\*\/\*$/.test(f)), 'data/ excluded');
+  assert.ok(files.some((f) => f.startsWith('!node_modules/vortexia/{') && f.includes('vortexia.env') && f.includes('vortexia.port.json')), 'env + port file excluded');
+});
+
 test('no drawer is a popover or an overlay: menus and settings sit in normal flow below the button bar', () => {
   const css = readSrc('renderer', 'widget.css');
   const openMenu = css.slice(css.indexOf('.open-menu {'), css.indexOf('.open-menu.hidden'));

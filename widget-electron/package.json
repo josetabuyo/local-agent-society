@@ -36,7 +36,9 @@
       "lib/**/*",
       "renderer/**/*",
       "node_modules/**/*",
-      "!node_modules/electron-builder/**/*"
+      "!node_modules/electron-builder/**/*",
+      "!node_modules/vortexia/{logs,data,launchd,python,scripts,test,docs}/**/*",
+      "!node_modules/vortexia/{vortexia.env,vortexia.env.example,vortexia.pid,vortexia.port.json,PROTOCOL.md,README.md,package-lock.json}"
     ],
     "asarUnpack": [
       "node_modules/onnxruntime-node/**/*",
