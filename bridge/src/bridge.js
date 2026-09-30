@@ -8,7 +8,7 @@
  *   4. per message: normalize -> interceptors -> sink -> ack (the source
  *      acks when `handle` resolves)
  */
-import { normalize } from './envelope.js';
+import { KIND, normalize } from './envelope.js';
 
 export class Bridge {
   /**
@@ -107,7 +107,9 @@ export class Bridge {
     }
     await this.sink.deliver(ctx);
     this.status?.bump();
-    if (this.session) this.session.touch(); // activity: this session is the one being used
+    // Activity: this session is the one being used — unless it was only the
+    // widget asking every session for a title, which must not reshuffle the default.
+    if (this.session && envelope.kind !== KIND.TITLE_REQUEST) this.session.touch();
     return { handledBy: null };
   }
 

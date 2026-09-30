@@ -115,3 +115,15 @@ test('session mode with the backend down: hold the agent mailbox anyway (the old
   assert.deepEqual(order, ['session.start', 'agent.start']);
   assert.equal(bridge.isDefault, true);
 });
+
+test('a title-request is delivered but is not activity: it never makes this session the default', async () => {
+  const touched = [];
+  const delivered = [];
+  const registry = { sid: 'codex-3', runtime: 'codex', register: async () => null, touch: async () => touched.push('touch'), unregister: async () => null };
+  const bridge = new Bridge({ agent: 'Robo', source: fakeSource('agent', []), session: registry, pipeline: new Pipeline([]), sink: { deliver: async (ctx) => delivered.push(ctx.envelope.kind) } });
+  await bridge.handle({ from: 'Robo', kind: 'title-request', text: '[las-session-title] sid=codex-3 — ...' });
+  assert.deepEqual(delivered, ['title-request'], 'the session still gets it: it has to answer');
+  assert.deepEqual(touched, [], 'the widget asking every child for a title must not reshuffle the last-used one');
+  await bridge.handle({ from: 'X', text: 'real work' });
+  assert.deepEqual(touched, ['touch']);
+});

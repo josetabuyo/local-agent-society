@@ -10,7 +10,7 @@ import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
 from cli.commands._agent_common import infer_locale, resolve_agent_name
-from cli.agent_config import TARGET_ALL, TARGET_DEFAULT, default_sessions_config
+from cli.agent_config import TARGET_ALL, TARGET_DEFAULT, TITLE_SOFT_CAP, default_sessions_config
 from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
 from cli.hierarchy import tree_lines
 
@@ -641,7 +641,75 @@ def _print_sessions(name: str, view: dict) -> None:
         mark = "*" if s.get("default") else " "
         age = int((time.time() * 1000 - s.get("lastActiveAt", 0)) / 1000)
         brain = "" if s.get("intelligent", True) else "  [not intelligent: commands only]"
-        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<7} pid {s.get('pid', '?'):<7} used {age}s ago  {s.get('cwd', '')}{brain}")
+        title = f"  \"{s['title']}\"" if s.get("title") else ""
+        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<7} pid {s.get('pid', '?'):<7} used {age}s ago  {s.get('cwd', '')}{title}{brain}")
+
+
+def _parent_pid(pid: int) -> int | None:
+    try:
+        out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True, timeout=2).stdout.strip()
+        return int(out) if out else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _ancestor_pids(pid: int | None = None) -> set:
+    """This process's ancestors (itself excluded, launchd/init excluded)."""
+    seen, pid = set(), _parent_pid(pid or os.getpid())
+    while pid and pid > 1 and pid not in seen:
+        seen.add(pid)
+        pid = _parent_pid(pid)
+    return seen
+
+
+def own_session(sessions: list, ancestors: set) -> dict | None:
+    """The session this command runs inside, found by process ancestry.
+
+    A session's bridge is either an ancestor itself (`las shell` runs
+    commands as its children) or the sibling of one: Claude Code starts the
+    channel bridge as its own child, and `las codex` starts the bridge next
+    to Codex — so the bridge's parent (Claude, or the `las codex` process)
+    is an ancestor of anything the model runs. The nearest match wins.
+    """
+    for s in sessions:
+        if s.get("pid") in ancestors:
+            return s
+    matches = [s for s in sessions if _parent_pid(s.get("pid") or 0) in ancestors]
+    return matches[0] if len(matches) == 1 else None
+
+
+@agent.command("title")
+@click.argument("title", required=False)
+@click.option("--name", "name", default=None, shell_complete=complete_agent_names, help="Which agent (default: the one in the current directory).")
+@click.option("--session", "sid", default=None, help="Which session (default: the one this command runs inside).")
+def title(title, name, sid):
+    """Name what this session is working on — shown next to its runtime in the widget's children list.
+
+    \b
+      las agent title "Widget session titles"     # this session (found by process ancestry)
+      las agent title --session codex-123-ab "…"   # a given session id
+      las agent title                              # show the sessions and their titles
+
+    Keep it around 34 characters (rung 0 of the scope ladder, one level down:
+    a soft target, never truncated). The widget's refresh button asks every
+    intelligent session to run this; a session may also set it on its own at
+    start or whenever its work changes. A shell cannot describe itself.
+    """
+    name = resolve_agent_name(name)
+    view = api.get(f"/agents/{quote(name, safe='')}/sessions")
+    if title is None:
+        _print_sessions(name, view)
+        return
+    if not sid:
+        mine = own_session(view.get("sessions", []), _ancestor_pids())
+        if not mine:
+            click.echo(f"{name}: can't tell which session this is — pass --session (see `las agent sessions`).", err=True)
+            raise SystemExit(1)
+        sid = mine["sid"]
+    view = api.put(f"/agents/{quote(name, safe='')}/sessions/{quote(sid, safe='')}/title", {"title": title})
+    if len(title) > TITLE_SOFT_CAP:
+        click.echo(f"note: {len(title)} chars — aim for about {TITLE_SOFT_CAP}.", err=True)
+    _print_sessions(name, view)
 
 
 @agent.command("target")

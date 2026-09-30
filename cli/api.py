@@ -39,7 +39,7 @@ def _request(method: str, path: str, data: Optional[dict] = None) -> Any:
     """
     try:
         func = getattr(requests, method)
-        if method in ("post", "patch"):
+        if method in ("post", "patch", "put"):
             resp = func(f"{BASE}{path}", json=data or {}, timeout=TIMEOUT_S)
         else:
             resp = func(f"{BASE}{path}", timeout=TIMEOUT_S)
@@ -77,3 +77,8 @@ def delete(path):
 def patch(path, data=None):
     """Send a PATCH request to ``path`` with an optional JSON ``data`` body."""
     return _request("patch", path, data)
+
+
+def put(path, data=None):
+    """Send a PUT request to ``path`` with an optional JSON ``data`` body."""
+    return _request("put", path, data)

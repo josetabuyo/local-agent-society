@@ -180,3 +180,33 @@ should expose viewer subscriptions instead of the widget touching
   and `tests/test_cli_sessions.py`, the bridge's envelope/channel tests,
   and the widget's children-button tests replacing the focus/mic-target
   ones.
+
+## Addendum (2026-09-30) — session titles
+
+The runtime descriptor says what a *kind* of child is for; nothing said
+what *this* child is doing. Two Claude sessions of one agent read the same
+in the children list. Each session now carries a `title`: rung 0 of the
+scope ladder (ADR 0001, soft target 34 chars, never truncated) one level
+down — the future input for smarter routing among children, for now a
+label.
+
+- **Set by the session itself**: `las agent title "<text>"`
+  (`PUT /agents/{name}/sessions/{sid}/title`). The CLI finds its own
+  session by process ancestry — the bridge is an ancestor (`las shell`) or
+  its parent is (Claude starts the channel bridge; `las codex` starts the
+  bridge next to Codex) — or takes `--session`. Setting a title is not
+  activity: the default session does not move. A re-register of the same
+  sid keeps it.
+- **Asked for by the widget**: the children menu's "↻ Refresh descriptions"
+  calls `POST /agents/{name}/sessions/titles/request`, which publishes one
+  `kind: "title-request"` envelope into each *intelligent* session's own
+  mailbox (never the agent inbox; the shell is skipped — it cannot
+  describe itself). The text stands alone (`[las-session-title] sid=…` plus
+  the exact `las agent title --name … --session …` command) because Codex
+  gets it typed into its TUI. The bridge does not `touch` on it, so asking
+  every child never reshuffles the last-used one; the widget log hides it.
+  Answers arrive asynchronously; the menu re-reads the list for ~30 s.
+- The `/las-agent` skill tells sessions to set a title when real work
+  starts and to answer a request silently (no reply, no TTS, no report).
+- The "Copy last-used session" toggle left the children menu (it stays in
+  settings and as `las agent target --cc`); the refresh button took its row.

@@ -1104,6 +1104,25 @@ ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {
   }
 });
 
+// The children menu's refresh button: ask every intelligent session of the
+// agent to title itself (backend request_session_titles). Answers arrive
+// later, as `las agent title` calls; the renderer re-reads the list.
+ipcMain.handle('agent:request-session-titles', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/sessions/titles/request`, { method: 'POST' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('children', `title request failed for ${name}: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('children', `${name}: asked ${json.asked.length} session(s) for a title, skipped ${json.skipped.length}`);
+    return json;
+  } catch (err) {
+    log.error('children', `title request failed for ${name}: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
 ipcMain.handle('agent:info', async (_event, name) => {
   try {
     const agents = await fetchAgents();

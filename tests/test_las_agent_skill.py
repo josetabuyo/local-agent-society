@@ -74,3 +74,9 @@ def test_installed_copy_matches_the_repo_copy_when_present():
     installed = Path.home() / ".claude/skills/las-agent/SKILL.md"
     if installed.exists():
         assert installed.read_text() == SKILL, "run install.sh (or copy) — the shipped skill drifted from the repo"
+
+
+def test_skill_tells_sessions_to_title_themselves_and_answer_a_title_request_silently():
+    assert 'las agent title' in SKILL
+    assert 'kind="title-request"' in SKILL
+    assert 'no reply, no TTS, no closing report' in SKILL

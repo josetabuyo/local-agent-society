@@ -25,8 +25,9 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (KIND_COMMAND, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands, descriptor_for,
-                              merge_config_patch, read_agent_config, sessions_config, write_agent_config)
+from cli.agent_config import (KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
+                              descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
+                              write_agent_config)
 from cli.path_utils import agent_config_path
 
 app = FastAPI(title="Local Agent Society", version="1.0.0")
@@ -425,6 +426,11 @@ class SessionRegisterRequest(BaseModel):
     cwd:     str = ""
 
 
+class SessionTitleRequest(BaseModel):
+    """What one session is working on — rung 0 of the scope ladder one level down (soft target 34 chars, never truncated)."""
+    title: str = Field(max_length=144)
+
+
 class TerminalRequest(BaseModel):
     model:    str            = "Default"
     model_id: Optional[str] = None        # claude --model flag value
@@ -707,7 +713,9 @@ def register_session(name: str, body: SessionRegisterRequest):
     now = int(time.time() * 1000)
     with _sessions_lock:
         sessions = _load_sessions(name)
-        sessions[body.sid] = {"sid": body.sid, "agent": name, "runtime": body.runtime, "pid": body.pid, "cwd": body.cwd, "startedAt": now, "lastActiveAt": now}
+        # A bridge that re-registers the same sid (backend restart) keeps the title it was given.
+        title = sessions.get(body.sid, {}).get("title", "")
+        sessions[body.sid] = {"sid": body.sid, "agent": name, "runtime": body.runtime, "pid": body.pid, "cwd": body.cwd, "title": title, "startedAt": now, "lastActiveAt": now}
         _save_sessions(name, sessions)
         published = _publish_default_session(name, sessions)
         view = _sessions_view(name, sessions)
@@ -727,6 +735,46 @@ def touch_session(name: str, sid: str):
         published = _publish_default_session(name, sessions) if was_default != sid else True
         view = _sessions_view(name, sessions)
     return {"ok": True, "published": published, **view}
+
+
+@app.put("/agents/{name}/sessions/{sid}/title")
+def set_session_title(name: str, sid: str, body: SessionTitleRequest):
+    """Name what one session is working on (`las agent title`). Not activity: the default session does not change."""
+    with _sessions_lock:
+        sessions = _load_sessions(name)
+        if sid not in sessions:
+            raise HTTPException(status_code=404, detail=f"{name} has no connected session {sid!r}")
+        sessions[sid]["title"] = " ".join(body.title.split())
+        _save_sessions(name, sessions)
+        view = _sessions_view(name, sessions)
+    return {"ok": True, **view}
+
+
+@app.post("/agents/{name}/sessions/titles/request")
+def request_session_titles(name: str):
+    """Ask every connected intelligent session of `name` to title itself (the widget's refresh button).
+
+    One `title-request` envelope per session, straight into its own mailbox —
+    never the agent mailbox, so each session knows the request is about IT
+    (the text carries its sid). A shell cannot describe itself: skipped. The
+    answers arrive asynchronously, as `las agent title` calls.
+    """
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    policy = sessions_config(_agent_config(name))
+    with _sessions_lock:
+        sessions = _load_sessions(name)
+    asked, skipped = [], []
+    ts = int(time.time() * 1000)
+    for s in sessions.values():
+        if not descriptor_for(policy, s.get("runtime", "")).get("intelligent", True):
+            skipped.append(s["sid"])
+            continue
+        envelope = {"from": name, "to": name, "source": "system", "kind": KIND_TITLE_REQUEST, "session": s["sid"],
+                    "text": title_request_text(name, s["sid"]), "ts": ts}
+        if _vortexia_publish(vx.session_inbox_topic(name, s["sid"]), envelope, retain=False):
+            asked.append(s["sid"])
+    return {"ok": True, "asked": asked, "skipped": skipped}
 
 
 @app.delete("/agents/{name}/sessions/{sid}")

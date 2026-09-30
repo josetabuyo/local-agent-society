@@ -105,6 +105,11 @@ contextBridge.exposeInMainWorld('las', {
    * `las agent target` writes. Resolves to the backend's config view. */
   setSessionsConfig: (name, patch) => ipcRenderer.invoke('agent:config-sessions', name, patch),
 
+  /** Ask every intelligent session of this agent to title itself (children
+   * menu refresh). Resolves to {asked, skipped} or null; the titles arrive
+   * later — re-read getAgentSessions. */
+  requestSessionTitles: (name) => ipcRenderer.invoke('agent:request-session-titles', name),
+
   /** Local Whisper transcription (main.js's "audio transcription" section) —
    * replaces the broken Electron SpeechRecognition/webkitSpeechRecognition.
    * `pcmBuffer` must be an ArrayBuffer of mono Float32 PCM samples at 16kHz

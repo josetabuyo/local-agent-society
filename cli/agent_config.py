@@ -97,6 +97,28 @@ def runtime_descriptor(config: dict | None, runtime: str) -> dict:
     return descriptor_for(sessions_config(config), runtime)
 
 
+# ── session titles ──────────────────────────────────────────────────────────
+#
+# Each connected session (a child of the agent) can carry a short title: what
+# that terminal is working on right now. It is rung 0 of the scope ladder one
+# level down (ADR 0001 caps rung 0 at 34 chars — a soft target, never
+# truncated). The widget asks every intelligent session for one with a
+# `title-request` envelope; the session answers with `las agent title`.
+
+KIND_TITLE_REQUEST = "title-request"
+TITLE_SOFT_CAP = 34
+TITLE_REQUEST_PREFIX = "[las-session-title]"
+
+
+def title_request_text(agent: str, sid: str) -> str:
+    """The self-contained instruction handed to one session — typed verbatim into a Codex TUI, so it must stand alone."""
+    return (
+        f"{TITLE_REQUEST_PREFIX} sid={sid} — give this session a title: what you are working on here, "
+        f"about {TITLE_SOFT_CAP} characters, in the agent's language. Set it by running "
+        f"`las agent title --name {agent} --session {sid} \"<title>\"`, nothing else — no other action, no reply, no closing report."
+    )
+
+
 def accepts_only_commands(descriptor: dict) -> bool:
     """A child that understands nothing but commands: whatever it is handed IS a command (the shell)."""
     accepts = descriptor.get("accepts")

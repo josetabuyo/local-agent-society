@@ -84,6 +84,11 @@ Treat it exactly as if the human had typed it (§7): act, then report as usual. 
 
 **Several runtimes at once = sessions, the agent's children.** The same agent can have a Claude, a Codex and a shell attached; each is a *session* (`las agent sessions`), the last one used is the **default** — a plain `send --to Name` reaches it, its bridge holds the agent mailbox. Pick one with `--session claude|codex|shell|<id>`, all with `--all-sessions`, switch the default with `las agent sessions --use X`. The recipient itself can pin where unqualified messages and its widget mic land: `las agent target default|all|<runtime>|<sid>` writes `sessions.target` into its `.las-agent.json`; `--cc` (on a send, or `las agent target --cc` for good) hands the last-used session a for-the-record copy of whatever went to another child (docs/adr/0005). A message that arrives here may carry `session="<id>"` in the tag: it was aimed at this session specifically. One with `kind="cc"` is such a copy — something the human sent to this agent's shell or Codex: take note, do not act on it, do not reply, no closing report. The widget's 👥 children button (click or hold) offers the same list as `las agent target`.
 
+**Session titles — say what this terminal is working on.** Each session can carry a short title, shown next to its runtime (`claude`, `codex`, `shell`) in the widget's 👥 children list and in `las agent sessions`. It is rung 0 of the scope ladder (§9) one level down: about 34 characters, a soft target, never truncated, in the agent's language — e.g. `las agent title "Widget session titles"`. The command finds its own session by process ancestry; `--session <sid>` names one explicitly. Two moments to set it:
+
+- **At the start of real work** — once the first task of the session is clear (not on a bare probe or greeting), set the title yourself, silently. Update it when the work clearly changes direction.
+- **When asked** — the widget's "↻ Refresh descriptions" button sends every intelligent session an event with `kind="title-request"` whose text starts with `[las-session-title]` and carries the exact command to run (with `--name` and `--session` filled in). Run that command with a fitting title and do nothing else: no reply, no TTS, no closing report — a housekeeping turn, like the probe. A shell never gets one (it cannot describe itself). Codex gets the same text typed into its TUI and answers by running the same command.
+
 **If `las bridge status` exits non-zero**, the channel isn't armed in this session — almost always because Claude was started as bare `claude` instead of `las claude` (the wrapper adds `--dangerously-load-development-channels server:las`, mandatory while channels are a research preview, and it is also what registers the `las` MCP server and publishes presence). Then, and only then, do the chain's work by hand, drain once, and tell the user in one line that live delivery isn't active this session and how to get it for THIS conversation: exit and `las claude --resume` (Claude restores the conversation; the mailbox keeps every message meanwhile — `las bridge status` prints the same guide):
 
 ```bash
@@ -253,6 +258,7 @@ las bridge status [<MyName>]
 
 # Which runtimes are attached to an agent right now (a Claude, a Codex, a shell), which is the default
 las agent sessions [<Name>] [--use <id|runtime>]
+las agent title "<what this session is working on>"             # ~34 chars; shown in the widget's children list
 las agent target [default|all|<runtime>|<sid>] [--cc/--no-cc]   # where messages + the mic land among MY sessions (.las-agent.json)
 las agent send --to <Name> --session shell --cc "make test"     # the shell runs it (a shell is handed everything as a command), the last-used session gets a cc
 las agent send --to <Name> --command "make test"                # mark it a command for an intelligent session

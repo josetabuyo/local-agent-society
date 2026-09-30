@@ -17,6 +17,10 @@ export const KIND = Object.freeze({
   // that went to another of its sessions (backend _route_send, docs/adr/0005).
   // Informational: shown, never acted on, never replied to.
   CC: 'cc',
+  // The widget asking this one session to title itself (backend
+  // request_session_titles). Answered with `las agent title`; not activity,
+  // so it never makes the session the default.
+  TITLE_REQUEST: 'title-request',
 });
 
 export const SOURCE = Object.freeze({ HUMAN: 'human', AGENT: 'agent', SYSTEM: 'system' });

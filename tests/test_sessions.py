@@ -243,3 +243,35 @@ def test_a_broken_config_file_never_takes_a_send_or_a_session_register_down(app,
     (tmp_path / ".las-agent.json").write_text('{"sessions": "shell"}')
     assert _register(client, "claude-1", "claude")["target"] == "default"
     assert _send(client)["mode"] == "direct"
+
+
+# ── session titles: what each child is working on (widget children list) ──
+
+def test_title_is_set_per_session_without_moving_the_default_and_survives_a_re_register(app):
+    main, client = app
+    _register(client, "claude-1", "claude")
+    _register(client, "codex-1", "codex")
+    view = client.put("/agents/Robo/sessions/claude-1/title", json={"title": "  Widget   session titles "}).json()
+    rows = {s["sid"]: s for s in view["sessions"]}
+    assert rows["claude-1"]["title"] == "Widget session titles", "whitespace collapsed, never truncated"
+    assert rows["codex-1"]["title"] == ""
+    assert view["default"] == "codex-1", "naming a session is not using it"
+    _register(client, "claude-1", "claude")
+    assert {s["sid"]: s for s in client.get("/agents/Robo/sessions").json()["sessions"]}["claude-1"]["title"] == "Widget session titles"
+    assert client.put("/agents/Robo/sessions/nope/title", json={"title": "x"}).status_code == 404
+
+
+def test_title_request_goes_to_each_intelligent_session_mailbox_never_the_shell(app):
+    main, client = app
+    _register(client, "claude-1", "claude")
+    _register(client, "codex-1", "codex")
+    _register(client, "shell-1", "shell")
+    main.published.clear()
+    r = client.post("/agents/Robo/sessions/titles/request").json()
+    assert sorted(r["asked"]) == ["claude-1", "codex-1"] and r["skipped"] == ["shell-1"]
+    sent = {t.split("/")[4]: e for t, e, _ in main.published}
+    assert set(sent) == {"claude-1", "codex-1"}, "only session mailboxes — never the agent inbox"
+    for sid, env in sent.items():
+        assert env["kind"] == "title-request" and env["session"] == sid
+        assert f"--session {sid}" in env["text"] and "--name Robo" in env["text"], "the text stands alone: Codex gets it typed in"
+    assert client.post("/agents/Nobody/sessions/titles/request").status_code == 404

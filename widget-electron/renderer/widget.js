@@ -811,6 +811,10 @@ window.las.onVortexiaMessage((envelope) => {
     // shows in this log (session inboxes are watched too, see main.js's
     // connectVortexia); showing the copy would double it.
     return;
+  } else if (envelope && envelope.kind === 'title-request') {
+    // This widget's own refresh button asking a session to title itself —
+    // plumbing, not conversation. The answer shows up in the children list.
+    return;
   } else if (envelope) {
     appendLogEntry(envelope);
   }
@@ -1297,17 +1301,20 @@ let sessionsPolicy = { target: 'default', cc_default: false };
 
 function sessionLabel(s) {
   const brain = s.intelligent === false ? ' · commands only' : '';
-  return `${s.runtime || '?'} · ${String(s.sid).split('-')[1] || s.sid}${brain}${s.default ? ' · last used' : ''}`;
+  const name = s.title ? ` · ${s.title}` : ` · ${String(s.sid).split('-')[1] || s.sid}`;
+  return `${s.runtime || '?'}${name}${brain}${s.default ? ' · last used' : ''}`;
 }
 
 /**
- * The choices, as {value, label, scope?}: the two fixed ones, then one per
- * connected RUNTIME (value = the runtime name — what `las agent target
- * shell` writes: it survives that terminal being reopened with a new
- * session id, which a sid never would), plus one per session id only when
- * a runtime has more than one session connected (then the id is the only
- * way to tell them apart). The same list feeds the menu and the settings
- * <select>, so both always agree.
+ * The choices, as {value, label, scope?, alias?}: the two fixed ones, then
+ * one row per connected session. A runtime with a single session gets a row
+ * valued by the runtime name (what `las agent target shell` writes: it
+ * survives that terminal being reopened with a new session id, which a sid
+ * never would). A runtime with several sessions gets one row per session,
+ * valued by its id — no extra "group" row, which read as one more session.
+ * `alias` lets a runtime-valued target (e.g. "codex" set from the CLI)
+ * still light up the session it resolves to (the most recent one). The
+ * same list feeds the menu and the settings <select>, so both always agree.
  */
 function targetRows() {
   const rows = [
@@ -1321,20 +1328,24 @@ function targetRows() {
     byRuntime.get(runtime).push(s);
   }
   for (const [runtime, sessions] of byRuntime) {
-    const brain = sessions[0].intelligent === false ? ' · commands only' : '';
-    const used = sessions.some((s) => s.default) ? ' · last used' : '';
-    const count = sessions.length > 1 ? ` (${sessions.length})` : '';
-    rows.push({ value: runtime, label: `${runtime}${count}${brain}${used}`, scope: sessions[0].scope });
-    if (sessions.length > 1) {
-      for (const s of sessions) rows.push({ value: s.sid, label: `  ${sessionLabel(s)}`, scope: s.scope });
+    if (sessions.length === 1) {
+      rows.push({ value: runtime, label: sessionLabel(sessions[0]), scope: sessions[0].scope });
+      continue;
     }
+    // knownSessions is most-recently-used first: sessions[0] is what the runtime name resolves to.
+    sessions.forEach((s, i) => rows.push({ value: s.sid, label: sessionLabel(s), scope: s.scope, alias: i === 0 ? runtime : undefined }));
   }
   return rows;
 }
 
+/** Does `row` stand for the `target` value (its own value, or the runtime it is the current pick of)? */
+function rowMatches(row, target) {
+  return row.value === target || (row.alias !== undefined && row.alias === target);
+}
+
 /** Human label of a target value: one of the rows, or "not connected". */
 function targetLabel(target) {
-  const row = targetRows().find((r) => r.value === target);
+  const row = targetRows().find((r) => rowMatches(r, target));
   return row ? row.label.trim() : `${target} (not connected)`;
 }
 
@@ -1343,7 +1354,9 @@ function syncMicTargetSelect() {
   // Keep the settings <select> honest: exactly the rows the menu shows.
   micTargetEl.innerHTML = '';
   const rows = targetRows();
-  if (!rows.some((r) => r.value === target)) rows.push({ value: target, label: targetLabel(target) });
+  const aliased = rows.find((r) => r.value !== target && rowMatches(r, target));
+  if (aliased) aliased.value = target; // the select must hold the exact value the file says
+  else if (!rows.some((r) => r.value === target)) rows.push({ value: target, label: targetLabel(target) });
   for (const row of rows) {
     const opt = document.createElement('option');
     opt.value = row.value;
@@ -1416,12 +1429,13 @@ function renderChildrenMenu() {
   }
   for (const row of rows) {
     const el = document.createElement('div');
-    el.className = 'open-row' + (row.value === current ? ' default' : '');
+    const isCurrent = rowMatches(row, current);
+    el.className = 'open-row' + (isCurrent ? ' default' : '');
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'open-label';
     btn.textContent = row.label;
-    btn.title = (row.scope ? `${row.scope} — ` : '') + (row.value === current ? 'the mic talks here now' : 'send the mic here');
+    btn.title = (row.scope ? `${row.scope} — ` : '') + (isCurrent ? 'the mic talks here now' : 'send the mic here');
     btn.addEventListener('click', async () => {
       await setSessionsConfig({ target: row.value });
       closeChildrenMenu();
@@ -1429,19 +1443,45 @@ function renderChildrenMenu() {
     el.appendChild(btn);
     childrenMenuEl.appendChild(el);
   }
-  const ccRow = document.createElement('div');
-  ccRow.className = 'open-row';
-  const ccLabel = document.createElement('label');
-  ccLabel.className = 'open-label';
-  const ccBox = document.createElement('input');
-  ccBox.type = 'checkbox';
-  ccBox.checked = !!sessionsPolicy.cc_default;
-  ccBox.title = 'When the mic talks to another session, the last-used one gets a copy for the record';
-  ccBox.addEventListener('change', () => setSessionsConfig({ cc_default: ccBox.checked }));
-  ccLabel.appendChild(ccBox);
-  ccLabel.appendChild(document.createTextNode(' Copy last-used session'));
-  ccRow.appendChild(ccLabel);
-  childrenMenuEl.appendChild(ccRow);
+  if (knownSessions.some((s) => s.intelligent !== false)) {
+    const refreshRow = document.createElement('div');
+    refreshRow.className = 'open-row';
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.className = 'open-label';
+    refreshBtn.textContent = '↻ Refresh descriptions';
+    refreshBtn.title = 'Ask every Claude/Codex session what it is working on (a shell cannot describe itself)';
+    refreshBtn.addEventListener('click', () => requestSessionTitles(refreshBtn));
+    refreshRow.appendChild(refreshBtn);
+    childrenMenuEl.appendChild(refreshRow);
+  }
+}
+
+/**
+ * Ask each intelligent child to title itself (backend
+ * request_session_titles). The answers come back asynchronously — each
+ * session runs `las agent title` when it gets to it — so re-read the list a
+ * few times while the menu stays open.
+ */
+async function requestSessionTitles(btn) {
+  btn.disabled = true;
+  btn.textContent = '↻ Asking sessions…';
+  const res = await window.las.requestSessionTitles(agentName);
+  if (!res || !Array.isArray(res.asked)) {
+    window.las.log('warn', 'children', 'could not ask sessions for titles — is the backend up?');
+    btn.textContent = '↻ Refresh failed — backend down?';
+    btn.disabled = false;
+    return;
+  }
+  for (const delay of [3000, 5000, 7000, 15000]) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (!childrenMenuOpen) return;
+    await refreshSessions();
+    if (!childrenMenuOpen) return;
+    syncMicTargetSelect();
+    renderChildrenMenu();
+    fitWindowToDrawer();
+  }
 }
 
 function cancelChildrenLongPress() {

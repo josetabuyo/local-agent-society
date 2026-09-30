@@ -1238,7 +1238,7 @@ test('agent:sessions reports an UNKNOWN policy (target: null) on failure and the
   assert.match(refresh, /typeof view\.target === 'string'/);
 });
 
-test('the children button lists the sessions on click, hold or right-click; a row writes sessions.target to .las-agent.json via the backend; a cc toggle writes cc_default', () => {
+test('the children button lists the sessions on click, hold or right-click; a row writes sessions.target to .las-agent.json via the backend; no cc toggle in the menu (settings only)', () => {
   const src = readSrc('renderer', 'widget.js');
   const down = extractFunctionBody(src, "childrenEl.addEventListener('mousedown', (e) => {");
   assert.match(down, /showChildrenMenu\(\)/);
@@ -1253,9 +1253,12 @@ test('the children button lists the sessions on click, hold or right-click; a ro
   assert.match(rows, /value: 'default'/);
   assert.match(rows, /value: 'all'/);
   assert.match(rows, /value: runtime/, 'a row per connected RUNTIME — the same vocabulary `las agent target shell` writes, stable across a terminal being reopened');
-  assert.match(rows, /sessions\.length > 1/, 'session ids only when a runtime has more than one session');
+  assert.match(rows, /sessions\.length === 1/, 'a runtime row only when that runtime has a single session');
+  assert.match(rows, /value: s\.sid/, 'several sessions of one runtime: one row each, by id');
+  assert.doesNotMatch(rows, /\(\$\{sessions\.length\}\)/, 'no "codex (2)" group row — it read as one more session');
+  assert.match(rows, /alias: i === 0 \? runtime/, 'a runtime target still lights up the session it resolves to');
   assert.match(extractFunctionBody(src, 'function syncMicTargetSelect()'), /targetRows\(\)/, 'the settings select shows the same rows');
-  assert.match(render, /setSessionsConfig\(\{\s*cc_default:\s*ccBox\.checked\s*\}\)/);
+  assert.doesNotMatch(render, /cc_default|Copy last-used/, 'the cc choice lives in settings, not in the children menu');
   const save = extractFunctionBody(src, 'async function setSessionsConfig(patch)');
   assert.match(save, /window\.las\.setSessionsConfig\(agentName,\s*patch\)/);
   const patch = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {");
@@ -1343,4 +1346,21 @@ test('ackSpeak tolerates envelopes without an id (a pre-handshake publisher stil
   const body = extractFunctionBody(src, 'function ackSpeak(envelope, phase, reason)');
   assert.match(body, /if \(!envelope \|\| !envelope\.id\) return;/);
   assert.match(body, /window\.las\.ackSpeak\(envelope\.id,\s*phase,\s*reason\)/);
+});
+
+test('children rows carry each session\'s title; the menu\'s refresh asks the intelligent sessions for one through the backend', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(extractFunctionBody(src, 'function sessionLabel(s)'), /s\.title/);
+  assert.match(extractFunctionBody(src, 'function targetRows()'), /sessionLabel\(/, 'every session row is labeled by sessionLabel (runtime · title)');
+  const render = extractFunctionBody(src, 'function renderChildrenMenu()');
+  assert.match(render, /Refresh descriptions/);
+  assert.match(render, /intelligent !== false/, 'no refresh when only a shell is connected: a shell cannot describe itself');
+  const ask = extractFunctionBody(src, 'async function requestSessionTitles(btn)');
+  assert.match(ask, /window\.las\.requestSessionTitles\(agentName\)/);
+  assert.match(ask, /refreshSessions\(\)/, 'titles arrive asynchronously: re-read the list');
+  assert.match(readSrc('preload.js'), /requestSessionTitles: \(name\) => ipcRenderer\.invoke\('agent:request-session-titles', name\)/);
+  const ipc = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('agent:request-session-titles', async (_event, name) => {");
+  assert.match(ipc, /\/sessions\/titles\/request`/);
+  assert.match(ipc, /method: 'POST'/);
+  assert.match(src, /envelope\.kind === 'title-request'/, 'the request itself never shows in the log');
 });

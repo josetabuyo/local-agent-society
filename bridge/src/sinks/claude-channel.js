@@ -43,7 +43,9 @@ export function instructionsFor(agent) {
     `An event with kind="probe" is a liveness check, not a message: immediately call the "${ACK_TOOL}" tool with its probe_id ` +
     'and say nothing about it. Until that ack, no mailbox message is delivered to this session. ' +
     'An event with kind="cc" is a for-the-record copy of something that went to another session of this agent (its shell, its Codex): ' +
-    'take note of it, do not act on it, do not reply, no closing report.'
+    'take note of it, do not act on it, do not reply, no closing report. ' +
+    'An event with kind="title-request" asks this session to name what it is working on: run the `las agent title` command its text gives, ' +
+    'with a title of about 34 characters, and nothing else — no reply, no closing report, no TTS.'
   );
 }
 
