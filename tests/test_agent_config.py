@@ -42,7 +42,8 @@ def test_merge_config_patch_replaces_top_level_keys_but_merges_sessions_and_its_
     assert merged["sessions"]["runtimes"]["shell"] == {"intelligent": False, "scope": "new"}
     assert merged["sessions"]["runtimes"]["codex"] == {"scope": "x"}
     assert config["sessions"]["target"] == "default", "the input is not mutated"
-    assert merge_config_patch({}, {"sessions": {"cc_default": True}}) == {"sessions": {"cc_default": True}}
+    seeded = merge_config_patch({}, {"sessions": {"cc_default": True}})["sessions"]
+    assert seeded["cc_default"] is True and seeded["target"] == "default" and "runtimes" in seeded, "a first patch seeds the whole section"
 
 
 def test_read_and_write_round_trip_and_a_broken_file_reads_as_empty(tmp_path):
@@ -78,3 +79,11 @@ def test_strict_read_refuses_a_broken_file_but_not_a_missing_one(tmp_path):
     assert accepts_only_commands(descriptor_for(policy, "shell")) is True
     assert accepts_only_commands(descriptor_for(policy, "claude")) is False
     assert accepts_only_commands({"accepts": "command"}) is False
+
+
+def test_the_first_sessions_patch_seeds_the_whole_section_with_its_descriptors():
+    merged = merge_config_patch({"name": "Robo"}, {"sessions": {"target": "shell"}})
+    assert merged["sessions"]["target"] == "shell" and merged["sessions"]["cc_default"] is False
+    assert set(merged["sessions"]["runtimes"]) == {"claude", "codex", "shell"}
+    again = merge_config_patch(merged, {"sessions": {"cc_default": True}})
+    assert again["sessions"]["target"] == "shell", "a later patch merges, it does not reseed"

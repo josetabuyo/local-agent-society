@@ -108,7 +108,10 @@ def merge_config_patch(config: dict, patch: dict) -> dict:
     result = copy.deepcopy(config)
     for key, value in patch.items():
         if key == "sessions" and isinstance(value, dict):
-            current = dict(result.get("sessions") or {})
+            # A file that never had the section gets the whole of it — the
+            # descriptors included — so the agent's file shows, in one
+            # place, what a router can know about its children.
+            current = dict(result["sessions"]) if isinstance(result.get("sessions"), dict) else default_sessions_config()
             for skey, svalue in value.items():
                 if skey == "runtimes" and isinstance(svalue, dict):
                     runtimes = dict(current.get("runtimes") or {})
