@@ -67,3 +67,13 @@ def test_las_claude_still_opens_when_the_backend_only_times_out(monkeypatch, tmp
     assert result.exit_code == 0, result.output
     assert "presence not published" in result.output
     assert calls == [["claude", bridge_mod.CLAUDE_CHANNEL_FLAG, bridge_mod.CLAUDE_CHANNEL_SERVER, "--resume"]]
+
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.fixture(autouse=True)
+def _plain_claude_on_path(monkeypatch):
+    """Assertions name `claude`; which native install this machine has is not what these tests check."""
+    from cli.commands import bridge as _bridge
+    monkeypatch.setattr(_bridge, "claude_bin", lambda: "claude")

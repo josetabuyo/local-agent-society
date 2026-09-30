@@ -17,6 +17,9 @@ echo ""
 # for the retired native implementation.)
 echo "[ 1/5 ] Building Electron widget..."
 ELECTRON_DIR="$INSTALL_DIR/widget-electron"
+# A previous build's dist/ can be left non-empty and locked (a widget still
+# running from it) — electron-builder then dies with ENOTEMPTY. Start clean.
+rm -rf "$ELECTRON_DIR/dist"
 (cd "$ELECTRON_DIR" && npm install --no-audit --no-fund -q && npm run build -q)
 ELECTRON_APP="$ELECTRON_DIR/dist/mac-arm64/Local Agent Society.app"
 if [ ! -d "$ELECTRON_APP" ]; then

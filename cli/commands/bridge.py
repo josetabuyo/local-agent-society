@@ -97,6 +97,22 @@ def _node() -> str:
     raise SystemExit(1)
 
 
+# Where Claude Code's native installer puts `claude`. Preferred over PATH:
+# a shell often reaches the native build through an alias (which exec never
+# sees) while PATH still holds an old npm global whose native binary is
+# missing — on uy-mac that stub failed with "Exec format error" and then
+# "claude native binary not installed", while `claude` typed by hand worked.
+NATIVE_CLAUDE_PATHS = ("~/.local/bin/claude", "~/.claude/local/claude")
+
+
+def claude_bin() -> str:
+    for candidate in NATIVE_CLAUDE_PATHS:
+        path = os.path.expanduser(candidate)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return "claude"
+
+
 def _is_text_script(path: str) -> bool:
     try:
         with open(path, "rb") as f:
@@ -317,7 +333,7 @@ def _launch_claude(args, no_widget=False):
         click.echo("Error: claude not found on PATH.", err=True)
         raise SystemExit(1)
     _chain(_agent_name_from_cwd(), widget=not no_widget)
-    _exec(["claude", CLAUDE_CHANNEL_FLAG, CLAUDE_CHANNEL_SERVER, *args])
+    _exec([claude_bin(), CLAUDE_CHANNEL_FLAG, CLAUDE_CHANNEL_SERVER, *args])
 
 
 class ClaudeGroup(click.Group):

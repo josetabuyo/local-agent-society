@@ -317,3 +317,13 @@ def test_las_codex_runs_in_the_current_directory_not_the_agent_root(monkeypatch,
     monkeypatch.chdir(sub)
     assert CliRunner().invoke(cli, ["codex"]).exit_code == 0
     assert runs == [("Robo", str(sub))]
+
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.fixture(autouse=True)
+def _plain_claude_on_path(monkeypatch):
+    """Assertions name `claude`; which native install this machine has is not what these tests check."""
+    from cli.commands import bridge as _bridge
+    monkeypatch.setattr(_bridge, "claude_bin", lambda: "claude")

@@ -224,3 +224,13 @@ def test_exec_runs_a_script_without_shebang_through_sh_like_a_shell_would(monkey
     monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: str(binary))
     with pytest.raises(SystemExit):
         bridge_mod._exec(["claude"])
+
+
+def test_claude_bin_prefers_the_native_install_over_path(monkeypatch, tmp_path):
+    from cli.commands import bridge as bridge_mod
+    native = tmp_path / "native-claude"
+    native.write_text("#!/bin/sh\n"); native.chmod(0o755)
+    monkeypatch.setattr(bridge_mod, "NATIVE_CLAUDE_PATHS", (str(tmp_path / "missing"), str(native)))
+    assert bridge_mod.claude_bin() == str(native)
+    monkeypatch.setattr(bridge_mod, "NATIVE_CLAUDE_PATHS", (str(tmp_path / "missing"),))
+    assert bridge_mod.claude_bin() == "claude"
