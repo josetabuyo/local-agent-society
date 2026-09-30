@@ -4,7 +4,9 @@ INSTALL_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 echo "Local Agent Society — updating"
 
-git -C "$INSTALL_DIR" pull
+# --no-rebase: a machine with local commits (a fix not pushed yet) merges
+# instead of stopping on "divergent branches"; a real conflict still stops here.
+git -C "$INSTALL_DIR" pull --no-rebase --no-edit
 
 bash "$INSTALL_DIR/stop.sh"
 
