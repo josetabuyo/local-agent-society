@@ -286,6 +286,8 @@ las agent focus <AgentName>
 las status
 ```
 
+**Picking the right terminal of another agent.** When a message is about work one specific session of the recipient is doing, look first: `las agent sessions <Name>` lists its connected sessions with runtime, title (what each is working on) and whether it is intelligent. Send to the one whose title matches with `--session <sid>`; use `--session <runtime>` when one of that kind is enough, and a plain send when it is not about any particular terminal (the recipient's own `sessions.target` then decides). A shell only runs commands — never send it prose. This is local only: `Name@env` reaches the other machine's agent, and its environment picks the session.
+
 Local delivery is **queued, not lost**: every agent has a broker-owned mailbox (MQTT persistent session, `vortexia/PROTOCOL.md` "Mailboxes"). A message sent while the recipient has no session open waits there, in order, one entry per message — nothing overwrites anything (cap 500, TTL 30 days, survives a broker restart). A Claude session gets it live through the LAS channel (`las bridge`); anything else through `las bridge shell|exec|stdout`; `las agent poll` is the manual fallback. Only broadcast is live-only.
 
 ### Hierarchy — subordinates are read from the folders, never declared
