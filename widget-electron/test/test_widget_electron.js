@@ -1131,7 +1131,7 @@ test("widget.js's speak() no longer uses window.speechSynthesis (replaced by loc
 
 test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays back the returned WAV", () => {
   const src = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(src, 'async function speak(text) {');
+  const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
   assert.match(body, /window\.las\.pickVoice\(agentName, locale, window\.las\.ttsVoices\)/);
   assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang\)/);
   assert.match(body, /new Audio\(url\)/);
@@ -1139,8 +1139,8 @@ test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays 
 
 test("widget.js's speak() still respects the mute pref before doing any synthesis work", () => {
   const src = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(src, 'async function speak(text) {');
-  const muteCheck = body.indexOf('if (prefs.mute) return;');
+  const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
+  const muteCheck = body.indexOf('if (prefs.mute) {');
   const synthCall = body.indexOf('window.las.synthesizeSpeech');
   assert.notEqual(muteCheck, -1);
   assert.ok(muteCheck < synthCall, 'mute must be checked before synthesis is attempted');
@@ -1184,4 +1184,58 @@ test('mic press-and-hold (and right-click) opens the target menu and never toggl
   const html = readSrc('renderer', 'index.html');
   assert.match(html, /id="micTarget"/, 'the settings panel offers the same choice');
   assert.match(html, /id="micMenu"/);
+});
+
+// ── speak-queue handshake: never two agents talking at once ────────────────
+// The backend drainer (backend/main.py's _drain_one) publishes ONE speak
+// envelope and blocks until the widget that plays it acks 'done'/'skipped'.
+// Playback lives in this app, so the ack has to come from here — if any of
+// these regress, the queue silently degrades back to publish-as-fast-as-
+// you-can and overlapping voices (heard live 2026-09-28).
+
+test('preload.js exposes ackSpeak for the speak-queue handshake', () => {
+  const src = readSrc('preload.js');
+  assert.match(src, /ackSpeak:\s*\(id,\s*phase,\s*reason\)\s*=>\s*ipcRenderer\.invoke\('queue:ack',\s*id,\s*phase,\s*reason\)/);
+});
+
+test('main.js forwards queue:ack to the backend as POST /queue/ack', () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, "ipcMain.handle('queue:ack'");
+  assert.match(body, /\/queue\/ack/);
+  assert.match(body, /method:\s*'POST'/);
+  assert.match(body, /JSON\.stringify\(\{\s*id,\s*phase,\s*reason/);
+});
+
+test('widget.js claims a speak envelope on receipt (started) and plays it through the local chain', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'window.las.onVortexiaMessage((envelope) => {');
+  const speakBranch = body.slice(body.indexOf("envelope.kind === 'speak'"));
+  assert.match(speakBranch, /ackSpeak\(envelope,\s*'started'\)/,
+    "'started' must go back on receipt — the drainer only waits a short grace for someone to claim a clip");
+  assert.match(speakBranch, /enqueueSpeak\(envelope\.text \|\| '',\s*envelope\)/);
+  assert.doesNotMatch(speakBranch, /[^a-zA-Z]speak\(envelope\.text/,
+    'must go through enqueueSpeak (the per-widget chain), not straight to speak()');
+});
+
+test('widget.js speak() acks done after playback ends and skipped on every path that never plays', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'async function speak(text, envelope)');
+  assert.match(body, /addEventListener\('ended'[\s\S]*?ackSpeak\(envelope,\s*'done'\)/);
+  for (const reason of ['muted', 'no-voice', 'synthesis-ipc-failed', 'synthesis-failed', 'playback-error', 'play-rejected']) {
+    assert.match(body, new RegExp(`ackSpeak\\(envelope,\\s*'skipped',\\s*'${reason}'\\)`), `missing skipped ack for ${reason}`);
+  }
+  assert.match(body, /await new Promise/, 'speak() must resolve only once the clip is over, so the local chain serializes');
+});
+
+test('widget.js plays speak envelopes through a promise chain — one clip at a time per widget', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function enqueueSpeak(text, envelope)');
+  assert.match(body, /speakChain\s*=\s*speakChain\.then\(\(\)\s*=>\s*speak\(text,\s*envelope\)\)/);
+});
+
+test('ackSpeak tolerates envelopes without an id (a pre-handshake publisher still gets played)', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const body = extractFunctionBody(src, 'function ackSpeak(envelope, phase, reason)');
+  assert.match(body, /if \(!envelope \|\| !envelope\.id\) return;/);
+  assert.match(body, /window\.las\.ackSpeak\(envelope\.id,\s*phase,\s*reason\)/);
 });

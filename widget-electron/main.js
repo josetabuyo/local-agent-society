@@ -1357,6 +1357,39 @@ ipcMain.handle('tts:synthesize', async (event, text, voiceId, lang) => {
   }
 });
 
+// ── speak-queue handshake (backend/main.py's _drain_one) ───────────────────
+//
+// The backend's TTS drainer publishes one speak envelope at a time and then
+// BLOCKS until the widget that plays it reports it over: that is what keeps
+// two agents from talking at once, since playback happens in each agent's
+// own widget process where nobody else can hear a clip end. The renderer
+// reports 'started' on receipt, then 'done' after playback (or 'skipped'
+// with a reason when it never played: muted, no voice, synthesis/playback
+// failure). Plain HTTP like every other backend call here. An unreachable
+// backend is not fatal — the drainer's own timeouts then pace the queue.
+ipcMain.handle('queue:ack', async (_event, id, phase, reason) => {
+  const tag = `speak ${String(id).slice(0, 8)}`;
+  try {
+    const res = await fetch(`${REGISTRY_URL}/queue/ack`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, phase, reason: reason || null }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.warn('tts', `${tag} ack ${phase} failed: HTTP ${res.status}`);
+    } else if (json.known === false) {
+      log.warn('tts', `${tag} ack ${phase}: backend no longer tracks it (drainer timed out first?)`);
+    } else {
+      log.info('tts', `${tag} ${phase}${reason ? ` (${reason})` : ''}`);
+    }
+    return { ok: res.ok, ...json };
+  } catch (err) {
+    log.warn('tts', `${tag} ack ${phase} failed: ${err && err.message ? err.message : err}`);
+    return { ok: false, error: String(err) };
+  }
+});
+
 // ── vortexia (MQTT) integration ─────────────────────────────────────────────
 //
 // Done in the MAIN process (Node context), not the renderer: main.js is a

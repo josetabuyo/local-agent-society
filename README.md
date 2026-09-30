@@ -185,6 +185,7 @@ Endpoints below are cross-checked against `app.openapi()['paths']` in `backend/m
 | `POST /queue/speak` | Enqueue TTS `{text, voice, name}` |
 | `GET /queue` | Current queue |
 | `DELETE /queue` | Clear queue |
+| `POST /queue/ack` | Widget → backend: `{id, phase: started\|done\|skipped, reason?}` — the drainer holds the next clip until the current one is reported over |
 | `POST /attribution` | Record a file attribution entry |
 | `GET /attribution` | File attribution log (`?file=` or `?name=`) |
 

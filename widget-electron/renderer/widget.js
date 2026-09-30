@@ -633,27 +633,75 @@ function appendLogEntry(envelope, { speak } = {}) {
 // pickVoice() hashes agents into — same function, same locale-fallback
 // behavior, just a different (better-sounding, and free) voice source.
 
-async function speak(text) {
-  if (prefs.mute) return;
+// Speak-queue handshake (backend/main.py's _drain_one): the backend drainer
+// publishes ONE speak envelope at a time and blocks until this widget says
+// it's over — that is what keeps two agents from talking at once, because
+// playback happens here, in this agent's own process, where no other agent
+// or the backend can hear a clip end. 'started' goes back the moment the
+// envelope is received (see onVortexiaMessage), 'done' once the audio ends,
+// and 'skipped' (+ reason) on every path where nothing plays — the speaker
+// is free either way, and the queue must not sit on the full timeout for a
+// muted widget. Envelopes without an id (a pre-handshake publisher) are
+// simply played with nothing to ack.
+function ackSpeak(envelope, phase, reason) {
+  if (!envelope || !envelope.id) return;
+  window.las.ackSpeak(envelope.id, phase, reason).catch((err) => console.warn('[widget] ackSpeak failed', err));
+}
+
+// Local playback chain: even if two speak envelopes for THIS agent arrive
+// back to back (the backend gate already spaces them, but las/speak is an
+// open topic), they play one after the other, never on top of each other.
+let speakChain = Promise.resolve();
+
+function enqueueSpeak(text, envelope) {
+  speakChain = speakChain.then(() => speak(text, envelope)).catch((err) => console.warn('[widget] speak failed', err));
+  return speakChain;
+}
+
+/** Resolves once the clip has finished playing (or was skipped). */
+async function speak(text, envelope) {
+  if (prefs.mute) {
+    ackSpeak(envelope, 'skipped', 'muted');
+    return;
+  }
   const { voice, warning } = window.las.pickVoice(agentName, locale, window.las.ttsVoices);
   if (warning) console.warn('[widget]', warning);
-  if (!voice) return;
+  if (!voice) {
+    ackSpeak(envelope, 'skipped', 'no-voice');
+    return;
+  }
   let result;
   try {
     result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang);
   } catch (err) {
     console.warn('[widget] synthesizeSpeech IPC failed', err);
+    ackSpeak(envelope, 'skipped', 'synthesis-ipc-failed');
     return;
   }
   if (!result || !result.ok) {
     console.warn('[widget] tts synthesis failed', result && result.error);
+    ackSpeak(envelope, 'skipped', 'synthesis-failed');
     return;
   }
   const url = URL.createObjectURL(new Blob([result.wav], { type: 'audio/wav' }));
   const audioEl = new Audio(url);
-  audioEl.addEventListener('ended', () => URL.revokeObjectURL(url));
-  audioEl.addEventListener('error', () => URL.revokeObjectURL(url));
-  audioEl.play().catch((err) => console.warn('[widget] audio playback failed', err));
+  await new Promise((resolve) => {
+    audioEl.addEventListener('ended', () => {
+      URL.revokeObjectURL(url);
+      ackSpeak(envelope, 'done');
+      resolve();
+    });
+    audioEl.addEventListener('error', () => {
+      URL.revokeObjectURL(url);
+      ackSpeak(envelope, 'skipped', 'playback-error');
+      resolve();
+    });
+    audioEl.play().catch((err) => {
+      console.warn('[widget] audio playback failed', err);
+      ackSpeak(envelope, 'skipped', 'play-rejected');
+      resolve();
+    });
+  });
 }
 
 // Set by runMicSelfTest() while it's waiting for the live session's "OK"
@@ -682,7 +730,10 @@ window.las.onVortexiaMessage((envelope) => {
   }
   if (envelope && envelope.kind === 'speak') {
     appendLogEntry(envelope, { speak: true });
-    speak(envelope.text || '');
+    // Claim it right away — the backend drainer only waits a short grace
+    // period for SOMEONE to pick a clip up, then the long playback timeout.
+    ackSpeak(envelope, 'started');
+    enqueueSpeak(envelope.text || '', envelope);
     if (
       pendingMicSelfTestResolve &&
       envelope.to === agentName &&

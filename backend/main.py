@@ -17,6 +17,7 @@ import threading
 import time
 import random
 import socket
+import uuid
 from pathlib import Path
 from datetime import datetime
 
@@ -185,35 +186,100 @@ def _vortexia_poll_inbox(name: str, timeout: float = 2.0) -> list[dict]:
 
 
 # ── TTS drainer (background thread) ──────────────────────────────────────────
+#
+# The queue only keeps voices from colliding if draining it is paced by
+# actual PLAYBACK, not by publish speed. Playback happens inside each agent's
+# own Electron widget (one process per agent — see widget-electron/main.js's
+# userData scoping), so nothing in this process can hear a clip end: the
+# widget has to say so. Every speak envelope therefore carries an `id`, and
+# the widget that picks it up acks it back over POST /queue/ack in phases:
+#
+#   started — "a widget has this one" (sent on receipt, before synthesis)
+#   done    — playback finished
+#   skipped — muted / no voice / synthesis or playback failed: the speaker is
+#             free now, same as done
+#
+# _drain_one() publishes ONE envelope and then blocks until done/skipped
+# before it touches the next queue entry — that is the whole serialization.
+# Two safety valves keep one absent widget from stalling everyone else's
+# speech: if nobody claims the message within SPEAK_PICKUP_GRACE_S (widget
+# closed, a stale pre-handshake build, vortexia down) the drainer logs it
+# and moves on at once; and once claimed, a per-message ceiling scaled by
+# text length (capped at SPEAK_MAX_WAIT_S) covers a widget that died
+# mid-clip.
+#
+# Before this handshake the loop popped and published as fast as it could,
+# so N agents reporting in the same second produced N overlapping voices —
+# the exact failure this queue exists to prevent (heard live 2026-09-28:
+# four clips synthesized within 2s, see session/widget.log).
 
-def tts_drainer():
-    while True:
-        with _queue_lock:
-            queue = load_json(QUEUE_FILE, [])
-            msg = queue.pop(0) if queue else None
-            if msg is not None:
-                save_json(QUEUE_FILE, queue)
-        if msg is None:
-            time.sleep(0.4)
-            continue
-        name = msg.get("name", "")
-        with _muted_lock:
-            muted = load_json(MUTED_FILE, [])
-        if name in muted:
-            continue
-        voice = msg.get("voice", "Samantha")
-        text  = msg.get("text", "")
-        if voice not in NICE_VOICE_NAMES:
-            print(f"[tts] skipping unknown voice {voice!r} for {name!r}", flush=True)
-            continue
-        if not text:
-            continue
-        # Publish to vortexia instead of shelling out to `say`. Whichever
-        # Electron widget is running for `name` picks this up off las/speak
-        # and does the actual TTS playback (Web Speech API) — see the note
-        # appended to vortexia/PROTOCOL.md. Nothing currently produces sound
-        # from this path until that widget exists.
+SPEAK_PICKUP_GRACE_S    = 2.0    # nobody claimed it → skip, don't stall the queue
+SPEAK_MAX_WAIT_S        = 180.0  # absolute ceiling per clip once claimed
+SPEAK_SYNTH_HEADROOM_S  = 15.0   # Kokoro synthesis usually 2–10s, occasionally far more
+SPEAK_SECONDS_PER_CHAR  = 1 / 12 # ~12 spoken chars per second
+SPEAK_GAP_S             = 0.3    # breath between two consecutive clips
+
+_speak_acks_lock = threading.Lock()
+_speak_acks: dict[str, dict] = {}   # speak id → {"started": Event, "done": Event, "name": str}
+
+
+def _speak_timeout_for(text: str) -> float:
+    return min(SPEAK_MAX_WAIT_S, SPEAK_SYNTH_HEADROOM_S + len(text) * SPEAK_SECONDS_PER_CHAR)
+
+
+def _pop_speak_request():
+    with _queue_lock:
+        queue = load_json(QUEUE_FILE, [])
+        msg = queue.pop(0) if queue else None
+        if msg is not None:
+            save_json(QUEUE_FILE, queue)
+    return msg
+
+
+def _ack_speak(speak_id: str, phase: str) -> bool:
+    """Record a widget's progress on one in-flight speak request. Returns
+    False when the id isn't being tracked (already timed out, or it came
+    from a previous backend process)."""
+    with _speak_acks_lock:
+        pending = _speak_acks.get(speak_id)
+    if pending is None:
+        return False
+    pending["started"].set()
+    if phase != "started":   # done | skipped — either way the speaker is free
+        pending["done"].set()
+    return True
+
+
+def _drain_one() -> bool:
+    """Pop one speak request, publish it, and block until its widget reports
+    playback over (or a safety valve fires). Returns False when the queue was
+    empty, so the caller can sleep instead of spinning."""
+    msg = _pop_speak_request()
+    if msg is None:
+        return False
+    name = msg.get("name", "")
+    with _muted_lock:
+        muted = load_json(MUTED_FILE, [])
+    if name in muted:
+        return True
+    voice = msg.get("voice", "Samantha")
+    text  = msg.get("text", "")
+    if voice not in NICE_VOICE_NAMES:
+        print(f"[tts] skipping unknown voice {voice!r} for {name!r}", flush=True)
+        return True
+    if not text:
+        return True
+
+    speak_id = uuid.uuid4().hex
+    pending = {"started": threading.Event(), "done": threading.Event(), "name": name}
+    with _speak_acks_lock:
+        _speak_acks[speak_id] = pending
+    try:
+        # Published to vortexia instead of shelling out to `say`: the Electron
+        # widget running for `name` picks this up off las/speak, synthesizes
+        # (backend /tts/synthesize, Kokoro) and plays it — then acks (above).
         envelope = {
+            "id": speak_id,
             "from": "queue",
             "to": name,
             "source": "system",
@@ -222,7 +288,36 @@ def tts_drainer():
             "voice": voice,
             "ts": int(time.time() * 1000),
         }
-        _vortexia_publish(SPEAK_TOPIC, envelope)
+        if not _vortexia_publish(SPEAK_TOPIC, envelope):
+            return True
+        if not pending["started"].wait(SPEAK_PICKUP_GRACE_S):
+            logger.warning(
+                f"[tts] no widget picked up speak {speak_id[:8]} for {name!r} "
+                f"within {SPEAK_PICKUP_GRACE_S}s — moving on"
+            )
+            return True
+        timeout = _speak_timeout_for(text)
+        if not pending["done"].wait(timeout):
+            logger.warning(
+                f"[tts] widget for {name!r} never reported speak {speak_id[:8]} "
+                f"done after {timeout:.0f}s — moving on"
+            )
+        time.sleep(SPEAK_GAP_S)
+        return True
+    finally:
+        with _speak_acks_lock:
+            _speak_acks.pop(speak_id, None)
+
+
+def tts_drainer():
+    while True:
+        try:
+            busy = _drain_one()
+        except Exception as exc:
+            logger.error(f"[tts] drainer iteration failed: {exc}")
+            busy = False
+        if not busy:
+            time.sleep(0.4)
 
 
 threading.Thread(target=tts_drainer, daemon=True).start()
@@ -259,6 +354,13 @@ class SpeakRequest(BaseModel):
     text:   str = Field(max_length=10000)
     voice:  str
     name:   str
+
+
+class SpeakAckRequest(BaseModel):
+    """A widget reporting progress on one speak envelope — see _drain_one()."""
+    id:     str = Field(min_length=1, max_length=64)
+    phase:  str = Field(pattern=r"^(started|done|skipped)$")
+    reason: Optional[str] = Field(default=None, max_length=200)
 
 
 class AttributionEntry(BaseModel):
@@ -724,6 +826,17 @@ def enqueue_speak(req: SpeakRequest):
         save_json(QUEUE_FILE, queue)
         length = len(queue)
     return {"ok": True, "queue_length": length}
+
+
+@app.post("/queue/ack")
+def ack_speak(req: SpeakAckRequest):
+    """The widget playing a speak envelope reports `started`, then `done` (or
+    `skipped` with a reason). `known: false` means the drainer had already
+    given up on that id — harmless, the ack is just late."""
+    known = _ack_speak(req.id, req.phase)
+    if req.phase == "skipped":
+        logger.info(f"[tts] speak {req.id[:8]} skipped by widget: {req.reason or 'no reason given'}")
+    return {"ok": True, "known": known}
 
 
 @app.get("/queue")

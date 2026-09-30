@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('las', {
    * {ok:true, wav: ArrayBuffer} or {ok:false, error}. */
   synthesizeSpeech: (text, voiceId, lang) => ipcRenderer.invoke('tts:synthesize', text, voiceId, lang),
 
+  /** Speak-queue handshake: report one speak envelope's progress back to the
+   * backend drainer (POST /queue/ack) so the NEXT agent's clip is held until
+   * this one is over. phase: 'started' | 'done' | 'skipped' (+ reason). */
+  ackSpeak: (id, phase, reason) => ipcRenderer.invoke('queue:ack', id, phase, reason),
+
   /** Progress pushes during synthesizeSpeech (model download/load vs.
    * inference), same shape as onAudioStatus below.
    * @param {(status: {state:string, progress?:number, file?:string}) => void} cb */
