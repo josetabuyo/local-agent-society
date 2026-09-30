@@ -160,6 +160,18 @@ fi
 # only catches output from before that initializes, or a hard crash.
 mkdir -p "$INSTALL_DIR/backend/logs"
 PLIST=~/Library/LaunchAgents/com.localagent.system.plist
+# This machine's federation identity (VORTEXIA_ENV_NAME) lives only here, in
+# the plist — never in a checked-in file (see backend/serve.sh). Rewriting
+# the plist used to drop it, silently turning cross-machine sends off after
+# every `las update` (uy-mac, 2026-09-30). Keep it: from vortexia's own
+# machine config first, else from the plist being replaced.
+VORTEXIA_ENV_FILE="$( cd "$INSTALL_DIR/.." && pwd )/vortexia/vortexia.env"
+ENV_NAME=""
+[ -f "$VORTEXIA_ENV_FILE" ] && ENV_NAME=$(grep -E '^VORTEXIA_ENV_NAME=' "$VORTEXIA_ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')
+[ -z "$ENV_NAME" ] && [ -f "$PLIST" ] && ENV_NAME=$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:VORTEXIA_ENV_NAME" "$PLIST" 2>/dev/null || true)
+ENV_NAME_XML=""
+[ -n "$ENV_NAME" ] && ENV_NAME_XML="        <key>VORTEXIA_ENV_NAME</key>
+        <string>$ENV_NAME</string>"
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -175,6 +187,7 @@ cat > "$PLIST" <<PLIST
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+$ENV_NAME_XML
     </dict>
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key>
