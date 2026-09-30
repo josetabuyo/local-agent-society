@@ -192,3 +192,35 @@ def test_plain_send_to_an_agent_with_several_sessions_lists_them(monkeypatch):
     assert "Robo has 2 sessions" in out and '"API review"' in out and "[commands only]" in out
     picked = CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "--session", "codex", "hi", "--from", "Me"]).output
     assert "has 2 sessions" not in picked, "a sender that already picked is not lectured"
+
+
+def test_exec_runs_a_script_without_shebang_through_sh_like_a_shell_would(monkeypatch, tmp_path):
+    import errno
+    from cli.commands import bridge as bridge_mod
+    script = tmp_path / "claude"
+    script.write_text("echo hi\n")
+    calls = []
+
+    def fake_execvp(prog, argv):
+        raise OSError(errno.ENOEXEC, "Exec format error")
+
+    monkeypatch.setattr(bridge_mod.os, "execvp", fake_execvp)
+    class Replaced(Exception):
+        pass
+
+    def fake_execv(prog, argv):  # a real execv never returns
+        calls.append((prog, argv))
+        raise Replaced
+
+    monkeypatch.setattr(bridge_mod.os, "execv", fake_execv)
+    monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: str(script))
+    import pytest
+    with pytest.raises(Replaced):
+        bridge_mod._exec(["claude", "--flag"])
+    assert calls == [("/bin/sh", ["/bin/sh", str(script), "--flag"])]
+
+    binary = tmp_path / "bad"
+    binary.write_bytes(b"\xcf\xfa\xed\xfe\0\0\0\0")
+    monkeypatch.setattr(bridge_mod.shutil, "which", lambda name: str(binary))
+    with pytest.raises(SystemExit):
+        bridge_mod._exec(["claude"])

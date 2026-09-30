@@ -26,6 +26,7 @@ Sinks (the low-level `las bridge <sink>` form):
   exec     run any command per message — Codex, a local model, a router —
            with the text on stdin, and send its output back to the sender
 """
+import errno
 import json
 import os
 import shutil
@@ -96,10 +97,36 @@ def _node() -> str:
     raise SystemExit(1)
 
 
+def _is_text_script(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            head = f.read(512)
+    except OSError:
+        return False
+    return bool(head) and b"\0" not in head
+
+
 def _exec(argv):
     """Replace this process — the bridge owns stdio from here on (for the
-    claude sink stdout IS the MCP wire)."""
-    os.execvp(argv[0], argv)
+    claude sink stdout IS the MCP wire).
+
+    A shell runs a script that has no `#!` line with /bin/sh; execvp does
+    not, it fails with ENOEXEC ("Exec format error") — seen with a `claude`
+    wrapper on uy-mac that worked typed by hand. Do what the shell does. A
+    binary the kernel still refuses (wrong architecture, truncated) gets a
+    clear message instead of a traceback.
+    """
+    try:
+        os.execvp(argv[0], argv)
+    except OSError as exc:
+        if exc.errno != errno.ENOEXEC:
+            raise
+        path = shutil.which(argv[0]) or argv[0]
+        if _is_text_script(path):
+            os.execv("/bin/sh", ["/bin/sh", path, *argv[1:]])
+        click.echo(f"Error: {path} is not a runnable program on this Mac (Exec format error) — "
+                   f"check `file {path}`; reinstall it if it is for another architecture or truncated.", err=True)
+        raise SystemExit(1)
 
 
 def bridge_argv(sink: str, name: str, extra=()) -> list:
