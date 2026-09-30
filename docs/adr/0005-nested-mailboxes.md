@@ -210,3 +210,22 @@ label.
   starts and to answer a request silently (no reply, no TTS, no report).
 - The "Copy last-used session" toggle left the children menu (it stays in
   settings and as `las agent target --cc`); the refresh button took its row.
+
+## Addendum (2026-09-30) — Vortexia's answers wired in (vortexia 7795362)
+
+- **Dead session mailboxes are dropped.** `DELETE /sessions/<sid>` publishes
+  `{clientId, id, force: true}` to `vortexia/control/mailbox/drop` (the
+  bridge says it is leaving, and may still be connected for a moment); a
+  session pruned for a dead pid is dropped without `force`, so a consumer
+  that did reconnect keeps its queue. Closes the leak flagged above.
+- **Sessions across machines.** The address `Name[@env][/<sid>|/<runtime>|/*]`
+  is agreed: vortex-relay routes on `Name@env` and hands the rest over as
+  `envelope.session` on the agent inbox. The default session's bridge
+  (`handleAgentMailbox`) forwards such a message to the named session via
+  `POST /agents/send`; if that session is not connected, it delivers the
+  message itself. `las agent send --to X@env --session S` builds the address.
+- **Society map.** `GET /sessions` and `las agent sessions --all`; the send
+  answer carries the recipient's sessions so a sender learns its options.
+- LAS never UNSUBSCRIBEs an inbox (bridge and widget close with `end()` /
+  `close()`), so the 2026-09-28 deaf-mailbox trigger was not ours; the
+  broker now guards against it either way.

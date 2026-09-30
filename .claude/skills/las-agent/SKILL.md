@@ -296,7 +296,7 @@ las status
 
 **Answering as the recipient.** When a message reached you without naming a session and your agent has more than one open, first give the useful answer; then, in the same reply, add one line listing your other sessions (runtime + title, from `las agent sessions`) so the sender can decide whether to keep talking to you here or address the terminal that owns that work. One line, only when there is more than one session, never on housekeeping (probes, cc, title requests).
 
-This is local only: `Name@env` reaches the other machine's agent, and its environment picks the session.
+Another machine works too: `las agent send --to Name@env --session codex` travels as `Name@env/codex` and is resolved over there, by that environment (unknown or closed session → it lands on the agent's default one, never lost). `las agent sessions --all` only maps this machine.
 
 Local delivery is **queued, not lost**: every agent has a broker-owned mailbox (MQTT persistent session, `vortexia/PROTOCOL.md` "Mailboxes"). A message sent while the recipient has no session open waits there, in order, one entry per message — nothing overwrites anything (cap 500, TTL 30 days, survives a broker restart). A Claude session gets it live through the LAS channel (`las bridge`); anything else through `las bridge shell|exec|stdout`; `las agent poll` is the manual fallback. Only broadcast is live-only.
 

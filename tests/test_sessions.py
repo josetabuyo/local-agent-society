@@ -301,3 +301,15 @@ def test_society_map_lists_every_agent_with_live_sessions(app):
     assert set(view) == {"Robo", "Other"}
     assert [s["sid"] for s in view["Other"]["sessions"]] == ["codex-9"], "dead processes pruned"
     assert view["Robo"]["target"] == "default"
+
+
+def test_a_gone_session_has_its_broker_mailbox_dropped(app):
+    main, client = app
+    _register(client, "claude-1", "claude")
+    _register(client, "codex-1", "codex", pid=999)   # dead process: pruned on the next read
+    main.published.clear()
+    client.get("/agents/Robo/sessions")
+    client.delete("/agents/Robo/sessions/claude-1")
+    drops = [e for t, e, _ in main.published if t == "vortexia/control/mailbox/drop"]
+    assert {(d["clientId"], d["force"]) for d in drops} == {("las-agent-Robo-codex-1", False), ("las-agent-Robo-claude-1", True)}
+    assert all(d["id"] for d in drops)

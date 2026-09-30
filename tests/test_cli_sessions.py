@@ -173,3 +173,22 @@ def test_send_command_marks_the_kind(monkeypatch):
     _, posts = _spy(monkeypatch, {})
     assert CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "--session", "claude", "--command", "make test", "--from", "Me"]).exit_code == 0
     assert posts[0][1]["kind"] == "command" and posts[0][1]["session"] == "claude"
+
+
+def test_send_to_another_machine_puts_the_session_in_the_address(monkeypatch):
+    gets, posts = _spy(monkeypatch, {})
+    runner = CliRunner()
+    assert runner.invoke(cli, ["agent", "send", "--to", "Robo@uy-mac", "--session", "codex", "hi", "--from", "Me"]).exit_code == 0
+    assert runner.invoke(cli, ["agent", "send", "--to", "Robo@uy-mac", "--all-sessions", "hi", "--from", "Me"]).exit_code == 0
+    assert posts[0][1]["to"] == "Robo@uy-mac/codex" and "session" not in posts[0][1]
+    assert posts[1][1]["to"] == "Robo@uy-mac/*" and "all_sessions" not in posts[1][1]
+
+
+def test_plain_send_to_an_agent_with_several_sessions_lists_them(monkeypatch):
+    view = {"sessions": [{"sid": "codex-1", "runtime": "codex", "title": "API review", "default": True},
+                         {"sid": "shell-1", "runtime": "shell", "title": "", "intelligent": False}]}
+    _spy(monkeypatch, view)
+    out = CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "hi", "--from", "Me"]).output
+    assert "Robo has 2 sessions" in out and '"API review"' in out and "[commands only]" in out
+    picked = CliRunner().invoke(cli, ["agent", "send", "--to", "Robo", "--session", "codex", "hi", "--from", "Me"]).output
+    assert "has 2 sessions" not in picked, "a sender that already picked is not lectured"

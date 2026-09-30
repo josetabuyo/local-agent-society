@@ -65,6 +65,35 @@ export class SessionRegistry {
   unregister() {
     return this._call('DELETE', `/sessions/${encodeURIComponent(this.sid)}`);
   }
+
+  /** Is `selector` (a sid, a runtime or "*") this very session? */
+  isMe(selector) {
+    return selector === this.sid || selector === this.runtime;
+  }
+
+  /**
+   * Re-route a message that reached the AGENT mailbox addressed to one of
+   * its sessions — `Name@env/<sid|runtime|*>` crossing vortex-relay arrives
+   * as envelope.session and only this environment can resolve it
+   * (vortexia/PROTOCOL.md). Resolves true when the backend delivered it.
+   */
+  async forward(envelope, selector) {
+    try {
+      const res = await this.fetchImpl(`${this.registryUrl}/agents/send`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: envelope.text, to: this.agent, from_agent: envelope.from, source: envelope.source,
+          ...(selector === '*' ? { all_sessions: true } : { session: selector }),
+          ...(envelope.kind && envelope.kind !== 'message' ? { kind: envelope.kind } : {}),
+        }),
+      });
+      return res.ok;
+    } catch (err) {
+      this.log(`${this.agent}: forward to session ${selector} failed (${err && err.message ? err.message : err})`);
+      return false;
+    }
+  }
 }
 
 /** Watches the retained default-session topic; emits 'default' with the sid (or null) on every change. */

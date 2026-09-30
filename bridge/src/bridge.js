@@ -44,11 +44,12 @@ export class Bridge {
     }
     this.status?.update({ armed: true });
     const deliver = (envelope) => this.handle(envelope);
+    const deliverAgent = (envelope) => this.handleAgentMailbox(envelope);
     if (this.session && this.sessionSource && this.defaultWatcher) {
       // Session mode: own inbox first, then announce ourselves (which makes
       // us the default) and let the watcher decide about the agent mailbox.
       await this.sessionSource.start(deliver);
-      this.defaultWatcher.on('default', (sid) => this._onDefault(sid, deliver));
+      this.defaultWatcher.on('default', (sid) => this._onDefault(sid, deliverAgent));
       await this.defaultWatcher.start();
       const view = await this.session.register();
       this.status?.update({ sid: this.session.sid, runtime: this.session.runtime, registered: Boolean(view) });
@@ -56,7 +57,7 @@ export class Bridge {
         // Backend down: nobody can elect a default, so behave like the old
         // single-consumer bridge and hold the agent mailbox ourselves.
         this.log(`${this.agent}: backend unreachable — holding the agent mailbox without a default election`);
-        this._onDefault(this.session.sid, deliver);
+        this._onDefault(this.session.sid, deliverAgent);
       }
       return this;
     }
@@ -86,6 +87,25 @@ export class Bridge {
       this.log(`${this.agent}: another session (${sid || 'none'}) is the default — releasing the agent mailbox`);
       this.source.stop().catch(() => {});
     }
+  }
+
+  /**
+   * The agent mailbox (held by the default session) may carry a message
+   * addressed to ANOTHER session of this agent: `Name@env/<sid|runtime|*>`
+   * from another machine lands here with `session` set. Hand it to that
+   * session through the backend; if it is not connected, keep it here —
+   * delivered somewhere beats dropped.
+   */
+  async handleAgentMailbox(raw) {
+    const selector = raw && typeof raw.session === 'string' && raw.session ? raw.session : null;
+    if (selector && this.session && typeof this.session.forward === 'function' && !this.session.isMe(selector)) {
+      if (await this.session.forward(normalize(raw), selector)) {
+        this.log(`${this.agent}: message for session ${selector} forwarded`);
+        return { handledBy: 'forward' };
+      }
+      this.log(`${this.agent}: session ${selector} not reachable — delivering here`);
+    }
+    return this.handle(raw);
   }
 
   async handle(raw) {

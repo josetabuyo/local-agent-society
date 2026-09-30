@@ -328,7 +328,12 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
             raise SystemExit(1)
         return
 
-    if to:
+    if to and "@" in to and (session or all_sessions):
+        # Another machine: the session travels in the address
+        # (Name@env/<sid|runtime|*>, vortexia/PROTOCOL.md) and is resolved
+        # there, by the recipient's own environment.
+        payload["to"] = f"{to}/{session or '*'}"
+    elif to:
         payload["to"] = to
         if session:
             payload["session"] = session

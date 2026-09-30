@@ -127,3 +127,32 @@ test('a title-request is delivered but is not activity: it never makes this sess
   await bridge.handle({ from: 'X', text: 'real work' });
   assert.deepEqual(touched, ['touch']);
 });
+
+test('a message on the agent mailbox addressed to another session (Name@env/<sid>) is forwarded; to this one or unreachable, delivered here', async () => {
+  const forwarded = [];
+  const delivered = [];
+  let reachable = true;
+  const registry = { sid: 'claude-1', runtime: 'claude', register: async () => null, touch: async () => null, unregister: async () => null,
+    isMe: (sel) => sel === 'claude-1' || sel === 'claude',
+    forward: async (env, sel) => (forwarded.push([sel, env.text]), reachable) };
+  const bridge = new Bridge({ agent: 'Robo', source: fakeSource('agent', []), session: registry, pipeline: new Pipeline([]), sink: { deliver: async (ctx) => delivered.push(ctx.envelope.text) } });
+  assert.deepEqual(await bridge.handleAgentMailbox({ from: 'X@uy', text: 'for codex', session: 'codex' }), { handledBy: 'forward' });
+  await bridge.handleAgentMailbox({ from: 'X@uy', text: 'for me', session: 'claude' });
+  await bridge.handleAgentMailbox({ from: 'X@uy', text: 'plain' });
+  reachable = false;
+  await bridge.handleAgentMailbox({ from: 'X@uy', text: 'shell is closed', session: 'shell' });
+  assert.deepEqual(forwarded, [['codex', 'for codex'], ['shell', 'shell is closed']]);
+  assert.deepEqual(delivered, ['for me', 'plain', 'shell is closed']);
+});
+
+test('SessionRegistry.forward posts to /agents/send with the selector (all sessions for "*")', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => (calls.push([url, JSON.parse(init.body)]), { ok: true, json: async () => ({}) });
+  const reg = new SessionRegistry({ agent: 'Robo', sid: 'claude-1', runtime: 'claude', fetchImpl, registryUrl: 'http://b' });
+  assert.equal(await reg.forward({ text: 'hi', from: 'X@uy', source: 'agent', kind: 'message' }, 'codex'), true);
+  await reg.forward({ text: 'all', from: 'X@uy', source: 'agent', kind: 'command' }, '*');
+  assert.deepEqual(calls[0], ['http://b/agents/send', { message: 'hi', to: 'Robo', from_agent: 'X@uy', source: 'agent', session: 'codex' }]);
+  assert.deepEqual(calls[1][1], { message: 'all', to: 'Robo', from_agent: 'X@uy', source: 'agent', all_sessions: true, kind: 'command' });
+  assert.equal(reg.isMe('claude'), true);
+  assert.equal(reg.isMe('codex'), false);
+});

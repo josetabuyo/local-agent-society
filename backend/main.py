@@ -596,6 +596,22 @@ def _pid_alive(pid) -> bool:
         return False
 
 
+MAILBOX_DROP_TOPIC = "vortexia/control/mailbox/drop"
+
+
+def _drop_session_mailbox(name: str, sid: str, *, force: bool) -> bool:
+    """Ask the broker to drop a gone session's persistent mailbox (vortexia/PROTOCOL.md "Dropping a mailbox").
+
+    Without this, every closed terminal left its queue behind until the
+    30-day TTL. Fire-and-forget: the answer comes on .../drop/result and
+    nothing here depends on it. `force` only when the session itself said it
+    is leaving (its bridge may still be connected for a moment); a pruned
+    dead process never forces — if something reconnected, the broker keeps it.
+    """
+    client_id = vx.session_mailbox_client_id(name, sid)
+    return _vortexia_publish(MAILBOX_DROP_TOPIC, {"clientId": client_id, "id": f"drop-{client_id}-{int(time.time() * 1000)}", "force": force})
+
+
 def _load_sessions(name: str) -> dict:
     """{sid: session}, pruned of dead processes (caller holds _sessions_lock)."""
     all_sessions = load_json(SESSIONS_FILE, {})
@@ -604,6 +620,8 @@ def _load_sessions(name: str) -> dict:
     if live != sessions:
         all_sessions[name] = live
         save_json(SESSIONS_FILE, all_sessions)
+        for sid in set(sessions) - set(live):
+            _drop_session_mailbox(name, sid, force=False)
     return live
 
 
@@ -810,6 +828,8 @@ def unregister_session(name: str, sid: str):
         sessions = _load_sessions(name)
         removed = sessions.pop(sid, None) is not None
         _save_sessions(name, sessions)
+        if removed:
+            _drop_session_mailbox(name, sid, force=True)
         published = _publish_default_session(name, sessions)
         view = _sessions_view(name, sessions)
     return {"ok": True, "removed": removed, "published": published, **view}
