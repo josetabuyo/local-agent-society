@@ -76,9 +76,11 @@
       </div>
     </div>
 
-    <!-- "Open" button press-and-hold menu: both actions in order, the top
-         one is what a plain click runs. Small inline popover (fixed above
-         the button bar), not a full-window overlay — no expand needed. -->
+    <!-- Drawers: settings above, the Open menu and the children menu below —
+         one inline panel at a time in normal flow under the button bar; the
+         window grows down to fit it (widget.js's openDrawer/fitWindowToDrawer).
+         "Open" menu: both actions in order, the top one is what a plain
+         click runs. -->
     <div id="openMenu" class="open-menu hidden"></div>
     <!-- Children menu: which connected session (this agent's children) the
          mic talks to — the agent's own sessions.target in .las-agent.json. -->

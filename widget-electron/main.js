@@ -620,16 +620,13 @@ ipcMain.on('window:resize-by', (event, dw, dh) => {
   });
 });
 
-// Auto-expand for overlay panels (settings):
-// those panels are `position: fixed; width:100vw; height:100vh` (see
-// widget.css .settings), so they're only as big as the compact widget
-// window (300x160 by default) unless the window itself grows to fit them.
-// The renderer calls setExpanded(true) whenever it shows one of those
-// panels and setExpanded(false) when it returns to the compact face; this
-// is idempotent (each state remembers whether it's already applied) so
-// switching between two overlay panels without fully closing doesn't
-// re-trigger a resize or lose the remembered compact size.
-const EXPANDED_WIDTH = 340;
+// Drawers (settings, the Open menu, the children menu) are inline panels
+// in normal flow below the button bar — never popovers, never overlays —
+// so showing one means the window itself must get taller by the drawer's
+// height. The renderer measures the drawer and calls setExpanded(true,
+// totalHeight); setExpanded(false) restores the compact bounds remembered
+// on the first expand. Re-fitting while already expanded is allowed (a
+// drawer re-rendered taller, or one drawer replaced another).
 const EXPANDED_HEIGHT = 460;
 /** @type {WeakMap<BrowserWindow, {x:number,y:number,width:number,height:number}>} */
 const collapsedBounds = new WeakMap();
@@ -639,12 +636,18 @@ const expandedWindows = new WeakSet();
 ipcMain.on('window:set-expanded', (event, expanded, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isDestroyed()) return;
-  if (expanded && !expandedWindows.has(win)) {
-    collapsedBounds.set(win, win.getBounds());
-    expandedWindows.add(win);
+  if (expanded) {
+    // Grow DOWN only: same x/y/width, taller. The compact bounds are
+    // remembered once, on the first expand; a later call while already
+    // expanded just re-fits the height (a drawer re-rendered, or another
+    // drawer replaced it) — see widget.js's fitWindowToDrawer.
+    if (!expandedWindows.has(win)) {
+      collapsedBounds.set(win, win.getBounds());
+      expandedWindows.add(win);
+    }
     const b = win.getBounds();
-    win.setBounds({ x: b.x, y: b.y, width: EXPANDED_WIDTH, height: height || EXPANDED_HEIGHT });
-  } else if (!expanded && expandedWindows.has(win)) {
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height: height || EXPANDED_HEIGHT });
+  } else if (expandedWindows.has(win)) {
     expandedWindows.delete(win);
     const prev = collapsedBounds.get(win);
     if (prev) win.setBounds(prev);

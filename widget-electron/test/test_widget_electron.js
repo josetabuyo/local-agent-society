@@ -515,12 +515,62 @@ test('preload.js exposes setExpanded on window.las', () => {
   assert.match(src, /setExpanded\s*:/);
 });
 
-test('gear button toggles settings mode, which expands the window open and shrinks it back closed', () => {
+test('gear button toggles settings mode: the settings drawer opens/closes and the gear shows pressed', () => {
   const src = readSrc('renderer', 'widget.js');
   assert.match(src, /gearEl\.addEventListener\('click',\s*\(\)\s*=>\s*setSettingsOpen\(!settingsOpen\)\)/);
-  const body = extractFunctionBody(src, 'function setSettingsOpen(open) {');
-  assert.match(body, /window\.las\.setExpanded\(open,\s*SETTINGS_HEIGHT\)/, 'must pass open through, covering both the expand and the shrink-back-closed path');
+  const body = extractFunctionBody(src, 'function setSettingsOpen(open, fromDrawer = false) {');
+  assert.match(body, /openDrawer\('settings'\)/);
+  assert.match(body, /closeDrawer\('settings'\)/);
   assert.match(body, /gearEl\.classList\.toggle\('active', open\)/, "gear must visually show 'pressed' while settings is open");
+});
+
+// ── drawers: one inline panel below the buttons, the window grows DOWN ────
+// Per explicit request: no popovers floating over the log (unreadable on a
+// translucent face), no separate settings UI — settings, the Open menu and
+// the children menu are the same kind of thing, a drawer under the button
+// bar, and the widget resizes itself down to show it.
+
+test('settings, Open and children are drawers of one controller; exactly one open at a time', () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /registerDrawer\('settings',\s*settingsEl/);
+  assert.match(src, /registerDrawer\('open',\s*openMenuEl/);
+  assert.match(src, /registerDrawer\('children',\s*childrenMenuEl/);
+  const open = extractFunctionBody(src, 'function openDrawer(name) {');
+  assert.match(open, /activeDrawer && activeDrawer !== name/, 'opening one closes the other');
+  assert.match(open, /compactHeight = window\.innerHeight/, 'remembers the compact height before the first drawer');
+  assert.match(extractFunctionBody(src, 'async function showChildrenMenu()'), /openDrawer\('children'\)/);
+  assert.match(extractFunctionBody(src, 'async function showOpenMenu()'), /openDrawer\('open'\)/);
+  assert.match(extractFunctionBody(src, 'function closeChildrenMenu()'), /closeDrawer\('children'\)/);
+  assert.match(extractFunctionBody(src, 'function closeOpenMenu()'), /closeDrawer\('open'\)/);
+});
+
+test('a drawer grows the window by its own measured height and shrinks it back on close; re-renders re-fit', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const fit = extractFunctionBody(src, 'function fitWindowToDrawer() {');
+  assert.match(fit, /window\.las\.setExpanded\(true,\s*compactHeight \+ el\.offsetHeight \+ DRAWER_GAP_PX\)/);
+  const close = extractFunctionBody(src, 'function closeDrawer(name) {');
+  assert.match(close, /window\.las\.setExpanded\(false\)/);
+  assert.match(extractFunctionBody(src, 'async function moveOpenAction(from, to)'), /fitWindowToDrawer\(\)/, 'reordering re-renders the Open menu');
+  assert.match(extractFunctionBody(src, 'async function showChildrenMenu()'), /fitWindowToDrawer\(\)/, 'the sessions list loads after the drawer opened');
+  assert.doesNotMatch(stripComments(src), /SETTINGS_HEIGHT/, 'no fixed settings height any more — measured like every other drawer');
+});
+
+test('main.js grows the window down only (same x/y/width) and re-fits an already-expanded window', () => {
+  const body = extractFunctionBody(readSrc('main.js'), "ipcMain.on('window:set-expanded', (event, expanded, height) => {");
+  assert.match(body, /width: b\.width/, 'never changes the width');
+  assert.doesNotMatch(body, /EXPANDED_WIDTH/);
+  assert.match(body, /if \(expanded\) \{/, 'an expand while expanded re-fits instead of being ignored');
+  assert.match(body, /if \(!expandedWindows\.has\(win\)\) \{\s*collapsedBounds\.set\(win, win\.getBounds\(\)\)/, 'compact bounds remembered once, on the first expand');
+});
+
+test('no drawer is a popover or an overlay: menus and settings sit in normal flow below the button bar', () => {
+  const css = readSrc('renderer', 'widget.css');
+  const openMenu = css.slice(css.indexOf('.open-menu {'), css.indexOf('.open-menu.hidden'));
+  assert.doesNotMatch(openMenu, /position:\s*fixed/);
+  assert.match(openMenu, /position:\s*relative/);
+  const settings = css.slice(css.indexOf('.settings {'), css.indexOf('.settings.hidden'));
+  assert.doesNotMatch(settings, /position:\s*fixed|100vw|100vh/);
+  assert.match(settings, /flex:\s*none/, 'natural height, so it can be measured');
 });
 
 test('window:set-expanded accepts an optional height override, falling back to EXPANDED_HEIGHT', () => {
@@ -1009,7 +1059,7 @@ test('reveal is locked (ignores mouse depth) while settings is open or the occlu
 
 test('opening settings forces a fully revealed, settled face and keeps the "revealed" latch in sync', () => {
   const src = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(src, 'function setSettingsOpen(open) {');
+  const body = extractFunctionBody(src, 'function setSettingsOpen(open, fromDrawer = false) {');
   assert.match(body, /revealed = true;/);
   assert.match(body, /setReveal\(1, \{ settle: true \}\);/);
 });

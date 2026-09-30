@@ -307,17 +307,74 @@ init();
 // (besides gear itself) hide while it's open. Gear toggles it open/closed
 // and shows .active ("pressed") while open, both as the visual indicator
 // and as the only way back besides re-clicking it.
-const SETTINGS_HEIGHT = 360;
-let settingsOpen = false;
+// ── drawers: ONE inline panel below the button bar, window grows down ─────
+//
+// Settings, the Open menu and the children menu are all the same thing to
+// the layout: a drawer in normal flow under the buttons (never a popover
+// floating over the log — unreadable on a translucent face — never a
+// full-window overlay). Exactly one is open at a time. Opening one measures
+// its natural height and asks main.js to make the window taller by that
+// much (same x/y/width); closing it restores the compact size. Re-render a
+// drawer while open (rows loaded, a row moved) and call fitWindowToDrawer()
+// again — main.js re-fits an already-expanded window.
 
-function setSettingsOpen(open) {
+const DRAWER_GAP_PX = 8;
+const drawerElements = {};
+let activeDrawer = null; // 'settings' | 'open' | 'children' | null
+let compactHeight = null; // window height before any drawer opened
+
+function registerDrawer(name, el, onClose) {
+  drawerElements[name] = { el, onClose };
+}
+
+function openDrawer(name) {
+  const { el } = drawerElements[name];
+  if (activeDrawer && activeDrawer !== name) {
+    const previous = drawerElements[activeDrawer];
+    previous.el.classList.add('hidden');
+    if (previous.onClose) previous.onClose();
+  }
+  if (activeDrawer === null) compactHeight = window.innerHeight;
+  activeDrawer = name;
+  el.classList.remove('hidden');
+  fitWindowToDrawer();
+}
+
+/** Grow the window to the compact height plus the open drawer's height. */
+function fitWindowToDrawer() {
+  if (!activeDrawer) return;
+  const { el } = drawerElements[activeDrawer];
+  requestAnimationFrame(() => {
+    if (activeDrawer === null) return;
+    window.las.setExpanded(true, compactHeight + el.offsetHeight + DRAWER_GAP_PX);
+  });
+}
+
+function closeDrawer(name) {
+  if (activeDrawer !== name) return;
+  drawerElements[name].el.classList.add('hidden');
+  activeDrawer = null;
+  compactHeight = null;
+  window.las.setExpanded(false);
+}
+
+let settingsOpen = false;
+registerDrawer('settings', settingsEl, () => setSettingsOpen(false, true));
+
+/** `fromDrawer`: the drawer controller already hid the panel (another drawer replaced it) — only the mode/gear state needs updating. */
+function setSettingsOpen(open, fromDrawer = false) {
   settingsOpen = open;
-  settingsEl.classList.toggle('hidden', !open);
   widgetEl.classList.toggle('settings-open', open);
   gearEl.classList.toggle('active', open);
-  window.las.setExpanded(open, SETTINGS_HEIGHT);
+  if (!fromDrawer) {
+    if (open) openDrawer('settings');
+    else closeDrawer('settings');
+  }
   if (open) {
-    refreshSessions().then(syncMicTargetSelect);
+    refreshSessions().then(() => {
+      syncMicTargetSelect();
+      fitWindowToDrawer();
+    });
     // Latch the "revealed" state too, so mousemove-driven entrance tracking
     // doesn't undo this the moment settings closes and a mousemove fires.
     revealed = true;
@@ -1329,18 +1386,22 @@ async function setSessionsConfig(patch) {
   syncMicTargetSelect();
 }
 
+registerDrawer('children', childrenMenuEl, () => { childrenMenuOpen = false; });
+
 function closeChildrenMenu() {
   childrenMenuOpen = false;
-  childrenMenuEl.classList.add('hidden');
+  closeDrawer('children');
 }
 
 async function showChildrenMenu() {
   childrenMenuOpen = true;
   childrenMenuEl.innerHTML = '<div class="open-row"><span class="open-label">Loading sessions…</span></div>';
-  childrenMenuEl.classList.remove('hidden');
+  openDrawer('children');
   await refreshSessions();
+  if (!childrenMenuOpen) return; // closed (or replaced) while loading
   syncMicTargetSelect();
   renderChildrenMenu();
+  fitWindowToDrawer();
 }
 
 function renderChildrenMenu() {
@@ -1466,10 +1527,15 @@ async function runOpenAction(action) {
   }
 }
 
+registerDrawer('open', openMenuEl, () => {
+  openMenuOpen = false;
+  openEl.classList.remove('active');
+});
+
 function closeOpenMenu() {
   openMenuOpen = false;
-  openMenuEl.classList.add('hidden');
   openEl.classList.remove('active');
+  closeDrawer('open');
 }
 
 async function showOpenMenu() {
@@ -1482,8 +1548,9 @@ async function showOpenMenu() {
       openTerminalAppName = '';
     }
   }
+  if (!openMenuOpen) return; // closed while resolving the terminal name
   renderOpenMenu();
-  openMenuEl.classList.remove('hidden');
+  openDrawer('open');
 }
 
 function renderOpenMenu() {
@@ -1530,6 +1597,7 @@ async function moveOpenAction(from, to) {
   order.splice(to, 0, item);
   await persist({ openOrder: order });
   renderOpenMenu();
+  fitWindowToDrawer();
 }
 
 function cancelOpenLongPress() {

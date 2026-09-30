@@ -479,27 +479,25 @@ html, body {
   flex: 1;
 }
 
-/* "Open" button press-and-hold menu: a small popover pinned above the
- * button bar's right end (fixed = window coords; the window IS the widget),
- * NOT a full-window overlay, so no expand round-trip. The children button's
- * menu (#childrenMenu) uses the same look.
- * Top row is the default click action; ▲/▼ reorder and persist. Same fill
- * and ink as .settings so it reads as part of the widget. */
+/* Drawers — the "Open" menu and the children menu (and the settings panel,
+ * .settings below, which shares the same placement): ONE inline panel in
+ * normal flow below the button bar, never a popover floating over the log
+ * (unreadable on a translucent face) and never a full-window overlay. The
+ * window grows down by the drawer's height while it is open (widget.js's
+ * fitWindowToDrawer + main.js's window:set-expanded) and shrinks back on
+ * close, so the name, the log and the buttons never move.
+ * Top row of the Open menu is the default click action; ▲/▼ reorder. */
 .open-menu {
-  position: fixed;
-  right: 16px;
-  bottom: 46px;
-  min-width: 160px;
-  max-width: calc(100vw - 32px);
+  position: relative;
+  flex-shrink: 0;
+  margin-top: 8px;
   padding: 6px;
   border-radius: 10px;
   background: var(--widget-bg, rgba(144, 192, 96, 0.72));
   border: 1.5px solid rgba(20, 20, 20, 0.35);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   color: #141414;
   font-size: 12px;
   -webkit-app-region: no-drag;
-  z-index: 5;
 }
 
 .open-menu.hidden {
@@ -571,18 +569,17 @@ html, body {
 }
 
 
+/* The gear panel: a drawer like the menus above — normal flow inside
+ * #widget, below the buttonbar, its natural height (flex: none, so
+ * widget.js can measure it and grow the window by exactly that much). The
+ * name/log above it stay where they are. Same fill as the widget face,
+ * transparency included (per explicit request). */
 .settings {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  position: relative;
+  flex: none;
   box-sizing: border-box;
-  padding: 14px;
-  /* Same fill as the widget face, transparency included (per explicit
-   * request) — previously always fully opaque regardless of --widget-bg's
-   * alpha, which made the leftover blank space below "Done" look like a
-   * big solid block. */
+  margin-top: 8px;
+  padding: 0;
   background: var(--widget-bg, rgba(144, 192, 96, 0.72));
   color: #141414;
   font-size: 12px;
@@ -591,21 +588,6 @@ html, body {
 
 .settings.hidden {
   display: none;
-}
-
-/* The gear panel: normal flow inside #widget, below the buttonbar, so
- * the real name/log above it stay visible (see setSettingsOpen in
- * widget.js) instead of being covered by a full-window opaque panel. */
-.settings.settings-inline {
-  position: relative;
-  top: auto;
-  left: auto;
-  width: auto;
-  height: auto;
-  flex: 1;
-  overflow-y: auto;
-  margin-top: 8px;
-  padding: 0;
 }
 
 .settings-row {
