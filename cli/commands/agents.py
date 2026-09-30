@@ -359,6 +359,18 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
     else:
         status = "vortexia unreachable — not delivered (is `vortexia start` running?)"
     click.echo(f"{target}: {status}")
+    others = result.get("sessions") or []
+    if injected and to and not session and not all_sessions and len(others) > 1:
+        # The recipient's own choice decided; say there was one to make.
+        click.echo(f"  {to} has {len(others)} sessions — next time pick one with --session:")
+        for s in others:
+            click.echo("    " + _session_line(s))
+
+
+def _session_line(s: dict) -> str:
+    title = f'"{s["title"]}"' if s.get("title") else "(no title yet)"
+    flags = ("  *default" if s.get("default") else "") + ("" if s.get("intelligent", True) else "  [commands only]")
+    return f"{s['sid']:<28} {s.get('runtime', '?'):<7} {title}{flags}"
 
 
 @agent.command("children")
@@ -636,14 +648,41 @@ def listen(name):
 @agent.command("sessions")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 @click.option("--use", "use_sid", default=None, help="Make this session (id or runtime) the default — the one a plain `send --to` reaches.")
-def sessions(name, use_sid):
+@click.option("--all", "society", is_flag=True, help="Every agent's sessions with their titles — the society map, one call.")
+@click.option("--refresh", is_flag=True, help="Ask the agent's intelligent sessions to title themselves, wait, then show.")
+@click.option("--wait", "wait_s", default=20, show_default=True, help="With --refresh: seconds to wait for the titles.")
+def sessions(name, use_sid, society, refresh, wait_s):
     """Connected runtime sessions of an agent (a Claude, a Codex, a shell...), most recently used first.
 
     The default (marked *) is the last one used: a plain `las agent send --to NAME`
     reaches it, and its bridge holds the agent's mailbox. `--session` / `--all-sessions`
     on `send` pick one or all. See docs/adr/0004 phase 2.
+
+    \b
+      las agent sessions --all              # every agent: which terminals, working on what
+      las agent sessions Garantido --refresh   # ask its sessions for fresh titles first
     """
+    if society:
+        agents_map = api.get("/sessions").get("agents", {})
+        if not agents_map:
+            click.echo("No agent has a connected session.")
+        for agent_name, info in agents_map.items():
+            target = info.get("target", TARGET_DEFAULT)
+            click.echo(f"{agent_name}" + ("" if target == TARGET_DEFAULT else f"  (plain sends go to {target})"))
+            for s in info.get("sessions", []):
+                click.echo("  " + _session_line(s))
+        return
     name = resolve_agent_name(name)
+    if refresh:
+        before = {s["sid"]: s.get("title", "") for s in api.get(f"/agents/{quote(name, safe='')}/sessions").get("sessions", [])}
+        asked = api.post(f"/agents/{quote(name, safe='')}/sessions/titles/request", {}).get("asked", [])
+        click.echo(f"{name}: asked {len(asked)} session(s) for a title, waiting up to {wait_s}s…")
+        deadline = time.time() + wait_s
+        while asked and time.time() < deadline:
+            time.sleep(2)
+            now = {s["sid"]: s.get("title", "") for s in api.get(f"/agents/{quote(name, safe='')}/sessions").get("sessions", [])}
+            if all(now.get(sid) and now.get(sid) != before.get(sid) or sid not in now for sid in asked):
+                break
     view = api.get(f"/agents/{quote(name, safe='')}/sessions")
     if use_sid:
         target = next((s for s in view.get("sessions", []) if s["sid"] == use_sid), None) \

@@ -80,3 +80,9 @@ def test_skill_tells_sessions_to_title_themselves_and_answer_a_title_request_sil
     assert 'las agent title' in SKILL
     assert 'kind="title-request"' in SKILL
     assert 'no reply, no TTS, no closing report' in SKILL
+
+
+def test_skill_teaches_the_society_map_and_the_recipient_note():
+    assert "las agent sessions --all" in SKILL
+    assert "--refresh" in SKILL
+    assert "Answering as the recipient" in SKILL

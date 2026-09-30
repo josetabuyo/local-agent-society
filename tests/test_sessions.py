@@ -275,3 +275,29 @@ def test_title_request_goes_to_each_intelligent_session_mailbox_never_the_shell(
         assert env["kind"] == "title-request" and env["session"] == sid
         assert f"--session {sid}" in env["text"] and "--name Robo" in env["text"], "the text stands alone: Codex gets it typed in"
     assert client.post("/agents/Nobody/sessions/titles/request").status_code == 404
+
+
+# ── knowing where to send: the recipient's sessions in the send answer, the society map ──
+
+def test_plain_send_goes_to_the_recipients_choice_and_tells_the_sender_what_else_is_open(app):
+    main, client = app
+    _register(client, "claude-1", "claude")
+    _register(client, "shell-1", "shell")
+    client.put("/agents/Robo/sessions/claude-1/title", json={"title": "Payments fix"})
+    r = client.post("/agents/send", json={"message": "hi", "to": "Robo"}).json()
+    assert r["mode"] == "direct", "no session named: the recipient's own default"
+    rows = {s["sid"]: s for s in r["sessions"]}
+    assert rows["claude-1"]["title"] == "Payments fix" and rows["shell-1"]["intelligent"] is False
+    assert rows["shell-1"]["default"] is True
+
+
+def test_society_map_lists_every_agent_with_live_sessions(app):
+    main, client = app
+    client.post("/agents", json={"name": "Other", "voice": "Daniel", "path": "/tmp/other"})
+    _register(client, "claude-1", "claude")
+    client.post("/agents/Other/sessions", json={"sid": "codex-9", "runtime": "codex", "pid": 1, "cwd": "/y"})
+    client.post("/agents/Other/sessions", json={"sid": "dead-1", "runtime": "codex", "pid": 999, "cwd": "/y"})
+    view = client.get("/sessions").json()["agents"]
+    assert set(view) == {"Robo", "Other"}
+    assert [s["sid"] for s in view["Other"]["sessions"]] == ["codex-9"], "dead processes pruned"
+    assert view["Robo"]["target"] == "default"

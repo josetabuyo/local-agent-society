@@ -688,6 +688,32 @@ def patch_agent_config(name: str, patch: dict):
     return _config_view(name)
 
 
+def _session_summaries(name: str, sessions: dict, policy: dict | None = None) -> list:
+    """One compact row per session — enough for another agent to pick where to send."""
+    policy = policy or sessions_config(_agent_config(name))
+    default = _default_sid(sessions)
+    ordered = sorted(sessions.values(), key=lambda s: s.get("lastActiveAt", 0), reverse=True)
+    return [{"sid": s["sid"], "runtime": s.get("runtime", "?"), "title": s.get("title", ""),
+             "intelligent": descriptor_for(policy, s.get("runtime", "")).get("intelligent", True),
+             "default": s["sid"] == default, "lastActiveAt": s.get("lastActiveAt", 0)} for s in ordered]
+
+
+@app.get("/sessions")
+def society_sessions():
+    """Every agent's connected sessions in one call — the society map an agent keeps in mind before sending."""
+    registry = load_json(REGISTRY_FILE, {})
+    out = {}
+    with _sessions_lock:
+        for name in sorted(load_json(SESSIONS_FILE, {})):
+            if name not in registry:
+                continue
+            sessions = _load_sessions(name)
+            if sessions:
+                policy = sessions_config(_agent_config(name, registry))
+                out[name] = {"target": policy["target"], "sessions": _session_summaries(name, sessions, policy)}
+    return {"agents": out, "ts": int(time.time() * 1000)}
+
+
 def _sessions_view(name: str, sessions: dict) -> dict:
     """The sessions (children) of `name`, each carrying its runtime's descriptor, plus where the agent wants a plain send to land."""
     default = _default_sid(sessions)
@@ -1479,7 +1505,10 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
                 # caller would retry — and deliver twice).
                 logger.warning("inject.log write failed for %s: %s", to, exc)
 
-        return {"ok": True, "injected": delivered, "mode": mode, "relayed": False, "targets": [s["sid"] for s in targets], "fallback_from": fallback_from, "cc": bool(cc_sent)}
+        # What the recipient has open, so a sender that did not pick a session
+        # learns there was a choice (`las agent send` prints it when > 1).
+        return {"ok": True, "injected": delivered, "mode": mode, "relayed": False, "targets": [s["sid"] for s in targets], "fallback_from": fallback_from, "cc": bool(cc_sent),
+                "sessions": _session_summaries(to, sessions, policy)}
 
     if not env_name:
         raise HTTPException(status_code=404, detail="Agent not found (and vortex-relay not configured on this machine)")

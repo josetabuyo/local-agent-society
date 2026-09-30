@@ -257,7 +257,8 @@ las agent send --to <AgentName> "<message>" --from <ThisAgent>
 las bridge status [<MyName>]
 
 # Which runtimes are attached to an agent right now (a Claude, a Codex, a shell), which is the default
-las agent sessions [<Name>] [--use <id|runtime>]
+las agent sessions [<Name>] [--use <id|runtime>] [--refresh]
+las agent sessions --all                                         # society map: every agent's terminals + titles
 las agent title "<what this session is working on>"             # ~34 chars; shown in the widget's children list
 las agent target [default|all|<runtime>|<sid>] [--cc/--no-cc]   # where messages + the mic land among MY sessions (.las-agent.json)
 las agent send --to <Name> --session shell --cc "make test"     # the shell runs it (a shell is handed everything as a command), the last-used session gets a cc
@@ -286,7 +287,16 @@ las agent focus <AgentName>
 las status
 ```
 
-**Picking the right terminal of another agent.** When a message is about work one specific session of the recipient is doing, look first: `las agent sessions <Name>` lists its connected sessions with runtime, title (what each is working on) and whether it is intelligent. Send to the one whose title matches with `--session <sid>`; use `--session <runtime>` when one of that kind is enough, and a plain send when it is not about any particular terminal (the recipient's own `sessions.target` then decides). A shell only runs commands — never send it prose. This is local only: `Name@env` reaches the other machine's agent, and its environment picks the session.
+**Sending to the right terminal — a habit, not an exception.** Agents have several terminals open (a Claude, a Codex, a shell), each with a title saying what it is working on. Keep a map of the society in mind and aim:
+
+1. **Know the map.** `las agent sessions --all` returns every agent's open sessions with runtime, title and whether it is intelligent — one local call. Keep the result in your context as a cache; refresh it when it is older than ~30 min, before a send that matters, or when a send says the picture changed. Don't re-run it before every message.
+2. **Choose.** Recipient with one session, or a message not about any particular terminal → a plain `las agent send --to X` (the recipient's own choice, `sessions.target`, decides — by default its last-used session). Recipient with several sessions and a message about one line of work → the session whose title matches: `--session <sid>` (or `--session <runtime>` when any of that kind will do). Never prose to a shell — it only runs commands.
+3. **Unclear?** If titles are empty or don't tell you which terminal does what, `las agent sessions X --refresh` asks X's sessions to title themselves, waits, and shows the answer; then send.
+4. **Learn from the answer.** A plain send to an agent with several sessions prints them (`X has 3 sessions — next time pick one with --session`). Update your map with it.
+
+**Answering as the recipient.** When a message reached you without naming a session and your agent has more than one open, first give the useful answer; then, in the same reply, add one line listing your other sessions (runtime + title, from `las agent sessions`) so the sender can decide whether to keep talking to you here or address the terminal that owns that work. One line, only when there is more than one session, never on housekeeping (probes, cc, title requests).
+
+This is local only: `Name@env` reaches the other machine's agent, and its environment picks the session.
 
 Local delivery is **queued, not lost**: every agent has a broker-owned mailbox (MQTT persistent session, `vortexia/PROTOCOL.md` "Mailboxes"). A message sent while the recipient has no session open waits there, in order, one entry per message — nothing overwrites anything (cap 500, TTL 30 days, survives a broker restart). A Claude session gets it live through the LAS channel (`las bridge`); anything else through `las bridge shell|exec|stdout`; `las agent poll` is the manual fallback. Only broadcast is live-only.
 
