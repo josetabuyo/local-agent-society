@@ -13,6 +13,7 @@ from typing import Any, Optional
 import requests
 
 BASE = "http://localhost:8700"
+TIMEOUT_S = 5
 
 
 def _handle(resp: requests.Response) -> Any:
@@ -39,12 +40,19 @@ def _request(method: str, path: str, data: Optional[dict] = None) -> Any:
     try:
         func = getattr(requests, method)
         if method in ("post", "patch"):
-            resp = func(f"{BASE}{path}", json=data or {}, timeout=5)
+            resp = func(f"{BASE}{path}", json=data or {}, timeout=TIMEOUT_S)
         else:
-            resp = func(f"{BASE}{path}", timeout=5)
+            resp = func(f"{BASE}{path}", timeout=TIMEOUT_S)
         return _handle(resp)
     except requests.ConnectionError:
         print("Error: backend not running. Try `las start`.")
+        sys.exit(1)
+    except requests.Timeout:
+        # ReadTimeout is NOT a ConnectionError: a backend that is up but
+        # starved (machine swapping, TTS synthesis hogging the process)
+        # used to escape here as a raw traceback, and every fail-soft
+        # caller (`las claude`'s presence step) only expects SystemExit.
+        print(f"Error: backend not responding (timed out after {TIMEOUT_S}s on {method.upper()} {path}). Try `las status`.")
         sys.exit(1)
     except requests.HTTPError as e:
         print(f"Error: {e.response.status_code} {e.response.text}")
