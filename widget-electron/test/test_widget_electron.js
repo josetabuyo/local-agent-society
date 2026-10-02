@@ -1191,6 +1191,28 @@ test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays 
   assert.match(body, /new Audio\(url\)/);
 });
 
+test("widget.js's speak() honours a Kokoro voice pinned via tts_voice before falling back to the name hash", () => {
+  const src = readSrc('renderer', 'widget.js');
+  assert.match(src, /let ttsVoice = null;/);
+  const initBody = extractFunctionBody(src, 'async function init() {');
+  assert.match(initBody, /if \(info && info\.ttsVoice\) ttsVoice = info\.ttsVoice;/);
+  const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
+  assert.match(body, /window\.las\.ttsVoices\.find\(\(v\) => v && v\.name === ttsVoice\)/);
+  assert.match(body, /pinned \? \{ voice: pinned, warning: null \} : window\.las\.pickVoice\(agentName, locale, window\.las\.ttsVoices\)/);
+  // An unknown id must not silently mute the agent — it warns and hashes as before.
+  assert.match(body, /is not in the Kokoro pool/);
+});
+
+test("main.js's agent:info reads tts_voice from the agent's config view and returns it as ttsVoice", () => {
+  const src = readSrc('main.js');
+  const body = extractFunctionBody(src, 'async function fetchPinnedTtsVoice(name) {');
+  assert.match(body, /\/agents\/\$\{encodeURIComponent\(name\)\}\/config/);
+  assert.match(body, /view\.config\.tts_voice/);
+  const info = src.slice(src.indexOf("ipcMain.handle('agent:info'"));
+  assert.match(info, /const ttsVoice = await fetchPinnedTtsVoice\(name\);/);
+  assert.match(info, /locale: data\.lang \|\| 'en-US', ttsVoice \}/);
+});
+
 test("widget.js's speak() still respects the mute pref before doing any synthesis work", () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function speak(text, envelope) {');

@@ -181,6 +181,11 @@ function updateNameCenterOffset(size, text) {
 // dictated to in regardless of what language their own TTS voice speaks.
 let prefs = { color: '#90c060', opacity: 0.72, alwaysOnTop: true, mute: false, expandWhenHidden: true, micLanguage: 'es' };
 let locale = 'en-US';
+// Optional Kokoro voice id pinned in this agent's .las-agent.json (`tts_voice`,
+// e.g. "em_alex"). When set and known to the pool it beats the name hash in
+// speak() — the only way to choose a voice's gender explicitly, since the
+// hash only guarantees a voice in the agent's language.
+let ttsVoice = null;
 
 /** '#rrggbb' + 0..1 alpha -> 'rgba(r, g, b, a)'. */
 function hexToRgba(hex, alpha) {
@@ -288,6 +293,7 @@ async function init() {
   try {
     const info = await window.las.getAgentInfo(agentName);
     if (info && info.locale) locale = info.locale;
+    if (info && info.ttsVoice) ttsVoice = info.ttsVoice;
   } catch (err) {
     console.warn('[widget] could not resolve agent locale, defaulting to en-US:', err);
   }
@@ -726,7 +732,9 @@ async function speak(text, envelope) {
     ackSpeak(envelope, 'skipped', 'muted');
     return;
   }
-  const { voice, warning } = window.las.pickVoice(agentName, locale, window.las.ttsVoices);
+  const pinned = ttsVoice ? window.las.ttsVoices.find((v) => v && v.name === ttsVoice) : null;
+  if (ttsVoice && !pinned) console.warn(`[widget] tts_voice "${ttsVoice}" is not in the Kokoro pool — falling back to the hashed voice`);
+  const { voice, warning } = pinned ? { voice: pinned, warning: null } : window.las.pickVoice(agentName, locale, window.las.ttsVoices);
   if (warning) console.warn('[widget]', warning);
   if (!voice) {
     ackSpeak(envelope, 'skipped', 'no-voice');
@@ -919,7 +927,7 @@ document.getElementById('clear').addEventListener('click', async () => {
 // the same destination the old SpeechRecognition.onresult used.
 
 const micEl = document.getElementById('mic');
-const MAX_RECORDING_MS = 600000; // 10 min safety net if the user forgets to click stop
+const MAX_RECORDING_MS = 5400000; // 90 min safety net if the user forgets to click stop (long dictations; whisper-base runs ~7x realtime locally, so a full window is ~13 min of transcription)
 
 let mediaRecorder = null;
 let recordedChunks = [];

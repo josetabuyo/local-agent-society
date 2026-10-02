@@ -127,6 +127,8 @@ The TTS engine only sounds natural when the text is in the voice's own language.
 2. If there's no locale, derive it from `voice` using the table above.
 3. Default if neither is available: **English**.
 
+**Which voice actually sounds.** Synthesis is Kokoro (backend), not macOS `say`: the `voice` name above only decides the *language*; the widget then hashes the agent's name into that language's Kokoro pool (`widget-electron/lib/kokoroVoices.js`), so the gender is whatever the hash lands on. To pin one explicitly — e.g. a masculine Spanish voice — set `"tts_voice": "em_alex"` (any id from that pool: `ef_dora`/`em_alex`/`em_santa` for Spanish, `af_*`/`am_*`/`bf_*`/`bm_*` for English) in `.las-agent.json` and `las agent sync`; an unknown id warns and falls back to the hash.
+
 **Golden rule:** whatever text you pass to `las speak` must always be in the language that matches the agent's voice. If the voice is Samantha, speak English. If it's Paulina, speak Spanish. Even if the user writes to you in another language, the TTS goes out in the voice's language.
 
 ### Closing report — brief summary at the end of every turn (mandatory)
@@ -140,14 +142,14 @@ There is no longer a global `Stop` hook (`~/.claude/hooks/announce-here.sh`) ann
 ```
 
 - `<report verb>` is `"Reporting"` in English / `"Reportando"` in Spanish, matching the voice's language (see table above).
-- `<summary>` is ONE sentence of what just happened, in the voice's language, kept within `report_max_chars` characters.
-  - Read `report_max_chars` from `.las-agent.json`. **If the field doesn't exist, default to 40.**
+- `<summary>` is what just happened, in the voice's language, kept within `response_length_hint` characters (one sentence at the default 40; more when the agent asks for a longer hint).
+  - Read `response_length_hint` from `.las-agent.json` (older files call it `report_max_chars`; `las update` renames it via `scripts/migrate-agent-json.py`). **If neither exists, default to 40.** It is a soft target, never a truncation: an agent that sets it high (e.g. 280) wants fuller spoken reports — give two or three sentences, not one clipped line.
   - **Hard fallback** (never leave the slot empty): if there's nothing substantial to summarize — a pure chat turn, a question with no action, etc. — use `"done"` (English) / `"listo"` (Spanish) as `<summary>`.
   - **Not on housekeeping turns.** A turn that exists only because a background notification arrived — a background task finished, a channel probe — with no human message and nothing done for the human gets no closing report and no TTS at all. The `"done"`/`"listo"` fallback is for turns the human started; speaking "Reporting: done" on a probe or a task notification is exactly the noise this rule exists to prevent.
 - `<AgentName>` is the `name` from `.las-agent.json`.
 
 ```bash
-# English, Samantha voice, report_max_chars: 40
+# English, Samantha voice, response_length_hint: 40
 las speak "Reporting: widget chat bubbles done. LocalAgentSociety." --name LocalAgentSociety
 
 # Spanish, Paulina voice

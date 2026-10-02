@@ -1121,17 +1121,34 @@ ipcMain.handle('agent:request-session-titles', async (_event, name) => {
   }
 });
 
+// `tts_voice` (optional, .las-agent.json): a Kokoro voice id (lib/kokoroVoices.js)
+// the agent pins for itself — the renderer's speak() uses it instead of
+// hashing the agent name into the locale's pool. Read through the backend's
+// config view (the one process that knows every agent's path).
+async function fetchPinnedTtsVoice(name) {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`);
+    if (!res.ok) return null;
+    const view = await res.json();
+    const pinned = view && view.config ? view.config.tts_voice : null;
+    return typeof pinned === 'string' && pinned.trim() ? pinned.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 ipcMain.handle('agent:info', async (_event, name) => {
+  const ttsVoice = await fetchPinnedTtsVoice(name);
   try {
     const agents = await fetchAgents();
     const voice = agents && agents[name] ? agents[name].voice : null;
-    if (!voice) return { voice: null, locale: 'en-US' };
+    if (!voice) return { voice: null, locale: 'en-US', ttsVoice };
     const res = await fetch(`${REGISTRY_URL}/voices/${encodeURIComponent(voice)}`);
-    if (!res.ok) return { voice, locale: 'en-US' };
+    if (!res.ok) return { voice, locale: 'en-US', ttsVoice };
     const data = await res.json();
-    return { voice, locale: data.lang || 'en-US' };
+    return { voice, locale: data.lang || 'en-US', ttsVoice };
   } catch {
-    return { voice: null, locale: 'en-US' };
+    return { voice: null, locale: 'en-US', ttsVoice };
   }
 });
 
