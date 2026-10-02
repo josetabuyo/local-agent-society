@@ -1252,8 +1252,9 @@ def focus_agent_terminal(name: str):
 
     Wake-via-vortexia fallback: if no live session is found AND the agent is
     both inactive and opted into wake-enabled, open a fresh iTerm2 window
-    running `claude --dangerously-skip-permissions` in its directory instead
-    of just reporting "not found", and mark it active again. Both flags must
+    running `las claude` in its directory instead of just reporting "not
+    found", and mark it active again. No permission flag is added: the
+    session runs in whatever mode the user's own Claude settings choose. Both flags must
     be set (see set_inactive/set_wake_enabled) — this must never fire for an
     agent that merely doesn't have iTerm2 open right now for some unrelated
     reason.
@@ -1275,7 +1276,7 @@ def focus_agent_terminal(name: str):
     with _wake_enabled_lock:
         wake_enabled = name in load_json(WAKE_ENABLED_FILE, [])
     if not ttys and is_inactive and wake_enabled and path:
-        shell_cmd = f"cd {shlex.quote(path)} && las claude --dangerously-skip-permissions"
+        shell_cmd = f"cd {shlex.quote(path)} && las claude"
         result = _open_iterm_window(shell_cmd)
         if result.returncode == 0:
             with _inactive_lock:
@@ -1660,7 +1661,7 @@ def get_inactive(name: str):
 # ── wake-up via vortexia (opt-in per agent) ────────────────────────────────────
 # When enabled, an inactive agent with no live terminal session gets woken up
 # by focus_agent_terminal below instead of just reporting "not found": a new
-# iTerm2 window is opened running `claude --dangerously-skip-permissions` in
+# iTerm2 window is opened running `las claude` in
 # its registered directory, and the agent is marked active again. Off by
 # default — waking a session unattended is exactly the kind of thing that
 # should require an explicit opt-in per agent.

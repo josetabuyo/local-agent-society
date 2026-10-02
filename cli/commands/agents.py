@@ -918,7 +918,7 @@ def activate(name):
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def wake_enable(name):
     """Allow `las agent focus`/vortexia to wake this agent when inactive (opens a new
-    iTerm2 window running `claude --dangerously-skip-permissions` in its directory)."""
+    iTerm2 window running `las claude` in its directory)."""
     name = resolve_agent_name(name)
     api.post(f"/agents/{name}/wake-enabled", {})
     click.echo(f"{name}: wake-up via vortexia enabled.")

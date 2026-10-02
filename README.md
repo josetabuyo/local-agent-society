@@ -103,7 +103,7 @@ las link [--agent NAME] [--tty PATH]    # link the current (or given) terminal t
 ```
 `NAME` is optional on most `agent` subcommands — it defaults to the agent registered for the current directory (via `.las-agent.json` or a path match in the backend registry).
 
-`las agent focus` also acts as the wake-up path: if an agent has no live terminal session, is marked inactive, and has `wake-enable`d, it opens a new iTerm2 window running `claude --dangerously-skip-permissions` in the agent's directory and marks it active again — instead of just reporting "not found".
+`las agent focus` also acts as the wake-up path: if an agent has no live terminal session, is marked inactive, and has `wake-enable`d, it opens a new iTerm2 window running `las claude` in the agent's directory and marks it active again — instead of just reporting "not found". No permission flag is forced: the session uses your own Claude settings (e.g. auto mode); pass flags by hand with `las claude [args]`.
 
 ### Voices
 ```
