@@ -572,15 +572,18 @@ html, body {
 /* The gear panel: a drawer like the menus above — normal flow inside
  * #widget, below the buttonbar, its natural height (flex: none, so
  * widget.js can measure it and grow the window by exactly that much). The
- * name/log above it stay where they are. Same fill as the widget face,
- * transparency included (per explicit request). */
+ * name/log above it stay where they are. Same box as .open-menu (padding,
+ * radius, border, row dividers — per explicit request, the children menu's
+ * look is the reference), same fill as the widget face. */
 .settings {
   position: relative;
   flex: none;
   box-sizing: border-box;
   margin-top: 8px;
-  padding: 0;
+  padding: 6px;
+  border-radius: 10px;
   background: var(--widget-bg, rgba(144, 192, 96, 0.72));
+  border: 1.5px solid rgba(20, 20, 20, 0.35);
   color: #141414;
   font-size: 12px;
   -webkit-app-region: no-drag;
@@ -594,7 +597,12 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
   gap: 8px;
+  min-height: 24px;
+  padding: 2px 6px;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
 }
 

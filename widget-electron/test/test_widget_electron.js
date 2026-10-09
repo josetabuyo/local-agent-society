@@ -1066,16 +1066,30 @@ test('mousemove and mouseenter cancel a pending leave — re-entering before the
   assert.match(cancelBody, /clearTimeout\(leaveTimer\)/);
 });
 
-test('reveal is locked (ignores mouse depth) while settings is open or the occlusion-expanded banner is active', () => {
+test('reveal is locked (ignores mouse depth) while ANY drawer is open or the occlusion-expanded banner is active', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'function revealLocked() {');
-  assert.match(body, /settingsOpen/);
+  assert.match(body, /activeDrawer !== null/, 'settings, Open menu and children menu all lock it');
+  assert.doesNotMatch(body, /settingsOpen/, 'no longer settings-only');
   assert.match(body, /occlusion-expanded/);
 });
 
-test('opening settings forces a fully revealed, settled face and keeps the "revealed" latch in sync', () => {
+test('settings drawer uses the children/Open menu box: same padding, radius, border and row dividers', () => {
+  const css = readSrc('renderer', 'widget.css');
+  const block = (sel) => css.slice(css.indexOf(`${sel} {`), css.indexOf('}', css.indexOf(`${sel} {`)));
+  const menu = block('.open-menu');
+  const settings = block('.settings');
+  for (const prop of ['padding', 'border-radius', 'border']) {
+    const re = new RegExp(`\\n\\s*${prop}:\\s*([^;]+);`);
+    assert.equal(settings.match(re)?.[1], menu.match(re)?.[1], `${prop} matches .open-menu`);
+  }
+  assert.match(css, /\.settings-row \+ \.settings-row\s*\{\s*border-top:\s*1px solid rgba\(0, 0, 0, 0\.12\);/);
+  assert.doesNotMatch(block('.settings-row'), /margin-bottom/);
+});
+
+test('opening any drawer forces a fully revealed, settled face and keeps the "revealed" latch in sync', () => {
   const src = readSrc('renderer', 'widget.js');
-  const body = extractFunctionBody(src, 'function setSettingsOpen(open, fromDrawer = false) {');
+  const body = extractFunctionBody(src, 'function openDrawer(name) {');
   assert.match(body, /revealed = true;/);
   assert.match(body, /setReveal\(1, \{ settle: true \}\);/);
 });
@@ -1350,9 +1364,14 @@ test('widget.js claims a speak envelope on receipt (started) and plays it throug
 test('widget.js speak() acks done after playback ends and skipped on every path that never plays', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function speak(text, envelope)');
-  assert.match(body, /addEventListener\('ended'[\s\S]*?ackSpeak\(envelope,\s*'done'\)/);
-  for (const reason of ['muted', 'no-voice', 'synthesis-ipc-failed', 'synthesis-failed', 'playback-error', 'play-rejected']) {
+  // Playback paths go through finish(phase, reason), which does the one ack.
+  assert.match(body, /const finish = \(phase, reason\) => \{[\s\S]*?ackSpeak\(envelope, phase, reason\);/);
+  assert.match(body, /addEventListener\('ended', \(\) => finish\('done'\)\)/);
+  for (const reason of ['muted', 'no-voice', 'synthesis-ipc-failed', 'synthesis-failed']) {
     assert.match(body, new RegExp(`ackSpeak\\(envelope,\\s*'skipped',\\s*'${reason}'\\)`), `missing skipped ack for ${reason}`);
+  }
+  for (const reason of ['muted', 'playback-error', 'play-rejected']) {
+    assert.match(body, new RegExp(`finish\\('skipped',\\s*'${reason}'\\)`), `missing skipped finish for ${reason}`);
   }
   assert.match(body, /await new Promise/, 'speak() must resolve only once the clip is over, so the local chain serializes');
 });
@@ -1385,4 +1404,31 @@ test('children rows carry each session\'s title; the menu\'s refresh asks the in
   assert.match(ipc, /\/sessions\/titles\/request`/);
   assert.match(ipc, /method: 'POST'/);
   assert.match(src, /envelope\.kind === 'title-request'/, 'the request itself never shows in the log');
+});
+
+// ── mute: cuts the clip in flight, not only the next one ───────────────────
+
+test('muting stops the clip that is playing right now', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const persistBody = extractFunctionBody(src, 'async function persist(patch) {');
+  assert.match(persistBody, /if \(prefs\.mute\) stopCurrentSpeech\(\);/);
+  const stopBody = extractFunctionBody(src, 'function stopCurrentSpeech() {');
+  assert.match(stopBody, /currentSpeech\.stop\(\)/);
+  const speakBody = extractFunctionBody(src, 'async function speak(text, envelope) {');
+  assert.match(speakBody, /audioEl\.pause\(\);\s*finish\('skipped', 'muted'\);/);
+});
+
+test('muting during synthesis skips playback once the audio is ready', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const speakBody = extractFunctionBody(src, 'async function speak(text, envelope) {');
+  const synth = speakBody.indexOf('synthesizeSpeech(');
+  const play = speakBody.indexOf('new Audio(');
+  const between = speakBody.slice(synth, play);
+  assert.match(between, /if \(prefs\.mute\) \{\s*ackSpeak\(envelope, 'skipped', 'muted'\);\s*return;/);
+});
+
+test('a stopped clip acks exactly once (ended after pause must not ack again)', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const speakBody = extractFunctionBody(src, 'async function speak(text, envelope) {');
+  assert.match(speakBody, /if \(settled\) return;\s*settled = true;/);
 });

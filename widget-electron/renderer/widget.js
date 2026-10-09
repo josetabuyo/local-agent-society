@@ -343,6 +343,13 @@ function openDrawer(name) {
   if (activeDrawer === null) compactHeight = window.innerHeight;
   activeDrawer = name;
   el.classList.remove('hidden');
+  // Any open drawer locks the face fully revealed (see revealLocked): the
+  // title stays put and the icons stay visible until the drawer closes.
+  // Latch "revealed" too, so closing it doesn't hand control back to
+  // mousemove mid-entrance.
+  cancelPendingLeave();
+  revealed = true;
+  setReveal(1, { settle: true });
   fitWindowToDrawer();
 }
 
@@ -381,10 +388,6 @@ function setSettingsOpen(open, fromDrawer = false) {
       syncMicTargetSelect();
       fitWindowToDrawer();
     });
-    // Latch the "revealed" state too, so mousemove-driven entrance tracking
-    // doesn't undo this the moment settings closes and a mousemove fires.
-    revealed = true;
-    setReveal(1, { settle: true });
   }
 }
 
@@ -393,6 +396,7 @@ gearEl.addEventListener('click', () => setSettingsOpen(!settingsOpen));
 async function persist(patch) {
   prefs = await window.las.setPrefs(agentName, patch);
   applyPrefsToDom();
+  if (prefs.mute) stopCurrentSpeech();
 }
 
 colorEl.addEventListener('input', () => persist({ color: colorEl.value }));
@@ -518,11 +522,14 @@ function setReveal(value, { settle } = {}) {
 
 setReveal(0);
 
-// Settings panel (active interaction) and the full-screen occlusion banner
-// (its own always-visible centered name, see .occlusion-expanded overrides
-// in widget.css) both opt out of mouse-depth-driven reveal entirely.
+// Any open drawer (settings, Open menu, children menu — an active
+// interaction) and the full-screen occlusion banner (its own always-visible
+// centered name, see .occlusion-expanded overrides in widget.css) opt out of
+// mouse-depth-driven reveal entirely: leaving the widget with a drawer open
+// neither centers the title nor hides the icons. Close the drawer and the
+// automatic reveal is back.
 function revealLocked() {
-  return settingsOpen || widgetEl.classList.contains('occlusion-expanded');
+  return activeDrawer !== null || widgetEl.classList.contains('occlusion-expanded');
 }
 
 // Two states, not a value that's recomputed on every mousemove forever:
@@ -726,6 +733,16 @@ function enqueueSpeak(text, envelope) {
   return speakChain;
 }
 
+// The clip playing right now, if any — so muting cuts it off mid-sentence
+// instead of only skipping the NEXT one. Synthesis alone takes 10-25s, so
+// "mute only applies to clips that haven't started" read as a mute button
+// that does nothing.
+let currentSpeech = null;
+
+function stopCurrentSpeech() {
+  if (currentSpeech) currentSpeech.stop();
+}
+
 /** Resolves once the clip has finished playing (or was skipped). */
 async function speak(text, envelope) {
   if (prefs.mute) {
@@ -753,23 +770,35 @@ async function speak(text, envelope) {
     ackSpeak(envelope, 'skipped', 'synthesis-failed');
     return;
   }
+  // Muted while synthesizing — the slow part — so never start playing.
+  if (prefs.mute) {
+    ackSpeak(envelope, 'skipped', 'muted');
+    return;
+  }
   const url = URL.createObjectURL(new Blob([result.wav], { type: 'audio/wav' }));
   const audioEl = new Audio(url);
   await new Promise((resolve) => {
-    audioEl.addEventListener('ended', () => {
+    let settled = false;
+    const finish = (phase, reason) => {
+      if (settled) return;
+      settled = true;
+      if (currentSpeech && currentSpeech.audioEl === audioEl) currentSpeech = null;
       URL.revokeObjectURL(url);
-      ackSpeak(envelope, 'done');
+      ackSpeak(envelope, phase, reason);
       resolve();
-    });
-    audioEl.addEventListener('error', () => {
-      URL.revokeObjectURL(url);
-      ackSpeak(envelope, 'skipped', 'playback-error');
-      resolve();
-    });
+    };
+    currentSpeech = {
+      audioEl,
+      stop: () => {
+        audioEl.pause();
+        finish('skipped', 'muted');
+      },
+    };
+    audioEl.addEventListener('ended', () => finish('done'));
+    audioEl.addEventListener('error', () => finish('skipped', 'playback-error'));
     audioEl.play().catch((err) => {
       console.warn('[widget] audio playback failed', err);
-      ackSpeak(envelope, 'skipped', 'play-rejected');
-      resolve();
+      finish('skipped', 'play-rejected');
     });
   });
 }
