@@ -24,6 +24,8 @@ def test_request_turns_a_timeout_into_a_clean_exit(monkeypatch, capsys, exc):
         raise exc("Read timed out. (read timeout=5)")
 
     monkeypatch.setattr(api_mod.requests, "post", slow_post)
+    monkeypatch.setattr(api_mod, "_port_listening", lambda port: False)
+    monkeypatch.delenv("CODEX_SANDBOX_NETWORK_DISABLED", raising=False)
     with pytest.raises(SystemExit) as info:
         api_mod.post("/agents/Robo/vortexia/register", {})
     assert info.value.code == 1
@@ -42,6 +44,8 @@ def test_request_still_reports_a_dead_backend_the_old_way(monkeypatch, capsys):
         raise requests.ConnectionError("Connection refused")
 
     monkeypatch.setattr(api_mod.requests, "get", refused)
+    monkeypatch.setattr(api_mod, "_port_listening", lambda port: False)
+    monkeypatch.delenv("CODEX_SANDBOX_NETWORK_DISABLED", raising=False)
     with pytest.raises(SystemExit):
         api_mod.get("/health")
     assert "backend not running" in capsys.readouterr().out
@@ -77,3 +81,30 @@ def _plain_claude_on_path(monkeypatch):
     """Assertions name `claude`; which native install this machine has is not what these tests check."""
     from cli.commands import bridge as _bridge
     monkeypatch.setattr(_bridge, "claude_bin", lambda: "claude")
+
+
+def _refused(url, timeout=None):
+    raise requests.ConnectionError("Connection refused")
+
+
+def test_a_live_backend_the_caller_cannot_reach_is_not_called_dead(monkeypatch, capsys):
+    """Regression 2026-10-08: a Codex sandbox with network off got "backend not
+    running" while the backend was up — the agent then told the user LAS was down."""
+    monkeypatch.setattr(api_mod.requests, "get", _refused)
+    monkeypatch.setattr(api_mod, "_port_listening", lambda port: port == 8700)
+    monkeypatch.delenv("CODEX_SANDBOX_NETWORK_DISABLED", raising=False)
+    with pytest.raises(SystemExit):
+        api_mod.get("/health")
+    out = capsys.readouterr().out
+    assert "backend not running" not in out
+    assert "is running on :8700" in out and "/permissions" in out
+
+
+def test_codex_network_disabled_sandbox_is_named_explicitly(monkeypatch, capsys):
+    monkeypatch.setattr(api_mod.requests, "get", _refused)
+    monkeypatch.setattr(api_mod, "_port_listening", lambda port: False)
+    monkeypatch.setenv("CODEX_SANDBOX_NETWORK_DISABLED", "1")
+    with pytest.raises(SystemExit):
+        api_mod.get("/health")
+    out = capsys.readouterr().out
+    assert "network is disabled in this Codex sandbox" in out and "las codex resume" in out

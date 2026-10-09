@@ -415,6 +415,10 @@ def claude_unregister():
 # typed into Codex's composer as a paste + Enter. Codex has no channel-like
 # API for an interactive session; its keyboard is the only way in.
 CODEX_ARGV = ["codex", "--yolo"]
+# Spellings of the flag CODEX_ARGV already carries. Typing `las codex --yolo`
+# out of habit must not pass it twice — codex refuses a repeated
+# --dangerously-bypass-approvals-and-sandbox and exits before opening.
+CODEX_YOLO_FLAGS = {"--yolo", "--dangerously-bypass-approvals-and-sandbox"}
 # The headless alternative (`--exec`): one `codex exec` per message, text on
 # stdin, answer sent back to the sender. --yolo there too: nobody is at the
 # keyboard to approve anything in a run driven by the mailbox.
@@ -431,7 +435,8 @@ def run_codex_interactive(name: str, agent_dir: str, codex_args=(), intercept_ur
         stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
     )
     try:
-        return pty_session.run_in_pty([*CODEX_ARGV, *codex_args], inject_fd=bridge.stdout.fileno(), cwd=agent_dir)
+        extra = [a for a in codex_args if a not in CODEX_YOLO_FLAGS]
+        return pty_session.run_in_pty([*CODEX_ARGV, *extra], inject_fd=bridge.stdout.fileno(), cwd=agent_dir)
     finally:
         bridge.terminate()
         try:

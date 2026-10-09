@@ -252,6 +252,11 @@ def test_run_codex_interactive_wires_a_codex_session_bridge_into_the_pty(monkeyp
     assert popens == [["/usr/local/bin/node", str(bridge_mod.BRIDGE_BIN), "stdout", "--agent", "Robo", "--runtime", "codex", "--quiet"]]
     assert ptys == [(["codex", "--yolo", "--model", "m"], "/r")]
 
+    # `las codex --yolo` (or the long spelling) must not hand codex the flag twice.
+    ptys.clear()
+    bridge_mod.run_codex_interactive("Robo", "/r", ("--yolo", "resume", "--dangerously-bypass-approvals-and-sandbox"))
+    assert ptys == [(["codex", "--yolo", "resume"], "/r")]
+
 
 def test_las_codex_refuses_clearly_when_codex_is_missing(monkeypatch, tmp_path):
     calls, *_ = _chain_spies(monkeypatch, tmp_path)
