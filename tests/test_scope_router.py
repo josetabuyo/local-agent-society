@@ -151,3 +151,69 @@ def test_route_choose_unknown_agent_is_404(backend):
 
 def test_route_bad_level_is_422(backend):
     assert TestClient(backend.app).post("/route", json={"text": "x", "level": "planet"}).status_code == 422
+
+
+# ── misheard agent names ──────────────────────────────────────────────────────
+
+def test_whisper_spellings_of_wavi_become_wavi():
+    fixes = sr.name_fixes({"Wavi": {}, "System": {}, "Pulpo": {}})
+    for heard in ("guabi", "Guabi", "uabi", "wabi", "huabi", "wavi"):
+        assert sr.fix_names(f"mandar un mensaje con {heard}", fixes) == "mandar un mensaje con Wavi"
+
+
+def test_ordinary_words_are_left_alone():
+    fixes = sr.name_fixes({"System": {}, "Forti": {}, "Teli": {}})
+    text = "el sistema anda lento, algo fuerte en la tele"
+    assert sr.fix_names(text, fixes) == text
+
+
+def test_heard_as_aliases_and_ambiguous_keys():
+    fixes = sr.name_fixes({"RuGIAR": {"heard_as": ["robot universidad", "rugiar"]}, "Baby": {}, "Wavi": {}})
+    assert sr.fix_names("hablale a robot universidad", fixes) == "hablale a RuGIAR"
+    assert "babi" not in fixes   # Baby and Wavi share the key: ambiguous, never rewritten
+    assert sr.fix_names("con guabi", fixes) == "con guabi"
+
+
+def test_route_endpoint_fixes_names_before_routing_and_delivery(backend, monkeypatch):
+    seen = []
+    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent": (seen.append(text), sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))[1])
+    res = TestClient(backend.app).post("/route", json={"text": "mandale algo con guabi", "deliver": True}).json()
+    assert seen == ["mandale algo con Wavi"] and res["text"] == "mandale algo con Wavi"
+    assert backend._published[-1][1]["text"] == "mandale algo con Wavi"
+    log = json.loads(backend.ROUTE_LOG_FILE.read_text().splitlines()[-1])
+    assert log["heard"] == "mandale algo con guabi"
+
+
+# ── dictation vocabulary (cli/vocabulary.py, POST /dictation/fix) ─────────────
+
+from cli import vocabulary as vocab
+
+
+def test_vocabulary_fixes_spanglish_dev_terms(tmp_path):
+    fixes = vocab.build_fixes({"Wavi": {}}, user_file=tmp_path / "none.txt")
+    assert vocab.fix_text("hacé un commit en JIT y abrí el pul request en guit hub", fixes) == \
+        "hacé un commit en git y abrí el pull request en GitHub"
+    assert vocab.fix_text("el bakend manda el yeison", fixes) == "el backend manda el JSON"
+    assert vocab.fix_text("con guabi", fixes) == "con Wavi"
+
+
+def test_vocabulary_leaves_plain_spanish_alone(tmp_path):
+    fixes = vocab.build_fixes({"System": {}, "Forti": {}, "Teli": {}}, user_file=tmp_path / "none.txt")
+    text = "la casa, la fuente del sistema, el cliente pagó, la cola del banco, quiero comer pasta"
+    assert vocab.fix_text(text, fixes) == text
+
+
+def test_user_vocabulary_file(tmp_path):
+    f = tmp_path / "vocabulary.txt"
+    vocab.add_entry("Supabase", f)
+    vocab.add_entry("supa beis => Supabase   # how it comes out", f)
+    fixes = vocab.build_fixes({}, user_file=f)
+    assert vocab.fix_text("conectá supa beis", fixes) == "conectá Supabase"
+    assert vocab.fix_text("conectá supabase", fixes) == "conectá Supabase"   # a plain term: matched by sound
+
+
+def test_dictation_fix_endpoint_uses_the_live_agent_names(backend, monkeypatch, tmp_path):
+    monkeypatch.setattr(vocab, "USER_FILE", tmp_path / "none.txt")
+    c = TestClient(backend.app)
+    assert c.post("/dictation/fix", json={"text": "decile a guabi"}).json() == {"text": "decile a Wavi", "changed": True}
+    assert c.post("/dictation/fix", json={"text": "hola"}).json() == {"text": "hola", "changed": False}

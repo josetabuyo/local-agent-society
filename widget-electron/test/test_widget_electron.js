@@ -1073,7 +1073,7 @@ test('bubbles: the actions go to the agent — focus (Space switch), focus + mic
   assert.match(renderer, /reportMic\('partial', \{ text:/, 'the words as they come');
   assert.match(renderer, /transcribeAudio\(pcm\.buffer, languageHint, \{ live: true \}\)/);
   assert.match(renderer, /if \(liveSt && liveSt\.inFlight\) await liveSt\.inFlight/, 'the final pass waits for a live pass: never two Whisper runs at once');
-  assert.match(readSrc('main.js'), /transcribeAudio\(win, pcm, languageHint \|\| null, \{ live: Boolean\(opts && opts\.live\) \}\)/);
+  assert.match(readSrc('main.js'), /const live = Boolean\(opts && opts\.live\);\s*let text = await transcribeAudio\(win, pcm, languageHint \|\| null, \{ live \}\)/);
   assert.match(readSrc('bubbles.js'), /state === 'partial'/, 'a live pass holds the bubble like listening does');
   assert.match(preload, /micStatus: \(name, state, detail\) => ipcRenderer\.send\('mic:status'/);
   const bubblesSrc = readSrc('bubbles.js');
@@ -1821,7 +1821,6 @@ test('update notice: the gear gets a dot and the panel a row only while an updat
 
 test('the general mic sends its dictation to the scope router, never to this agent directly, and shows the pick before sending', () => {
   const widget = stripComments(readSrc('renderer', 'widget.js'));
-  assert.match(readSrc('renderer', 'index.html'), /id="routeCard"/);
   assert.match(widget, /startRecording\('route'\)/);
   // route mode branches off BEFORE the self-send
   const branch = widget.indexOf("if (micMode === 'route')");
@@ -1829,7 +1828,7 @@ test('the general mic sends its dictation to the scope router, never to this age
   // a confident pick waits a countdown and can be changed or cancelled; a pending one waits for a tap
   assert.match(widget, /ROUTE_COUNTDOWN_S/);
   assert.match(widget, /'Change'/);
-  assert.match(widget, /Who is this for\?/);
+  assert.match(widget, /who is this for\?/);
   // this agent is always offered, so a dead router never strands the text
   assert.match(widget, /names\.push\(\{ name: agentName/);
   // every send goes through /route/choose (correction log), via main.js
@@ -1841,10 +1840,18 @@ test('the general mic sends its dictation to the scope router, never to this age
   assert.match(main, /\/route\/choose`/);
 });
 
-test('the route card is not a fourth bubble kind: it never goes through appendLogEntry', () => {
+test('a routed dictation lives in the conversation as a mic bubble (user-msg) — no separate card that pushes the face buttons', () => {
   const widget = stripComments(readSrc('renderer', 'widget.js'));
-  const start = widget.indexOf('function hideRouteCard');
-  const end = widget.indexOf('async function routeDictation');
-  const body = widget.slice(start, widget.indexOf('\n}\n', end));
-  assert.doesNotMatch(body, /appendLogEntry/);
+  const body = extractFunctionBody(widget, 'function routedEntry(text) {');
+  assert.match(body, /'entry user-msg routed'/);
+  assert.match(body, /logEl\.appendChild\(row\)/);
+  assert.doesNotMatch(readSrc('renderer', 'index.html'), /routeCard/);
+});
+
+test('every final dictation goes through the vocabulary fix (backend /dictation/fix); the live preview does not, and a dead backend keeps the text', () => {
+  const main = stripComments(readSrc('main.js'));
+  assert.match(main, /if \(!live && text\) text = await fixDictation\(text\)/);
+  const body = extractFunctionBody(main, 'async function fixDictation(text) {');
+  assert.match(body, /\/dictation\/fix`/);
+  assert.match(body, /return text;\s*\}$/);
 });

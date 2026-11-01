@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -33,6 +35,62 @@ INSTRUCTIONS = {
     "agent": "Which agent should handle this spoken request",
     "session": "Which of this agent's terminal sessions should handle this request",
 }
+
+
+# ── agent names as dictation hears them ──────────────────────────────────────
+#
+# Whisper writes names it doesn't know the way they sound: "Wavi" comes out
+# "guabi", "uabi", "wabi". Before routing, every word whose Spanish sound
+# matches an agent's name is rewritten to the name, so both the model and the
+# agent that receives the text read "Wavi". An agent can add spellings the
+# sound key misses with `heard_as` in its .las-agent.json.
+
+_DIGRAPHS = [(r"g[uü](?=[aeiou])", "w"), (r"h?u(?=[aeio])", "w"), (r"qu(?=[ei])", "k"), (r"c(?=[ei])", "s"),
+             (r"ch", "x"), (r"ll", "y"), (r"c|q", "k"), (r"z", "s"), (r"h", ""), (r"[vw]", "b"), (r"j", "g"), (r"ee", "i")]
+
+
+def sound_key(word: str) -> str:
+    """A rough Spanish-ear phonetic key: guabi, uabi, wabi and Wavi all → "babi"."""
+    w = unicodedata.normalize("NFKD", word.lower())
+    w = "".join(ch for ch in w if not unicodedata.combining(ch) or ch == "\u0308")
+    w = w.replace("u\u0308", "ü")
+    w = re.sub(r"[^a-zñü]", "", w)
+    for pat, rep in _DIGRAPHS:
+        w = re.sub(pat, rep, w)
+    w = w.replace("y", "i")
+    return re.sub(r"(.)\1+", r"\1", w)
+
+
+def name_fixes(configs: dict[str, dict]) -> dict[str, str]:
+    """sound key / lowercase alias → canonical agent name. Only one-word names
+    of 4+ letters (short keys collide with ordinary words); a key two agents
+    share is dropped — ambiguous, so never rewritten."""
+    fixes: dict[str, str] = {}
+    clash: set[str] = set()
+    for name, cfg in configs.items():
+        keys = set()
+        if re.fullmatch(r"[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{4,}", name):
+            keys.add(sound_key(name))
+        for alias in cfg.get("heard_as") or []:
+            if isinstance(alias, str) and alias.strip():
+                keys.add(alias.strip().lower())
+        for k in keys:
+            if k in fixes and fixes[k] != name:
+                clash.add(k)
+            fixes[k] = name
+    return {k: v for k, v in fixes.items() if k not in clash}
+
+
+def fix_names(text: str, fixes: dict[str, str]) -> str:
+    """Rewrite each word (or multi-word heard_as alias) that sounds like an agent's name to that name."""
+    for alias, name in sorted(((a, n) for a, n in fixes.items() if " " in a), key=lambda x: -len(x[0])):
+        text = re.sub(rf"(?i)\b{re.escape(alias)}\b", name, text)
+
+    def one(m: re.Match) -> str:
+        word = m.group(0)
+        name = fixes.get(word.lower()) or fixes.get(sound_key(word))
+        return name if name and len(word) >= 3 else word   # agents need 4+ letters to get a key at all (name_fixes)
+    return re.sub(r"[A-Za-zÁÉÍÓÚáéíóúÑñÜü]+", one, text)
 
 
 def agent_candidates(configs: dict[str, dict]) -> dict[str, str]:

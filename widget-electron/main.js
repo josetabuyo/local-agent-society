@@ -1865,11 +1865,31 @@ ipcMain.on('log:write', (_event, level, component, message) => {
   writeLog(String(level || 'INFO'), String(component || 'widget'), String(message || ''));
 });
 
+async function fixDictation(text) {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/dictation/fix`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal: AbortSignal.timeout(3000) });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && typeof json.text === 'string') {
+      if (json.changed) log.info('mic', `vocabulary: "${text}" → "${json.text}"`);
+      return json.text;
+    }
+  } catch (err) {
+    log.warn('mic', `vocabulary fix skipped (backend unreachable): ${err && err.message ? err.message : err}`);
+  }
+  return text;
+}
+
 ipcMain.handle('audio:transcribe', async (event, pcmBuffer, languageHint, opts) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   try {
     const pcm = new Float32Array(pcmBuffer);
-    const text = await transcribeAudio(win, pcm, languageHint || null, { live: Boolean(opts && opts.live) });
+    const live = Boolean(opts && opts.live);
+    let text = await transcribeAudio(win, pcm, languageHint || null, { live });
+    // The final text goes through the dictation vocabulary (backend
+    // POST /dictation/fix: agent names, dev terms, ~/.las/vocabulary.txt —
+    // "JIT" → "git", "guabi" → "Wavi"). The live preview skips it (it ticks
+    // every 1.5 s); an unreachable backend leaves the text as heard.
+    if (!live && text) text = await fixDictation(text);
     return { ok: true, text };
   } catch (err) {
     log.error('mic', `audio:transcribe IPC failed: ${err && err.stack ? err.stack : err}`);

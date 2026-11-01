@@ -1121,7 +1121,6 @@ document.getElementById('clear').addEventListener('click', async () => {
 
 const micEl = document.getElementById('mic');
 const routeEl = document.getElementById('route');
-const routeCardEl = document.getElementById('routeCard');
 const MAX_RECORDING_MS = 5400000; // 90 min safety net if the user forgets to click stop (long dictations; whisper-base runs ~7x realtime locally, so a full window is ~13 min of transcription)
 
 let mediaRecorder = null;
@@ -1623,112 +1622,121 @@ routeEl.addEventListener('click', () => {
   else if (micState === 'idle') startRecording('route');
 });
 
-// ── the route card ──────────────────────────────────────────────────────────
-// What the router decided, shown in place before anything is sent:
-//   deliver → "→ Wavi · 83%" with a short countdown; Change opens the
-//             chips, ✕ sends nothing; at zero it is sent to the pick.
-//   pending → "Who is this for?" + chips of the best candidates (and this
+// ── a routed dictation, in the conversation ─────────────────────────────────
+// The 🧭 dictation is the human's words, so it is a mic bubble (right side,
+// the user-msg kind — still exactly three kinds) living in the log like any
+// other; under it, the router's pick and the controls:
+//   deliver → "🧭 → Wavi · 83% (4s)" counting down, with Send now / Change;
+//             ✕ sends nothing; at zero it is sent to the pick.
+//   pending → "🧭 who is this for?" + chips of the best candidates (and this
 //             agent, always) — waits for a tap; nothing goes anywhere alone.
-// The chosen agent gets it as a human dictation (its own mic bubble), so
-// the three bubble kinds stay three. Every send goes through POST
-// /route/choose, which logs the router's pick next to the human's.
+// Once sent it stays in the history as "🧭 → Wavi". Every send goes through
+// POST /route/choose, which logs the router's pick next to the human's.
 const ROUTE_COUNTDOWN_S = 4;
-let routeCardTimer = null;
-
-function hideRouteCard() {
-  clearInterval(routeCardTimer);
-  routeCardTimer = null;
-  routeCardEl.classList.add('hidden');
-  routeCardEl.replaceChildren();
-}
-
-function routeCardEls(title, text) {
-  clearInterval(routeCardTimer);
-  routeCardTimer = null;
-  routeCardEl.replaceChildren();
-  const head = document.createElement('div');
-  head.className = 'route-head';
-  const t = document.createElement('span');
-  t.className = 'route-title';
-  t.textContent = title;
-  const close = document.createElement('button');
-  close.className = 'route-x';
-  close.textContent = '✕';
-  close.title = 'Send nothing';
-  close.addEventListener('click', () => {
-    window.las.log('info', 'mic', 'route: dismissed — nothing sent');
-    hideRouteCard();
-  });
-  head.append(t, close);
-  const quote = document.createElement('div');
-  quote.className = 'route-text';
-  quote.textContent = `“${text}”`;
-  const row = document.createElement('div');
-  row.className = 'route-row';
-  routeCardEl.append(head, quote, row);
-  routeCardEl.classList.remove('hidden');
-  return { title: t, row };
-}
 
 function pct(p) { return `${Math.round((p || 0) * 100)}%`; }
 
-function showRouteChips(text, res, why) {
-  const { row } = routeCardEls(why || 'Who is this for?', text);
-  const names = (res.ranked || []).map((r) => r);
-  if (!names.some((r) => r.name === agentName)) names.push({ name: agentName, p: null });
-  for (const r of names) {
-    const chip = document.createElement('button');
-    chip.className = 'route-chip';
-    chip.textContent = r.p == null ? r.name : `${r.name} · ${pct(r.p)}`;
-    chip.addEventListener('click', () => sendRouted(text, r.name, res.choice));
-    row.append(chip);
-  }
+function routedEntry(text) {
+  const row = document.createElement('div');
+  row.className = 'entry user-msg routed';
+  const bubble = document.createElement('span');
+  bubble.className = 'bubble';
+  const said = document.createElement('span');
+  said.textContent = text;
+  const controls = document.createElement('span');
+  controls.className = 'route-row';
+  bubble.append(said, controls);
+  const desc = document.createElement('span');
+  desc.className = 'desc';
+  row.append(bubble, desc);
+  logEl.appendChild(row);
+  const entry = { row, said, controls, desc, timer: null };
+  entry.set = (label, buttons = []) => {
+    clearInterval(entry.timer);
+    entry.timer = null;
+    desc.textContent = `🧭 ${label}`;
+    controls.replaceChildren(...buttons);
+    controls.classList.toggle('hidden', !buttons.length);
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+  return entry;
 }
 
-async function sendRouted(text, choice, suggested) {
-  routeCardEls(`Sending to ${choice}…`, text);
+function routeButton(label, onClick, cls = '') {
+  const b = document.createElement('button');
+  b.className = `route-chip ${cls}`.trim();
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function cancelButton(entry) {
+  return routeButton('✕', () => {
+    window.las.log('info', 'mic', 'route: dismissed — nothing sent');
+    entry.set('not sent');
+    entry.row.classList.add('route-cancelled');
+  }, 'route-x');
+}
+
+function showRouteChips(entry, text, res, label) {
+  const names = (res.ranked || []).slice();
+  if (!names.some((r) => r.name === agentName)) names.push({ name: agentName, p: null });
+  entry.set(label, [
+    ...names.map((r) => routeButton(r.p == null ? r.name : `${r.name} · ${pct(r.p)}`, () => sendRouted(entry, text, r.name, res.choice))),
+    cancelButton(entry),
+  ]);
+}
+
+async function sendRouted(entry, text, choice, suggested) {
+  entry.set(`→ ${choice}…`);
   const out = await window.las.routeChoose(text, choice, suggested);
   if (out && out.ok) {
-    routeCardEls(`✓ Sent to ${choice}`, text);
     reportMic('sent', { text });
-    routeCardTimer = setTimeout(hideRouteCard, 2500);
+    // To this very agent, the dictation comes back through its own inbox as
+    // a plain mic bubble — keep one, not two.
+    if (choice === agentName) entry.row.remove();
+    else entry.set(`→ ${choice}`);
   } else {
     const err = (out && out.error) || 'unknown error';
-    showRouteChips(text, { ranked: [{ name: choice, p: null }], choice: suggested }, `✗ Not sent (${err}) — retry?`);
+    showRouteChips(entry, text, { ranked: [{ name: choice, p: null }], choice: suggested }, `not sent (${err}) — retry?`);
     reportMic('failed', { error: `not delivered: ${err}` });
   }
 }
 
 async function routeDictation(text) {
-  routeCardEls('Routing…', text);
+  const entry = routedEntry(text);
+  entry.set('routing…');
   const res = await window.las.routeAsk(text);
   if (!res || res.decision === 'error') {
-    showRouteChips(text, { ranked: [] }, `Router unavailable — send to ${agentName}?`);
+    showRouteChips(entry, text, { ranked: [] }, 'router unavailable — send it here?');
     return;
+  }
+  // The backend fixes misheard agent names ("guabi" → "Wavi"): from here on
+  // the bubble shows, and the agent receives, its corrected text.
+  if (res.text) {
+    text = res.text;
+    entry.said.textContent = text;
   }
   if (res.decision !== 'deliver') {
-    showRouteChips(text, res, 'Who is this for?');
+    showRouteChips(entry, text, res, 'who is this for?');
     return;
   }
-  const { title, row } = routeCardEls('', text);
-  const change = document.createElement('button');
-  change.className = 'route-chip';
-  change.textContent = 'Change';
-  change.addEventListener('click', () => showRouteChips(text, res, 'Send it to…'));
-  const now = document.createElement('button');
-  now.className = 'route-chip route-go';
-  now.textContent = 'Send now';
-  now.addEventListener('click', () => sendRouted(text, res.choice, res.choice));
-  row.append(now, change);
   let left = ROUTE_COUNTDOWN_S;
-  const paint = () => { title.textContent = `→ ${res.choice} · ${pct(res.confidence)}   (${left}s)`; };
-  paint();
-  routeCardTimer = setInterval(() => {
+  const buttons = [
+    routeButton('Send now', () => sendRouted(entry, text, res.choice, res.choice), 'route-go'),
+    routeButton('Change', () => showRouteChips(entry, text, res, 'send it to…')),
+    cancelButton(entry),
+  ];
+  entry.set(`→ ${res.choice} · ${pct(res.confidence)} (${left}s)`, buttons);
+  entry.timer = setInterval(() => {
     left -= 1;
-    if (left > 0) return paint();
-    clearInterval(routeCardTimer);
-    routeCardTimer = null;
-    sendRouted(text, res.choice, res.choice);
+    if (left > 0) {
+      entry.desc.textContent = `🧭 → ${res.choice} · ${pct(res.confidence)} (${left}s)`;
+      return;
+    }
+    clearInterval(entry.timer);
+    entry.timer = null;
+    sendRouted(entry, text, res.choice, res.choice);
   }, 1000);
 }
 

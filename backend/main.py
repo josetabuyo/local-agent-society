@@ -1840,6 +1840,26 @@ def _route_candidates(level: str, agent: Optional[str]) -> dict:
     raise HTTPException(status_code=422, detail="level must be 'agent' or 'session'")
 
 
+def _route_fix_names(text: str) -> str:
+    """Words Whisper misheard — agent names ("guabi" → "Wavi"), software terms
+    ("JIT" → "git"), the user's ~/.las/vocabulary.txt — put back right
+    (cli/vocabulary.py)."""
+    from cli.vocabulary import build_fixes, fix_text
+    registry = load_json(REGISTRY_FILE, {})
+    return fix_text(text, build_fixes({name: _agent_config(name, registry) for name in registry}))
+
+
+class DictationFix(BaseModel):
+    text: str = Field(max_length=MESSAGE_MAX_CHARS)
+
+
+@app.post("/dictation/fix")
+def dictation_fix(body: DictationFix):
+    """The widget calls this after every final transcription (🎤 and 🧭)."""
+    fixed = _route_fix_names(body.text) if body.text.strip() else body.text
+    return {"text": fixed, "changed": fixed != body.text}
+
+
 def _route_deliver(text: str, choice: str, level: str, agent: Optional[str], from_agent: Optional[str]) -> dict:
     """Deliver as a human dictation: from == to == the agent reads as mic in its widget."""
     to = agent if level == "session" else choice
@@ -1854,11 +1874,13 @@ def route_text(body: RouteRequest):
     ranked candidates; with deliver=true a confident pick is also sent."""
     from cli.scope_router import route
     criteria = _route_candidates(body.level, body.agent)
-    result = route(body.text, criteria, body.level)
+    text = _route_fix_names(body.text)
+    result = route(text, criteria, body.level)
     result["candidates"] = len(criteria)
+    result["text"] = text   # what gets delivered — names fixed; clients send this, not what they heard
     if body.deliver and result["decision"] == "deliver":
-        result["delivered"] = _route_deliver(body.text, result["choice"], body.level, body.agent, body.from_agent)
-    _route_log({"text": body.text, "level": body.level, "agent": body.agent, "decision": result["decision"],
+        result["delivered"] = _route_deliver(text, result["choice"], body.level, body.agent, body.from_agent)
+    _route_log({"text": text, **({"heard": body.text} if text != body.text else {}), "level": body.level, "agent": body.agent, "decision": result["decision"],
                 "choice": result["choice"], "ranked": result["ranked"], "reason": result["reason"],
                 "delivered": bool(result.get("delivered"))})
     return result
@@ -1873,8 +1895,9 @@ def route_choose(body: RouteChoice):
         raise HTTPException(status_code=404, detail=f"no agent named {body.choice!r}")
     if body.level == "session" and body.choice not in criteria:
         raise HTTPException(status_code=404, detail=f"{body.agent} has no titled session {body.choice!r}")
-    delivered = _route_deliver(body.text, body.choice, body.level, body.agent, body.from_agent)
-    _route_log({"text": body.text, "level": body.level, "agent": body.agent, "decision": "chosen",
+    text = _route_fix_names(body.text)
+    delivered = _route_deliver(text, body.choice, body.level, body.agent, body.from_agent)
+    _route_log({"text": text, "level": body.level, "agent": body.agent, "decision": "chosen",
                 "choice": body.choice, "suggested": body.suggested,
                 "correction": bool(body.suggested and body.suggested != body.choice)})
     return {"ok": True, "choice": body.choice, "delivered": delivered}
