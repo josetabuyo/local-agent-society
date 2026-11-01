@@ -12,6 +12,10 @@
       <button id="door" class="facebtn door-corner" title="Deactivate (close widget, mark inactive)">&#128682;</button>
     </div>
     <div id="log" class="log"></div>
+    <!-- General mic (🧭): where the router's pick is shown and can be
+         changed before it is sent. Not a log bubble — the dictation lands
+         in the chosen agent's widget as its own mic bubble. -->
+    <div id="routeCard" class="route-card hidden"></div>
 
     <div class="buttonbar">
       <div class="bar-left">
@@ -21,6 +25,7 @@
       <div class="bar-right">
         <button id="open" class="facebtn" title="Open: terminal window / folder at this agent's path (click = default, hold or right-click = choose and reorder)">&#10697;</button>
         <button id="speaker" class="facebtn" title="Mute/unmute">&#128266;</button>
+        <button id="route" class="facebtn" title="General mic: dictate without choosing an agent — the router sends it to whoever it fits">&#129517;</button>
         <button id="mic" class="facebtn" title="Dictate (click to start/stop, double-click to test mic)">&#127908;</button>
         <button id="children" class="facebtn" title="Children: which connected session (Claude, Codex, shell) hears the mic — click or hold to choose">&#128101;</button>
       </div>

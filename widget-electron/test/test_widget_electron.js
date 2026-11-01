@@ -220,9 +220,9 @@ test('widget/ (Swift) has been removed — this Electron app is the sole widget'
 
 // ── face buttons (restored from widget/tray.swift) ──────────────────────────
 
-test('index.html renders all 6 face buttons (gear + 5, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot)', () => {
+test('index.html renders all 7 face buttons (gear + 6, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot, "route" = the general mic)', () => {
   const html = readSrc('renderer', 'index.html');
-  for (const id of ['gear', 'clear', 'open', 'speaker', 'mic', 'children']) {
+  for (const id of ['gear', 'clear', 'open', 'speaker', 'route', 'mic', 'children']) {
     assert.match(html, new RegExp(`id="${id}"`), `missing button #${id}`);
   }
 });
@@ -317,8 +317,9 @@ test('mic sends recorded audio to transcribeAudio and routes text through the sa
 test('mic button has a distinct busy/transcribing visual state, separate from the recording (active) state', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, "function setMicState(next) {");
-  assert.match(body, /classList\.toggle\('active',\s*next === 'listening'\)/);
-  assert.match(body, /classList\.toggle\('busy',\s*next === 'transcribing'\)/);
+  // the button that started the dictation (🎤 or 🧭) carries the state
+  assert.match(body, /classList\.toggle\('active',\s*el === btn && next === 'listening'\)/);
+  assert.match(body, /classList\.toggle\('busy',\s*el === btn && next === 'transcribing'\)/);
 });
 
 test('mic recording has a max-duration safety net so a forgotten click-to-stop does not record forever', () => {
@@ -1065,7 +1066,7 @@ test('bubbles: the actions go to the agent — focus (Space switch), focus + mic
   assert.match(preload, /onMicRequest/);
   const renderer = readSrc('renderer', 'widget.js');
   assert.match(renderer, /onMicRequest\(\(command\) => \{/);
-  assert.match(renderer, /else if \(micState === 'idle'\) \{\s*startRecording\(\);/, 'a voice answer never interrupts a recording in flight');
+  assert.match(renderer, /else if \(micState === 'idle'\) \{\s*startRecording\('self'\);/, 'a voice answer never interrupts a recording in flight');
   assert.match(renderer, /command === 'cancel'[\s\S]*discardRecording = true/, 'cancel throws the audio away');
   assert.match(renderer, /if \(discardRecording\) \{[\s\S]*recordedChunks = \[\];[\s\S]*reportMic\('cancelled'\)/, 'a cancelled dictation transcribes and sends nothing');
   assert.match(renderer, /reportMic\('sent', \{ text: result\.text \}\)/, 'the bubble learns what was sent');
@@ -1814,4 +1815,36 @@ test('update notice: the gear gets a dot and the panel a row only while an updat
   assert.match(js, /gearEl\.classList\.toggle\('has-update', available\)/);
   assert.match(js, /updateRowEl\.classList\.toggle\('hidden', !available\)/);
   assert.match(readSrc('renderer/widget.css'), /#gear\.has-update::after/);
+});
+
+// ── general mic (🧭): the scope router picks the agent ─────────────────────
+
+test('the general mic sends its dictation to the scope router, never to this agent directly, and shows the pick before sending', () => {
+  const widget = stripComments(readSrc('renderer', 'widget.js'));
+  assert.match(readSrc('renderer', 'index.html'), /id="routeCard"/);
+  assert.match(widget, /startRecording\('route'\)/);
+  // route mode branches off BEFORE the self-send
+  const branch = widget.indexOf("if (micMode === 'route')");
+  assert.ok(branch > 0 && branch < widget.indexOf('window.las.sendToSelf(agentName, result.text)'));
+  // a confident pick waits a countdown and can be changed or cancelled; a pending one waits for a tap
+  assert.match(widget, /ROUTE_COUNTDOWN_S/);
+  assert.match(widget, /'Change'/);
+  assert.match(widget, /Who is this for\?/);
+  // this agent is always offered, so a dead router never strands the text
+  assert.match(widget, /names\.push\(\{ name: agentName/);
+  // every send goes through /route/choose (correction log), via main.js
+  const preload = stripComments(readSrc('preload.js'));
+  assert.match(preload, /routeAsk:.*'route:ask'/);
+  assert.match(preload, /routeChoose:.*'route:choose'/);
+  const main = stripComments(readSrc('main.js'));
+  assert.match(main, /\/route`/);
+  assert.match(main, /\/route\/choose`/);
+});
+
+test('the route card is not a fourth bubble kind: it never goes through appendLogEntry', () => {
+  const widget = stripComments(readSrc('renderer', 'widget.js'));
+  const start = widget.indexOf('function hideRouteCard');
+  const end = widget.indexOf('async function routeDictation');
+  const body = widget.slice(start, widget.indexOf('\n}\n', end));
+  assert.doesNotMatch(body, /appendLogEntry/);
 });

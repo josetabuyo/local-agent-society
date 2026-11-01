@@ -1120,11 +1120,14 @@ document.getElementById('clear').addEventListener('click', async () => {
 // the same destination the old SpeechRecognition.onresult used.
 
 const micEl = document.getElementById('mic');
+const routeEl = document.getElementById('route');
+const routeCardEl = document.getElementById('routeCard');
 const MAX_RECORDING_MS = 5400000; // 90 min safety net if the user forgets to click stop (long dictations; whisper-base runs ~7x realtime locally, so a full window is ~13 min of transcription)
 
 let mediaRecorder = null;
 let recordedChunks = [];
 let micState = 'idle'; // 'idle' | 'listening' | 'transcribing'
+let micMode = 'self';  // 'self' (🎤: this agent) | 'route' (🧭: the router picks the agent)
 let discardRecording = false; // a bubble's cancel: stop, throw the audio away, send nothing
 let maxDurationTimer = null;
 let countdownTimers = [];
@@ -1140,8 +1143,15 @@ function setMicState(next) {
   if ((next === 'listening') !== (micState === 'listening')) window.las.setMicRecording(agentName, next === 'listening');
   micState = next;
   reportMic(next);
-  micEl.classList.toggle('active', next === 'listening');
-  micEl.classList.toggle('busy', next === 'transcribing');
+  // Whichever button started the dictation shows its phases.
+  const btn = micMode === 'route' ? routeEl : micEl;
+  for (const el of [micEl, routeEl]) {
+    el.classList.toggle('active', el === btn && next === 'listening');
+    el.classList.toggle('busy', el === btn && next === 'transcribing');
+  }
+  routeEl.title = next === 'idle' || micMode !== 'route'
+    ? 'General mic: dictate without choosing an agent — the router sends it to whoever it fits'
+    : (next === 'listening' ? 'Recording for the router… click to stop' : 'Transcribing…');
   if (next === 'listening') {
     micEl.title = 'Recording… click to stop';
   } else if (next === 'transcribing') {
@@ -1422,6 +1432,10 @@ async function stopRecordingAndTranscribe() {
       // last-used one, all, or one — the children button) is the agent's
       // own `sessions.target` in its .las-agent.json, applied by the
       // backend when it routes the send (docs/adr/0005).
+      if (micMode === 'route') {
+        routeDictation(result.text);   // the card takes it from here; not awaited — the mic is free again
+        return;
+      }
       const sendResult = await window.las.sendToSelf(agentName, result.text);
       if (sendResult && sendResult.ok) reportMic('sent', { text: result.text });
       if (!sendResult || !sendResult.ok) {
@@ -1552,7 +1566,8 @@ function stopLiveTranscription() {
   return st;
 }
 
-async function startRecording() {
+async function startRecording(mode = 'self') {
+  micMode = mode;
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1594,11 +1609,128 @@ micEl.addEventListener('click', (e) => {
     if (micState === 'listening') {
       stopRecordingAndTranscribe();
     } else if (micState === 'idle') {
-      startRecording();
+      startRecording('self');
     }
     // clicks while 'transcribing' are ignored — nothing meaningful to toggle
   }, 220);
 });
+
+// 🧭 General mic: same recording, but the text goes to the scope router
+// (backend POST /route) instead of this agent. Click to start, click again
+// (or 🎤) to stop.
+routeEl.addEventListener('click', () => {
+  if (micState === 'listening') stopRecordingAndTranscribe();
+  else if (micState === 'idle') startRecording('route');
+});
+
+// ── the route card ──────────────────────────────────────────────────────────
+// What the router decided, shown in place before anything is sent:
+//   deliver → "→ Wavi · 83%" with a short countdown; Change opens the
+//             chips, ✕ sends nothing; at zero it is sent to the pick.
+//   pending → "Who is this for?" + chips of the best candidates (and this
+//             agent, always) — waits for a tap; nothing goes anywhere alone.
+// The chosen agent gets it as a human dictation (its own mic bubble), so
+// the three bubble kinds stay three. Every send goes through POST
+// /route/choose, which logs the router's pick next to the human's.
+const ROUTE_COUNTDOWN_S = 4;
+let routeCardTimer = null;
+
+function hideRouteCard() {
+  clearInterval(routeCardTimer);
+  routeCardTimer = null;
+  routeCardEl.classList.add('hidden');
+  routeCardEl.replaceChildren();
+}
+
+function routeCardEls(title, text) {
+  clearInterval(routeCardTimer);
+  routeCardTimer = null;
+  routeCardEl.replaceChildren();
+  const head = document.createElement('div');
+  head.className = 'route-head';
+  const t = document.createElement('span');
+  t.className = 'route-title';
+  t.textContent = title;
+  const close = document.createElement('button');
+  close.className = 'route-x';
+  close.textContent = '✕';
+  close.title = 'Send nothing';
+  close.addEventListener('click', () => {
+    window.las.log('info', 'mic', 'route: dismissed — nothing sent');
+    hideRouteCard();
+  });
+  head.append(t, close);
+  const quote = document.createElement('div');
+  quote.className = 'route-text';
+  quote.textContent = `“${text}”`;
+  const row = document.createElement('div');
+  row.className = 'route-row';
+  routeCardEl.append(head, quote, row);
+  routeCardEl.classList.remove('hidden');
+  return { title: t, row };
+}
+
+function pct(p) { return `${Math.round((p || 0) * 100)}%`; }
+
+function showRouteChips(text, res, why) {
+  const { row } = routeCardEls(why || 'Who is this for?', text);
+  const names = (res.ranked || []).map((r) => r);
+  if (!names.some((r) => r.name === agentName)) names.push({ name: agentName, p: null });
+  for (const r of names) {
+    const chip = document.createElement('button');
+    chip.className = 'route-chip';
+    chip.textContent = r.p == null ? r.name : `${r.name} · ${pct(r.p)}`;
+    chip.addEventListener('click', () => sendRouted(text, r.name, res.choice));
+    row.append(chip);
+  }
+}
+
+async function sendRouted(text, choice, suggested) {
+  routeCardEls(`Sending to ${choice}…`, text);
+  const out = await window.las.routeChoose(text, choice, suggested);
+  if (out && out.ok) {
+    routeCardEls(`✓ Sent to ${choice}`, text);
+    reportMic('sent', { text });
+    routeCardTimer = setTimeout(hideRouteCard, 2500);
+  } else {
+    const err = (out && out.error) || 'unknown error';
+    showRouteChips(text, { ranked: [{ name: choice, p: null }], choice: suggested }, `✗ Not sent (${err}) — retry?`);
+    reportMic('failed', { error: `not delivered: ${err}` });
+  }
+}
+
+async function routeDictation(text) {
+  routeCardEls('Routing…', text);
+  const res = await window.las.routeAsk(text);
+  if (!res || res.decision === 'error') {
+    showRouteChips(text, { ranked: [] }, `Router unavailable — send to ${agentName}?`);
+    return;
+  }
+  if (res.decision !== 'deliver') {
+    showRouteChips(text, res, 'Who is this for?');
+    return;
+  }
+  const { title, row } = routeCardEls('', text);
+  const change = document.createElement('button');
+  change.className = 'route-chip';
+  change.textContent = 'Change';
+  change.addEventListener('click', () => showRouteChips(text, res, 'Send it to…'));
+  const now = document.createElement('button');
+  now.className = 'route-chip route-go';
+  now.textContent = 'Send now';
+  now.addEventListener('click', () => sendRouted(text, res.choice, res.choice));
+  row.append(now, change);
+  let left = ROUTE_COUNTDOWN_S;
+  const paint = () => { title.textContent = `→ ${res.choice} · ${pct(res.confidence)}   (${left}s)`; };
+  paint();
+  routeCardTimer = setInterval(() => {
+    left -= 1;
+    if (left > 0) return paint();
+    clearInterval(routeCardTimer);
+    routeCardTimer = null;
+    sendRouted(text, res.choice, res.choice);
+  }, 1000);
+}
 
 // A speech bubble's "answer by voice" (main.js onBubbleAction) drives this
 // widget's mic from afar — the widget stays on its own Space, the bubble is
@@ -1614,7 +1746,7 @@ window.las.onMicRequest((command) => {
       stopRecordingAndTranscribe();
     }
   } else if (micState === 'idle') {
-    startRecording();
+    startRecording('self');
   } else {
     reportMic('failed', { error: `mic busy (${micState})` });
   }
