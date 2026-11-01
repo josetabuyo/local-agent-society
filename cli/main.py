@@ -8,6 +8,7 @@ from cli.commands.queue import queue
 from cli.commands.boarding import boarding
 from cli.commands.completion import completion
 from cli.commands.shell_init import shell_init
+from cli.commands.route import route
 from cli.commands.bridge import bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
 
 
@@ -49,3 +50,4 @@ cli.add_command(claude_relay_cmd, name="claudeRelay")
 cli.add_command(codex_cmd, name="codex")
 cli.add_command(shell_cmd, name="shell")
 cli.add_command(shell_init, name="shell-init")
+cli.add_command(route)

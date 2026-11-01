@@ -62,7 +62,7 @@ def _unreachable_message() -> str:
     return "Error: backend not running. Try `las start`."
 
 
-def _request(method: str, path: str, data: Optional[dict] = None) -> Any:
+def _request(method: str, path: str, data: Optional[dict] = None, timeout: Optional[float] = None) -> Any:
     """Perform an HTTP request against the backend and return the JSON body.
 
     Handles connection failures and HTTP errors uniformly: prints a
@@ -77,12 +77,13 @@ def _request(method: str, path: str, data: Optional[dict] = None) -> Any:
     Returns:
         The parsed JSON response body.
     """
+    timeout = timeout or TIMEOUT_S
     try:
         func = getattr(requests, method)
         if method in ("post", "patch", "put"):
-            resp = func(f"{BASE}{path}", json=data or {}, timeout=TIMEOUT_S)
+            resp = func(f"{BASE}{path}", json=data or {}, timeout=timeout)
         else:
-            resp = func(f"{BASE}{path}", timeout=TIMEOUT_S)
+            resp = func(f"{BASE}{path}", timeout=timeout)
         return _handle(resp)
     except requests.ConnectionError:
         print(_unreachable_message())
@@ -92,7 +93,7 @@ def _request(method: str, path: str, data: Optional[dict] = None) -> Any:
         # starved (machine swapping, TTS synthesis hogging the process)
         # used to escape here as a raw traceback, and every fail-soft
         # caller (`las claude`'s presence step) only expects SystemExit.
-        print(f"Error: backend not responding (timed out after {TIMEOUT_S}s on {method.upper()} {path}). Try `las status`.")
+        print(f"Error: backend not responding (timed out after {timeout}s on {method.upper()} {path}). Try `las status`.")
         sys.exit(1)
     except requests.HTTPError as e:
         print(f"Error: {e.response.status_code} {e.response.text}")
@@ -104,9 +105,9 @@ def get(path):
     return _request("get", path)
 
 
-def post(path, data=None):
+def post(path, data=None, timeout=None):
     """Send a POST request to ``path`` with an optional JSON ``data`` body."""
-    return _request("post", path, data)
+    return _request("post", path, data, timeout)
 
 
 def delete(path):
