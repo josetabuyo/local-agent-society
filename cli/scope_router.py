@@ -160,12 +160,12 @@ def decide(response: dict, *, min_top: float = MIN_TOP, min_margin: float = MIN_
 
 # ── is the router usable on this machine? ────────────────────────────────────
 #
-# The general mic is optional: it needs LocalModels' router (ROUTER_URL) and,
-# behind it, Ollama with the decision model pulled. A Mac without them gets a
-# notice that says what to install, never a mic that records and goes nowhere.
+# The general mic is optional: it needs LocalModels (its router, Ollama and
+# the decision model). Which model, which tag per platform, whether it is
+# loaded — all of that is LocalModels' business, asked through the router's
+# own GET /status; LAS never names a model. A Mac without it gets a notice
+# that says what's missing, never a mic that records and goes nowhere.
 
-OLLAMA_URL = os.getenv("LAS_OLLAMA_URL", "http://localhost:11434")
-ROUTER_MODEL = os.getenv("LAS_ROUTER_MODEL", "d3")   # name prefix in `ollama list`
 STATUS_TIMEOUT_S = 1.5
 
 
@@ -175,25 +175,20 @@ def _get_json(url: str, timeout: float = STATUS_TIMEOUT_S) -> dict:
 
 
 def status(*, getter=_get_json) -> dict:
-    """{available, router, ollama, model, missing: [what to install]} — fast, never raises."""
-    out = {"available": False, "router": False, "ollama": False, "model": None, "missing": [],
-           "router_url": ROUTER_URL, "model_wanted": ROUTER_MODEL}
+    """{available, router, ollama, model, missing: [what to install], engine} — fast, never raises."""
+    out = {"available": False, "router": False, "ollama": False, "model": None, "missing": [], "router_url": ROUTER_URL}
     try:
-        out["router"] = (getter(ROUTER_URL.rstrip("/") + "/health") or {}).get("status") == "ok"
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-        pass
-    try:
-        tags = getter(OLLAMA_URL.rstrip("/") + "/api/tags") or {}
-        out["ollama"] = True
-        out["model"] = next((m.get("name") for m in tags.get("models") or []
-                             if (m.get("name") or "").split(":")[0] == ROUTER_MODEL), None)
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-        pass
-    if not out["ollama"]:
-        out["missing"].append("ollama")
-    elif not out["model"]:
-        out["missing"].append(f"model {ROUTER_MODEL}")
-    if not out["router"]:
+        st = getter(ROUTER_URL.rstrip("/") + "/status") or {}
+        out["router"] = bool((st.get("router") or {}).get("up"))
+        out["ollama"] = bool((st.get("ollama") or {}).get("up"))
+        model = st.get("model") or {}
+        out["model"] = model.get("name") if model.get("installed") else None
+        out["warm"] = bool((st.get("warm") or {}).get("loaded"))
+        if not out["ollama"]:
+            out["missing"].append("ollama")
+        elif not out["model"]:
+            out["missing"].append(f"model {model.get('name') or 'd3'}")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError, AttributeError):
         out["missing"].append("LocalModels router")
     out["available"] = not out["missing"]
     # Pulpo is optional: without it the backend decides by itself.
@@ -257,32 +252,25 @@ def pulpo_up(timeout: float = 0.5) -> bool:
         return False
 
 
-# ── warm-up: load d3 while the human is still talking ────────────────────────
+# ── warm-up: load the model while the human is still talking ─────────────────
 #
-# Cold, d3 takes 6-16 s to answer; warm, under a second of model time. The
-# widget asks for a warm-up the moment 🧭 starts recording, so by the time the
-# dictation is transcribed the model is resident. Straight to Ollama (the
-# router's own call uses Ollama's 5-minute default keep_alive); d3 only takes
-# /v1/systemone, so the warm-up is a one-question decision (LocalModels' recipe).
-WARM_KEEP_ALIVE = os.getenv("LAS_ROUTER_KEEP_ALIVE", "10m")
+# Cold, the decision model takes 6-16 s; warm, a couple. The widget asks for a
+# warm-up the moment 🧭 starts recording, so by the time the dictation is
+# transcribed the model is resident. The router's POST /v1/warm picks the
+# model and how long it stays loaded (LocalModels owns both).
 
 
-def warm(model: str | None = None, *, timeout: float = 30.0, caller=None) -> bool:
-    """Load the decision model into memory. Blocking; returns whether it answered."""
-    model = model or status().get("model")
-    if not model:
-        return False
-    body = {"model": model, "keep_alive": WARM_KEEP_ALIVE, "state": "warm",
-            "questions": {"w": {"type": "noul", "instructions": "ok"}}}
+def warm(*, timeout: float = 30.0, caller=None) -> bool:
+    """Ask the router to load its decision model. Blocking; returns whether it did."""
     try:
         if caller:
-            caller(body)
+            out = caller({})
         else:
-            req = urllib.request.Request(OLLAMA_URL.rstrip("/") + "/v1/systemone", data=json.dumps(body).encode(),
+            req = urllib.request.Request(ROUTER_URL.rstrip("/") + "/v1/warm", data=b"{}",
                                          headers={"Content-Type": "application/json"}, method="POST")
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                resp.read()
-        return True
+                out = json.loads(resp.read())
+        return bool((out or {}).get("ok"))
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
         return False
 

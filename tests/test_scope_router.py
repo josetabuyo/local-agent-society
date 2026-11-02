@@ -224,43 +224,39 @@ def test_dictation_fix_endpoint_uses_the_live_agent_names(backend, monkeypatch, 
 
 # ── /route/status: is the general mic usable on this Mac? ────────────────────
 
-def _getter(router_ok=True, ollama=True, models=("d3:4b-nvfp4",)):
+def _router_status(router_ok=True, ollama=True, installed=True):
     def get(url, timeout=None):
-        if url.endswith("/health"):
-            if not router_ok:
-                raise urllib.error.URLError("refused")
-            return {"status": "ok"}
-        if not ollama:
+        assert url.endswith("/status")
+        if not router_ok:
             raise urllib.error.URLError("refused")
-        return {"models": [{"name": m} for m in models]}
+        return {"router": {"up": True}, "ollama": {"up": ollama},
+                "model": {"name": "d3:4b-nvfp4", "installed": installed and ollama}, "warm": {"loaded": False}}
     return get
 
 
-def test_status_available_when_router_ollama_and_model_are_there():
-    st = sr.status(getter=_getter())
+def test_status_available_when_the_router_says_ollama_and_model_are_there():
+    st = sr.status(getter=_router_status())
     assert st["available"] and st["missing"] == [] and st["model"] == "d3:4b-nvfp4"
 
 
 def test_status_names_each_missing_piece():
-    assert sr.status(getter=_getter(ollama=False))["missing"] == ["ollama"]
-    assert sr.status(getter=_getter(models=("qwen3.5:4b", "d3x:1b")))["missing"] == ["model d3"]
-    st = sr.status(getter=_getter(router_ok=False, ollama=False))
-    assert not st["available"] and st["missing"] == ["ollama", "LocalModels router"]
+    assert sr.status(getter=_router_status(ollama=False))["missing"] == ["ollama"]
+    assert sr.status(getter=_router_status(installed=False))["missing"] == ["model d3:4b-nvfp4"]
+    st = sr.status(getter=_router_status(router_ok=False))
+    assert not st["available"] and st["missing"] == ["LocalModels router"]
 
 
-def test_warm_sends_a_one_question_decision_with_keep_alive():
-    sent = []
-    assert sr.warm("d3:4b-nvfp4", caller=sent.append)
-    assert sent[0]["model"] == "d3:4b-nvfp4" and sent[0]["keep_alive"] == sr.WARM_KEEP_ALIVE
-    assert sent[0]["questions"]["w"]["type"] == "noul"
+def test_las_never_names_the_model_the_router_does():
+    src = Path(sr.__file__).read_text()
+    assert "11434" not in src and "d3:" not in src and "keep_alive" not in src
 
 
-def test_warm_without_model_or_with_a_failing_call_is_false_not_an_error(monkeypatch):
-    monkeypatch.setattr(sr, "status", lambda: {"model": None})
-    assert sr.warm() is False
+def test_warm_asks_the_router_and_never_raises():
+    assert sr.warm(caller=lambda body: {"ok": True, "model": "d3:4b-nvfp4"}) is True
+    assert sr.warm(caller=lambda body: {"ok": False}) is False
     def boom(body):
         raise urllib.error.URLError("refused")
-    assert sr.warm("d3:4b-nvfp4", caller=boom) is False
+    assert sr.warm(caller=boom) is False
 
 
 # ── Pulpo's "las-dictation" flow decides; the backend falls back to itself ────
