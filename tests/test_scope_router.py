@@ -243,3 +243,18 @@ def test_status_names_each_missing_piece():
     assert sr.status(getter=_getter(models=("qwen3.5:4b", "d3x:1b")))["missing"] == ["model d3"]
     st = sr.status(getter=_getter(router_ok=False, ollama=False))
     assert not st["available"] and st["missing"] == ["ollama", "LocalModels router"]
+
+
+def test_warm_sends_a_one_question_decision_with_keep_alive():
+    sent = []
+    assert sr.warm("d3:4b-nvfp4", caller=sent.append)
+    assert sent[0]["model"] == "d3:4b-nvfp4" and sent[0]["keep_alive"] == sr.WARM_KEEP_ALIVE
+    assert sent[0]["questions"]["w"]["type"] == "noul"
+
+
+def test_warm_without_model_or_with_a_failing_call_is_false_not_an_error(monkeypatch):
+    monkeypatch.setattr(sr, "status", lambda: {"model": None})
+    assert sr.warm() is False
+    def boom(body):
+        raise urllib.error.URLError("refused")
+    assert sr.warm("d3:4b-nvfp4", caller=boom) is False

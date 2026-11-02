@@ -1504,6 +1504,14 @@ ipcMain.handle('route:status', async () => {
   }
 });
 
+// Fire-and-forget: load the decision model while the human is still talking.
+ipcMain.handle('route:warm', async () => {
+  try {
+    await fetch(`${REGISTRY_URL}/route/warm`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+  } catch { /* a cold model only means a slower pick */ }
+  return true;
+});
+
 ipcMain.handle('route:choose', async (_event, text, choice, suggested) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/route/choose`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, choice, suggested: suggested || null }), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });

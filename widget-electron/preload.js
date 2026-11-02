@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('las', {
    * {decision: 'error', error}. Never sends anything by itself. */
   routeAsk: (text) => ipcRenderer.invoke('route:ask', text),
   routeStatus: () => ipcRenderer.invoke('route:status'),
+  routeWarm: () => ipcRenderer.invoke('route:warm'),
 
   /** General mic: deliver `text` to `choice` as a human dictation (POST
    * /route/choose); `suggested` = the router's pick, for its correction log. */

@@ -1874,6 +1874,15 @@ def route_status():
     return status()
 
 
+@app.post("/route/warm")
+def route_warm():
+    """Start loading the decision model in the background; returns at once.
+    The widget calls it when 🧭 starts recording."""
+    from cli.scope_router import warm
+    threading.Thread(target=warm, daemon=True, name="route-warm").start()
+    return {"warming": True}
+
+
 @app.post("/route")
 def route_text(body: RouteRequest):
     """Pick the agent (level=agent) or the session of `agent` (level=session)

@@ -193,6 +193,36 @@ def status(*, getter=_get_json) -> dict:
     return out
 
 
+# ── warm-up: load d3 while the human is still talking ────────────────────────
+#
+# Cold, d3 takes 6-16 s to answer; warm, under a second of model time. The
+# widget asks for a warm-up the moment 🧭 starts recording, so by the time the
+# dictation is transcribed the model is resident. Straight to Ollama (the
+# router's own call uses Ollama's 5-minute default keep_alive); d3 only takes
+# /v1/systemone, so the warm-up is a one-question decision (LocalModels' recipe).
+WARM_KEEP_ALIVE = os.getenv("LAS_ROUTER_KEEP_ALIVE", "10m")
+
+
+def warm(model: str | None = None, *, timeout: float = 30.0, caller=None) -> bool:
+    """Load the decision model into memory. Blocking; returns whether it answered."""
+    model = model or status().get("model")
+    if not model:
+        return False
+    body = {"model": model, "keep_alive": WARM_KEEP_ALIVE, "state": "warm",
+            "questions": {"w": {"type": "noul", "instructions": "ok"}}}
+    try:
+        if caller:
+            caller(body)
+        else:
+            req = urllib.request.Request(OLLAMA_URL.rstrip("/") + "/v1/systemone", data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                resp.read()
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return False
+
+
 def route(text: str, criteria: dict[str, str], level: str = "agent", *, caller=call_router) -> dict:
     """Ask the model and decide. Never raises: a router failure is `pending`."""
     if not criteria:

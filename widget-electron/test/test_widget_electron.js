@@ -1872,3 +1872,10 @@ test('🧭 only records when this Mac can route: it asks /route/status first, an
   assert.match(click[0], /routeStatus\(\)[\s\S]*if \(!applyRouteStatus\(st\)\) \{ routeNotice\(st\); return; \}[\s\S]*startRecording\('route'\)/);
   assert.match(readSrc('renderer', 'widget.css'), /\.facebtn\.unavailable/);
 });
+
+test('🧭 warms the decision model as recording starts, so the pick is not a cold load', () => {
+  assert.match(stripComments(readSrc('main.js')), /ipcMain\.handle\('route:warm'[\s\S]*?\/route\/warm/);
+  assert.match(stripComments(readSrc('preload.js')), /routeWarm: \(\) => ipcRenderer\.invoke\('route:warm'\)/);
+  const widget = stripComments(readSrc('renderer', 'widget.js'));
+  assert.match(widget, /window\.las\.routeWarm\(\);\s*startRecording\('route'\)/);
+});

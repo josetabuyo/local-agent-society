@@ -1625,7 +1625,10 @@ routeEl.addEventListener('click', async () => {
   let st = null;
   try { st = await window.las.routeStatus(); } catch { /* backend down → unavailable */ }
   if (!applyRouteStatus(st)) { routeNotice(st); return; }
-  if (micState === 'idle') startRecording('route');
+  if (micState !== 'idle') return;
+  // d3 loads while the human talks — warm by the time Whisper is done.
+  window.las.routeWarm();
+  startRecording('route');
 });
 
 // ── a routed dictation, in the conversation ─────────────────────────────────
