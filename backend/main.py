@@ -1867,6 +1867,13 @@ def _route_deliver(text: str, choice: str, level: str, agent: Optional[str], fro
                        session=choice if level == "session" else None)
 
 
+@app.get("/route/status")
+def route_status():
+    """Can this Mac route? The widget's 🧭 asks before recording."""
+    from cli.scope_router import status
+    return status()
+
+
 @app.post("/route")
 def route_text(body: RouteRequest):
     """Pick the agent (level=agent) or the session of `agent` (level=session)

@@ -116,6 +116,7 @@ contextBridge.exposeInMainWorld('las', {
    * belongs to. Resolves to its decision ({decision, choice, ranked, …}) or
    * {decision: 'error', error}. Never sends anything by itself. */
   routeAsk: (text) => ipcRenderer.invoke('route:ask', text),
+  routeStatus: () => ipcRenderer.invoke('route:status'),
 
   /** General mic: deliver `text` to `choice` as a human dictation (POST
    * /route/choose); `suggested` = the router's pick, for its correction log. */
@@ -189,7 +190,6 @@ contextBridge.exposeInMainWorld('las', {
   /** Clear button: types `text` (literally "/clear") into the agent's live
    * linked terminal(s) — the backend's AppleScript-via-iTerm write, not
    * vortexia messaging. */
-  writeToTty: (name, text) => ipcRenderer.invoke('agent:tty-write', name, text),
 
   /** Door button: mark this agent inactive on the backend and close this
    * widget window. See main.js's agent:deactivate comment. */

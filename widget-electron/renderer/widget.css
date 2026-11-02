@@ -361,7 +361,7 @@ html, body {
  * Bottom button row: ALL face buttons live here now, gear included — moved
  * off its earlier top-right absolute position on request, so there's a
  * single row along the bottom edge and nothing floating up top. Order:
- * gear + clear on the left, terminal/speaker/mic/focus on the right.
+ * gear on the left, then open/speaker/route/mic/children.
  * Flex layout (rather than the Swift version's fixed pixel x-coordinates)
  * so it holds up across this app's resizable window.
  */
@@ -690,3 +690,7 @@ html, body {
 .route-chip.route-go {
   background: var(--bubble-border, rgba(20, 20, 20, 0.2));
 }
+
+/* 🧭 without its router: dimmed, still clickable (the click explains why). */
+.facebtn.unavailable { opacity: 0.35; filter: grayscale(1); }
+.log .entry.route-notice .desc { white-space: normal; }

@@ -1494,6 +1494,16 @@ ipcMain.handle('route:ask', async (_event, text) => {
   }
 });
 
+// Can this Mac route at all (LocalModels router + Ollama + decision model)?
+ipcMain.handle('route:status', async () => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/route/status`, { signal: AbortSignal.timeout(5000) });
+    return res.ok ? await res.json() : { available: false, missing: [`backend HTTP ${res.status}`] };
+  } catch (err) {
+    return { available: false, missing: ['LAS backend'] };
+  }
+});
+
 ipcMain.handle('route:choose', async (_event, text, choice, suggested) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/route/choose`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, choice, suggested: suggested || null }), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
@@ -1704,23 +1714,6 @@ ipcMain.handle('agent:get-wake-enabled', async (_event, name) => {
     return await res.json();
   } catch (err) {
     return { wake_enabled: false, error: String(err) };
-  }
-});
-
-// Raw terminal write (types `text` into the agent's live linked terminal(s),
-// the backend's AppleScript-via-iTerm mechanism — see backend
-// POST /agents/{name}/tty-write). Used by the Clear button to send "/clear",
-// matching the retired Swift widget's clearSession() exactly.
-ipcMain.handle('agent:tty-write', async (_event, name, text) => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/tty-write`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-    return await res.json();
-  } catch (err) {
-    return { ok: false, error: String(err) };
   }
 });
 

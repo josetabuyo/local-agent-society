@@ -152,6 +152,47 @@ def decide(response: dict, *, min_top: float = MIN_TOP, min_margin: float = MIN_
             "router": {k: x_router.get(k) for k in ("resolved", "local", "fallback_used") if k in x_router}}
 
 
+# ── is the router usable on this machine? ────────────────────────────────────
+#
+# The general mic is optional: it needs LocalModels' router (ROUTER_URL) and,
+# behind it, Ollama with the decision model pulled. A Mac without them gets a
+# notice that says what to install, never a mic that records and goes nowhere.
+
+OLLAMA_URL = os.getenv("LAS_OLLAMA_URL", "http://localhost:11434")
+ROUTER_MODEL = os.getenv("LAS_ROUTER_MODEL", "d3")   # name prefix in `ollama list`
+STATUS_TIMEOUT_S = 1.5
+
+
+def _get_json(url: str, timeout: float = STATUS_TIMEOUT_S) -> dict:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def status(*, getter=_get_json) -> dict:
+    """{available, router, ollama, model, missing: [what to install]} — fast, never raises."""
+    out = {"available": False, "router": False, "ollama": False, "model": None, "missing": [],
+           "router_url": ROUTER_URL, "model_wanted": ROUTER_MODEL}
+    try:
+        out["router"] = (getter(ROUTER_URL.rstrip("/") + "/health") or {}).get("status") == "ok"
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        pass
+    try:
+        tags = getter(OLLAMA_URL.rstrip("/") + "/api/tags") or {}
+        out["ollama"] = True
+        out["model"] = next((m.get("name") for m in tags.get("models") or []
+                             if (m.get("name") or "").split(":")[0] == ROUTER_MODEL), None)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        pass
+    if not out["ollama"]:
+        out["missing"].append("ollama")
+    elif not out["model"]:
+        out["missing"].append(f"model {ROUTER_MODEL}")
+    if not out["router"]:
+        out["missing"].append("LocalModels router")
+    out["available"] = not out["missing"]
+    return out
+
+
 def route(text: str, criteria: dict[str, str], level: str = "agent", *, caller=call_router) -> dict:
     """Ask the model and decide. Never raises: a router failure is `pending`."""
     if not criteria:

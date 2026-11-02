@@ -217,3 +217,29 @@ def test_dictation_fix_endpoint_uses_the_live_agent_names(backend, monkeypatch, 
     c = TestClient(backend.app)
     assert c.post("/dictation/fix", json={"text": "decile a guabi"}).json() == {"text": "decile a Wavi", "changed": True}
     assert c.post("/dictation/fix", json={"text": "hola"}).json() == {"text": "hola", "changed": False}
+
+
+# ── /route/status: is the general mic usable on this Mac? ────────────────────
+
+def _getter(router_ok=True, ollama=True, models=("d3:4b-nvfp4",)):
+    def get(url, timeout=None):
+        if url.endswith("/health"):
+            if not router_ok:
+                raise urllib.error.URLError("refused")
+            return {"status": "ok"}
+        if not ollama:
+            raise urllib.error.URLError("refused")
+        return {"models": [{"name": m} for m in models]}
+    return get
+
+
+def test_status_available_when_router_ollama_and_model_are_there():
+    st = sr.status(getter=_getter())
+    assert st["available"] and st["missing"] == [] and st["model"] == "d3:4b-nvfp4"
+
+
+def test_status_names_each_missing_piece():
+    assert sr.status(getter=_getter(ollama=False))["missing"] == ["ollama"]
+    assert sr.status(getter=_getter(models=("qwen3.5:4b", "d3x:1b")))["missing"] == ["model d3"]
+    st = sr.status(getter=_getter(router_ok=False, ollama=False))
+    assert not st["available"] and st["missing"] == ["ollama", "LocalModels router"]

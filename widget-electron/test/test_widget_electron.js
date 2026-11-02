@@ -220,11 +220,18 @@ test('widget/ (Swift) has been removed — this Electron app is the sole widget'
 
 // ── face buttons (restored from widget/tray.swift) ──────────────────────────
 
-test('index.html renders all 7 face buttons (gear + 6, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot, "route" = the general mic)', () => {
+test('index.html renders all 6 face buttons (gear + 5, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot, "route" = the general mic)', () => {
   const html = readSrc('renderer', 'index.html');
-  for (const id of ['gear', 'clear', 'open', 'speaker', 'route', 'mic', 'children']) {
+  for (const id of ['gear', 'open', 'speaker', 'route', 'mic', 'children']) {
     assert.match(html, new RegExp(`id="${id}"`), `missing button #${id}`);
   }
+});
+
+test('the 🧹 clear button is gone from every layer (it never reached a terminal reliably)', () => {
+  assert.doesNotMatch(readSrc('renderer', 'index.html'), /id="clear"/);
+  assert.doesNotMatch(stripComments(readSrc('renderer', 'widget.js')), /getElementById\('clear'\)|writeToTty/);
+  assert.doesNotMatch(stripComments(readSrc('preload.js')), /writeToTty|agent:tty-write/);
+  assert.doesNotMatch(stripComments(readSrc('main.js')), /agent:tty-write/);
 });
 
 test('the focus/scope button and its TTY picker are gone from every layer (delivery is vortexia, not a TTY)', () => {
@@ -235,7 +242,6 @@ test('the focus/scope button and its TTY picker are gone from every layer (deliv
   assert.doesNotMatch(preload, /focusAgent|getAgentTtys|pinTty|agent:focus|agent:ttys|agent:pin-tty/);
   const main = stripComments(readSrc('main.js'));
   assert.doesNotMatch(main, /agent:focus|agent:ttys|agent:pin-tty/);
-  assert.match(main, /agent:tty-write/, 'the Clear button\'s raw "/clear" write stays');
 });
 
 test('preload.js exposes the face-button bridge methods on window.las', () => {
@@ -1854,4 +1860,15 @@ test('every final dictation goes through the vocabulary fix (backend /dictation/
   const body = extractFunctionBody(main, 'async function fixDictation(text) {');
   assert.match(body, /\/dictation\/fix`/);
   assert.match(body, /return text;\s*\}$/);
+});
+
+test('🧭 only records when this Mac can route: it asks /route/status first, and a missing router is a notice, not a dictation', () => {
+  const main = stripComments(readSrc('main.js'));
+  assert.match(main, /ipcMain\.handle\('route:status'[\s\S]*?\/route\/status/);
+  assert.match(stripComments(readSrc('preload.js')), /routeStatus: \(\) => ipcRenderer\.invoke\('route:status'\)/);
+  const widget = stripComments(readSrc('renderer', 'widget.js'));
+  const click = widget.match(/routeEl\.addEventListener\('click', async \(\) => \{[\s\S]*?\n\}\);/);
+  assert.ok(click, 'route click handler not found');
+  assert.match(click[0], /routeStatus\(\)[\s\S]*if \(!applyRouteStatus\(st\)\) \{ routeNotice\(st\); return; \}[\s\S]*startRecording\('route'\)/);
+  assert.match(readSrc('renderer', 'widget.css'), /\.facebtn\.unavailable/);
 });

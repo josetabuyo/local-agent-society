@@ -1078,30 +1078,6 @@ speakerEl.addEventListener('click', async () => {
   await persist({ mute: !prefs.mute });
 });
 
-// -- clear: type "/clear" into the linked terminal(s) ------------------------
-//
-// Faithful port of the retired Swift clearSession(), which did
-// injectToSession("/clear", source: "raw") — literally typing "/clear" into
-// the agent's live iTerm2 session(s). That raw-terminal-write mechanism
-// (distinct from the retired inter-agent inject/messaging pipeline — see
-// main.js's agent:focus/agent:tty-write comments) still exists on the
-// backend and still works; an agent can have more than one linked terminal
-// open, so this writes to all of them (backend: POST /agents/{name}/tty-write
-// with no `tty` -> _find_all_claude_ttys, not just one selected session).
-// Also clears this window's own visible log, which is free and harmless.
-
-document.getElementById('clear').addEventListener('click', async () => {
-  logEl.innerHTML = '';
-  try {
-    const result = await window.las.writeToTty(agentName, '/clear');
-    if (!result || !result.written || result.written.length === 0) {
-      console.warn('[widget] /clear did not reach any linked terminal:', result);
-    }
-  } catch (err) {
-    console.warn('[widget] tty-write failed:', err);
-  }
-});
-
 // -- mic: dictation via local, offline Whisper transcription ----------------
 //
 // Chromium's built-in SpeechRecognition/webkitSpeechRecognition is a cloud
@@ -1419,10 +1395,6 @@ async function stopRecordingAndTranscribe() {
       // specifically and isn't portable across terminal apps (or platforms —
       // Windows has no equivalent at all), which is exactly the class of
       // mechanism this whole project moved away from in favor of vortexia.
-      // The Clear button still uses writeToTty on purpose — "/clear" is
-      // meant to act on a live session right now, a different use case from
-      // dictation, which is fine landing in the inbox for the /las-agent
-      // skill to pick up at the next session start (see CLAUDE.md).
       //
       // Don't also appendLogEntry here — this agent is subscribed to its own
       // inbox topic, so the publish loops back through onVortexiaMessage and
@@ -1617,9 +1589,43 @@ micEl.addEventListener('click', (e) => {
 // 🧭 General mic: same recording, but the text goes to the scope router
 // (backend POST /route) instead of this agent. Click to start, click again
 // (or 🎤) to stop.
-routeEl.addEventListener('click', () => {
-  if (micState === 'listening') stopRecordingAndTranscribe();
-  else if (micState === 'idle') startRecording('route');
+//
+// 🧭 is optional: it needs LocalModels' router and Ollama with the decision
+// model (backend GET /route/status). Without them it stays dimmed, and a
+// click puts a one-line notice of what's missing in the log instead of
+// recording a dictation that could go nowhere. Checked on load and again on
+// every click, so installing them later turns it on without a restart.
+const ROUTE_NEEDS = 'needs Ollama + the d3 model + the LocalModels router (≈4 GB RAM while in use)';
+
+function applyRouteStatus(st) {
+  const ok = Boolean(st && st.available);
+  routeEl.classList.toggle('unavailable', !ok);
+  routeEl.title = ok ? 'General mic — dictate, the router picks the agent'
+    : `General mic unavailable: ${ROUTE_NEEDS}`;
+  return ok;
+}
+
+function routeNotice(st) {
+  const missing = (st && st.missing && st.missing.length) ? st.missing.join(', ') : 'router';
+  const row = document.createElement('div');
+  row.className = 'entry routed route-notice';
+  const desc = document.createElement('span');
+  desc.className = 'desc';
+  desc.textContent = `🧭 General mic unavailable — missing: ${missing}. It ${ROUTE_NEEDS}. Install them and click 🧭 again.`;
+  row.append(desc);
+  logEl.appendChild(row);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+window.las.routeStatus().then(applyRouteStatus).catch(() => applyRouteStatus(null));
+
+routeEl.addEventListener('click', async () => {
+  if (micState === 'listening') { stopRecordingAndTranscribe(); return; }
+  if (micState !== 'idle') return;
+  let st = null;
+  try { st = await window.las.routeStatus(); } catch { /* backend down → unavailable */ }
+  if (!applyRouteStatus(st)) { routeNotice(st); return; }
+  if (micState === 'idle') startRecording('route');
 });
 
 // ── a routed dictation, in the conversation ─────────────────────────────────
