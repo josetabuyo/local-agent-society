@@ -1826,11 +1826,11 @@ def _route_log(entry: dict) -> None:
         logger.warning(f"[route] could not write {ROUTE_LOG_FILE}: {exc}")
 
 
-def _route_candidates(level: str, agent: Optional[str]) -> dict:
+def _route_candidates(level: str, agent: Optional[str], rung: str = "short") -> dict:
     from cli.scope_router import agent_candidates, session_candidates
     registry = load_json(REGISTRY_FILE, {})
     if level == "agent":
-        return agent_candidates({name: _agent_config(name, registry) for name in registry})
+        return agent_candidates({name: _agent_config(name, registry) for name in registry}, rung)
     if level == "session":
         if not agent or agent not in registry:
             raise HTTPException(status_code=404, detail="level=session needs a registered `agent`")
@@ -1896,8 +1896,9 @@ def route_text(body: RouteRequest):
         text = result["text"]
     else:
         criteria = _route_candidates(body.level, body.agent)
+        detail = _route_candidates(body.level, body.agent, rung="long") if body.level == "agent" else None
         text = _route_fix_names(body.text)
-        result = route(text, criteria, body.level)
+        result = route(text, criteria, body.level, detail=detail)
         result["candidates"] = len(criteria)
         result["engine"] = "local"
     result["text"] = text   # what gets delivered — names fixed; clients send this, not what they heard

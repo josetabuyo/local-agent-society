@@ -93,11 +93,17 @@ def fix_names(text: str, fixes: dict[str, str]) -> str:
     return re.sub(r"[A-Za-zÁÉÍÓÚáéíóúÑñÜü]+", one, text)
 
 
-def agent_candidates(configs: dict[str, dict]) -> dict[str, str]:
-    """Agent name → scope text, for every agent whose config has one."""
+def agent_candidates(configs: dict[str, dict], rung: str = "short") -> dict[str, str]:
+    """Agent name → scope text, for every agent whose config has one.
+
+    rung="short" (the first pass) prefers short_description: d3's time is
+    ~4 ms per prompt token, and LocalModels measured 24 agents at 537 tokens /
+    ~2 s on short vs 900 / ~3.6 s on long, same accuracy (12/12). rung="long"
+    (the second pass, over a pending's top few) prefers long_description."""
+    order = ("short_description", "long_description") if rung == "short" else ("long_description", "short_description")
     out = {}
     for name, cfg in configs.items():
-        scope = (cfg.get("long_description") or cfg.get("short_description") or "").strip()
+        scope = next((cfg[k].strip() for k in order if isinstance(cfg.get(k), str) and cfg[k].strip()), "")
         if scope:
             out[name] = scope
     return out
@@ -281,8 +287,13 @@ def warm(model: str | None = None, *, timeout: float = 30.0, caller=None) -> boo
         return False
 
 
-def route(text: str, criteria: dict[str, str], level: str = "agent", *, caller=call_router) -> dict:
-    """Ask the model and decide. Never raises: a router failure is `pending`."""
+def route(text: str, criteria: dict[str, str], level: str = "agent", *, detail: dict[str, str] | None = None,
+          caller=call_router) -> dict:
+    """Ask the model and decide. Never raises: a router failure is `pending`.
+
+    `detail` (name → longer scope text) enables a second pass: a pending pick
+    is asked again over just its top few, with their longer descriptions —
+    3 options cost under a second."""
     if not criteria:
         return {"decision": "pending", "choice": None, "confidence": 0.0, "margin": 0.0, "confident": None,
                 "ranked": [], "reason": "no candidates with a scope description", "router": {}}
@@ -295,4 +306,17 @@ def route(text: str, criteria: dict[str, str], level: str = "agent", *, caller=c
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         return {"decision": "pending", "choice": None, "confidence": 0.0, "margin": 0.0, "confident": None,
                 "ranked": [], "reason": f"router unavailable: {exc}", "router": {}}
-    return decide(response)
+    first = decide(response)
+    if first["decision"] == "deliver" or not detail or (first["router"] or {}).get("fallback_used"):
+        return first
+    top = {r["name"]: detail.get(r["name"]) or criteria[r["name"]] for r in first["ranked"] if r["name"] in criteria}
+    if len(top) < 2 or top == {n: criteria[n] for n in top}:
+        return first   # nothing new to tell the model
+    try:
+        second = decide(caller(build_request(text, top, level)))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return first
+    second["passes"] = 2
+    if second["decision"] != "deliver":
+        second["ranked"] = second["ranked"] or first["ranked"]
+    return second

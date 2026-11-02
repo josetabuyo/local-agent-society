@@ -71,7 +71,9 @@ def test_no_candidates_is_pending():
 def test_candidates_use_the_scope_ladder():
     crit = sr.agent_candidates({"A": {"long_description": "long", "short_description": "short"},
                                 "B": {"short_description": "short"}, "C": {"name": "C"}})
-    assert crit == {"A": "long", "B": "short"}  # C has no scope → can't be chosen
+    assert crit == {"A": "short", "B": "short"}  # short first (prompt length is d3's cost); C has no scope
+    assert sr.agent_candidates({"A": {"long_description": "long", "short_description": "short"},
+                                "B": {"short_description": "short"}}, rung="long") == {"A": "long", "B": "short"}
 
 
 def test_session_candidates_skip_untitled_and_shells():
@@ -121,7 +123,7 @@ def backend(tmp_path, monkeypatch):
 
 def test_route_endpoint_delivers_as_mic(backend, monkeypatch):
     seen = []
-    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent": (seen.append(crit), sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))[1])
+    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent", **k: (seen.append(crit), sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))[1])
     res = TestClient(backend.app).post("/route", json={"text": "mandale un whatsapp a Diego", "deliver": True}).json()
     assert res["decision"] == "deliver" and res["choice"] == "Wavi" and res["delivered"]["ok"]
     assert seen[0] == {"LocalAgentSociety": "widget, mic, ports", "Wavi": "WhatsApp automation"}  # Mute has no scope
@@ -132,7 +134,7 @@ def test_route_endpoint_delivers_as_mic(backend, monkeypatch):
 
 
 def test_route_endpoint_pending_does_not_send(backend, monkeypatch):
-    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent": sr.decide(response({"Wavi": 0.5, "LocalAgentSociety": 0.45})))
+    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent", **k: sr.decide(response({"Wavi": 0.5, "LocalAgentSociety": 0.45})))
     res = TestClient(backend.app).post("/route", json={"text": "algo ambiguo", "deliver": True}).json()
     assert res["decision"] == "pending" and "delivered" not in res
     assert backend._published == []
@@ -177,7 +179,7 @@ def test_heard_as_aliases_and_ambiguous_keys():
 
 def test_route_endpoint_fixes_names_before_routing_and_delivery(backend, monkeypatch):
     seen = []
-    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent": (seen.append(text), sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))[1])
+    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent", **k: (seen.append(text), sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))[1])
     res = TestClient(backend.app).post("/route", json={"text": "mandale algo con guabi", "deliver": True}).json()
     assert seen == ["mandale algo con Wavi"] and res["text"] == "mandale algo con Wavi"
     assert backend._published[-1][1]["text"] == "mandale algo con Wavi"
@@ -305,6 +307,33 @@ def test_route_endpoint_uses_pulpo_then_falls_back(backend, monkeypatch):
     assert log[-1]["engine"] == "pulpo" and log[-1]["run_id"] == "wrun_1"
 
     monkeypatch.setattr(sr, "route_via_pulpo", lambda *a, **k: None)
-    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent": sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))
+    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent", **k: sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))
     res = TestClient(backend.app).post("/route", json={"text": "mandale un whatsapp"}).json()
     assert res["engine"] == "local" and res["choice"] == "Wavi"
+
+
+def test_a_pending_first_pass_is_asked_again_over_its_top_few_with_long_descriptions():
+    crit = {"Wavi": "WhatsApp", "Teli": "Telegram", "Pulpo": "Bots", "System": "IT"}
+    detail = {"Wavi": "WhatsApp automation for the owner's chats", "Teli": "Telegram CLI", "Pulpo": "Flows for Telegram bots",
+              "System": "Mac IT"}
+    asked = []
+    def caller(body):
+        c = body["questions"]["agent"]["criteria"]
+        asked.append(c)
+        if len(asked) == 1:
+            return response({"Wavi": 0.4, "Teli": 0.35, "Pulpo": 0.2, "System": 0.05})
+        return response({"Wavi": 0.85, "Teli": 0.1, "Pulpo": 0.05})
+    res = sr.route("mandale un mensaje", crit, detail=detail, caller=caller)
+    assert asked[1] == {n: detail[n] for n in ("Wavi", "Teli", "Pulpo")}   # only the top 3, long text
+    assert res["decision"] == "deliver" and res["choice"] == "Wavi" and res["passes"] == 2
+
+
+def test_no_second_pass_when_the_first_delivers_or_there_is_nothing_longer():
+    calls = []
+    caller = lambda body: (calls.append(1), response({"Wavi": 0.4, "Teli": 0.35}))[1]
+    sr.route("x", {"Wavi": "a", "Teli": "b"}, detail={"Wavi": "a", "Teli": "b"}, caller=caller)
+    assert len(calls) == 1
+    calls.clear()
+    sr.route("x", {"Wavi": "a", "Teli": "b"}, detail={"Wavi": "long a"},
+             caller=lambda body: (calls.append(1), response({"Wavi": 0.9, "Teli": 0.05}))[1])
+    assert len(calls) == 1
