@@ -14,92 +14,102 @@ def _tools(calls):
     ]
 
 
-class FakeChat:
-    """Returns the scripted messages in order; records which tools it was shown."""
-    def __init__(self, *replies):
-        self.replies = list(replies)
-        self.seen_tools = []
-        self.seen_system = []
-
-    def __call__(self, messages, tools):
-        self.seen_tools.append([t["function"]["name"] for t in tools])
-        self.seen_system.append(messages[0]["content"])
-        return self.replies.pop(0)
+def _answer(text):
+    msg = {"role": "assistant", "content": text}
+    return {"type": "answer", "messages": [msg], "message": msg, "model": "qwen3.5:4b"}
 
 
-def _agent(chat, selector=None, calls=None, skills=(), confirm=lambda p, o: True):
+def _calls(*calls):
+    msg = {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": n, "arguments": a}} for n, a in calls]}
+    return {"type": "tool_calls", "messages": [msg], "message": msg}
+
+
+class FakeFlow:
+    """Pulpo's las-local flow: returns scripted steps in order; records each request."""
+    def __init__(self, *steps):
+        self.steps = list(steps)
+        self.seen = []
+
+    def __call__(self, data):
+        self.seen.append(json.loads(json.dumps(data)))
+        step = self.steps.pop(0)
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+
+def _agent(step, calls=None, skills=(), confirm=lambda p, o: True):
     return la.LocalAgent(name="Pulpo", agent_dir="/tmp", tools=_tools(calls if calls is not None else []),
-                         skills=list(skills), chat=chat, selector=selector, confirm=confirm)
+                         skills=list(skills), step=step, confirm=confirm)
 
 
-def _picks(choice, p=0.9, second=0.05):
-    def selector(text, options, context=""):
-        assert choice in options
-        other = next(k for k in options if k != choice)
-        return la.scope_router.decide({"answers": {"agent": {"probabilities": {choice: p, other: second}}}})
-    return selector
-
-
-def test_confident_pick_narrows_the_tools_to_that_one():
+def test_a_turn_sends_the_whole_conversation_tools_and_skills_and_runs_the_asked_tool():
     calls = []
-    chat = FakeChat({"tool_calls": [{"function": {"name": "list_agents", "arguments": {}}}]},
-                    {"content": "Está Pulpo con claude y local."})
-    answer = _agent(chat, _picks("list_agents"), calls).handle(la.Turn("¿quién está conectado?"))
-    assert answer == "Está Pulpo con claude y local."
-    assert chat.seen_tools[0] == ["list_agents"]
-    assert calls == [("list_agents",)]
+    flow = FakeFlow(_calls(("list_agents", {})), _answer("Pulpo está conectado"))
+    skill = la.Skill("deploy-web", "how to deploy the web", "npx vercel --prod")
+    answer = _agent(flow, calls, skills=[skill]).handle(la.Turn("¿quién está?", "human"))
+    assert answer == "Pulpo está conectado" and calls == [("list_agents",)]
+    first, second = flow.seen
+    assert first["agent_name"] == "Pulpo" and first["messages"] == [{"role": "user", "content": "[dictated by the human] ¿quién está?"}]
+    assert [t["function"]["name"] for t in first["tools"]] == ["list_agents", "run_shell"]
+    assert first["skills"] == [{"name": "deploy-web", "description": "how to deploy the web", "body": "npx vercel --prod"}]
+    # the step's own messages, then the tool result, go back on the next step
+    assert second["messages"][1]["tool_calls"][0]["function"]["name"] == "list_agents"
+    assert second["messages"][2] == {"role": "tool", "tool_name": "list_agents", "content": "Pulpo: claude, local"}
 
 
-def test_chat_pick_offers_no_tools():
-    chat = FakeChat({"content": "hola"})
-    _agent(chat, _picks("chat")).handle(la.Turn("hola"))
-    assert chat.seen_tools == [[]]
+def test_string_json_arguments_are_accepted():
+    calls = []
+    _agent(FakeFlow(_calls(("run_shell", '{"command": "ls"}')), _answer("ok")), calls).handle(la.Turn("ls"))
+    assert calls == [("run_shell", "ls")]
 
 
-def test_weak_pick_falls_back_to_every_tool():
-    chat = FakeChat({"content": "?"})
-    _agent(chat, _picks("run_shell", p=0.45, second=0.40)).handle(la.Turn("algo raro"))
-    assert chat.seen_tools == [["list_agents", "run_shell"]]
+def test_pulpo_down_or_a_model_error_is_said_not_raised():
+    down = _agent(FakeFlow(la.StepError("Pulpo unreachable"))).handle(la.Turn("hola"))
+    assert down.startswith("(no answer:") and "unreachable" in down
+    err = _agent(FakeFlow({"type": "error", "messages": [], "error": "ollama down"})).handle(la.Turn("hola"))
+    assert err == "(no answer: ollama down)"
 
 
-def test_dead_selector_falls_back_to_every_tool():
-    def boom(body):
-        raise OSError("connection refused")
-    chat = FakeChat({"content": "ok"})
-    agent = _agent(chat, lambda t, o, c="": la.select(t, o, c, caller=boom))
-    agent.handle(la.Turn("x"))
-    assert chat.seen_tools == [["list_agents", "run_shell"]]
+def test_pulpo_step_posts_the_contract_and_rejects_odd_answers(monkeypatch):
+    seen = {}
 
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
 
-def test_chosen_skill_enters_the_system_prompt_only_when_picked():
-    sk = la.Skill("deploy", "deploy the web app", "Run npx vercel --prod from web/.")
-    chat = FakeChat({"content": "a"}, {"content": "b"})
-    agent = _agent(chat, _picks("skill:deploy"), skills=[sk])
-    agent.handle(la.Turn("deployá"))
-    assert "npx vercel --prod" in chat.seen_system[0]
-    agent.selector = _picks("chat")
-    agent.handle(la.Turn("gracias"))
-    assert "npx vercel --prod" not in chat.seen_system[1]
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(req, timeout):
+        seen["url"], seen["body"], seen["timeout"] = req.full_url, json.loads(req.data), timeout
+        return Resp(json.dumps({"run_id": "inline_1", "response": _answer("hola")}).encode())
+    monkeypatch.setattr(la.urllib.request, "urlopen", urlopen)
+    assert la.pulpo_step({"messages": []})["type"] == "answer"
+    assert seen["url"] == la.FLOW_URL and seen["body"]["wait"] is True and seen["body"]["timeout_ms"] == la.STEP_TIMEOUT_MS
+    assert seen["timeout"] > la.STEP_TIMEOUT_MS / 1000   # the flow's own 504 arrives first
+    monkeypatch.setattr(la.urllib.request, "urlopen", lambda req, timeout: Resp(b'{"response": {"type": "maybe"}}'))
+    import pytest
+    with pytest.raises(la.StepError):
+        la.pulpo_step({"messages": []})
 
 
 def test_declined_confirmation_does_not_run_the_tool():
     calls = []
-    chat = FakeChat({"tool_calls": [{"function": {"name": "run_shell", "arguments": {"command": "rm -rf x"}}}]},
-                    {"content": "no lo corrí"})
-    _agent(chat, None, calls, confirm=lambda p, o: False).handle(la.Turn("borrá x"))
+    flow = FakeFlow(_calls(("run_shell", {"command": "rm -rf x"})), _answer("no lo corrí"))
+    _agent(flow, calls, confirm=lambda p, o: False).handle(la.Turn("borrá x"))
     assert calls == []
+    assert flow.seen[1]["messages"][-1]["content"] == "the human declined to run this"
 
 
 def test_tool_rounds_are_capped():
-    loop = {"tool_calls": [{"function": {"name": "list_agents", "arguments": "{}"}}]}
-    chat = FakeChat(*[loop] * (la.MAX_TOOL_ROUNDS + 1))
-    answer = _agent(chat).handle(la.Turn("x"))
+    flow = FakeFlow(*[_calls(("list_agents", "{}"))] * (la.MAX_TOOL_ROUNDS + 1))
+    answer = _agent(flow).handle(la.Turn("x"))
     assert "too many tool calls" in answer
 
 
 def test_history_is_bounded_and_tool_chatter_dropped():
-    chat = FakeChat(*[{"content": str(i)} for i in range(20)])
-    agent = _agent(chat)
+    agent = _agent(FakeFlow(*[_answer(str(i)) for i in range(20)]))
     for i in range(20):
         agent.handle(la.Turn(f"m{i}"))
     assert len(agent.history) == la.HISTORY_TURNS
@@ -142,7 +152,7 @@ def test_runtime_answers_the_terminal_and_exits(monkeypatch):
     sent = []
     monkeypatch.setattr(la, "_sh", lambda argv, **k: sent.append(argv) or "")
     out = io.StringIO()
-    agent = _agent(FakeChat({"content": "¡hola!"}))
+    agent = _agent(FakeFlow(_answer("¡hola!")))
     rt = la.LocalRuntime(agent, bridge_argv=None, stdin=io.StringIO("hola\n/exit\n"), out=out)
     assert rt.run() == 0
     assert "Pulpo › ¡hola!" in out.getvalue()
@@ -152,24 +162,11 @@ def test_runtime_answers_the_terminal_and_exits(monkeypatch):
 def test_runtime_replies_to_the_sending_agent(monkeypatch):
     sent = []
     monkeypatch.setattr(la, "_sh", lambda argv, **k: sent.append(argv) or "")
-    agent = _agent(FakeChat({"content": "listo"}))
+    agent = _agent(FakeFlow(_answer("listo")))
     rt = la.LocalRuntime(agent, bridge_argv=None, las="las", out=io.StringIO())
     turn = la.envelope_to_turn({"from": "Wavi", "source": "agent", "text": "hacé algo"}, "Pulpo")
     rt.deliver(turn, agent.handle(turn))
     assert sent == [["las", "agent", "send", "--to", "Wavi", "--from", "Pulpo", la.AUTO_REPLY_MARK + "listo"]]
-
-
-def test_select_builds_a_systemone_choice():
-    seen = {}
-
-    def caller(body):
-        seen.update(body)
-        return {"answers": {"agent": {"probabilities": {"chat": 0.9, "x": 0.1}}}}
-    res = la.select("hola", {"chat": "talk", "x": "do x"}, "User: antes", caller=caller)
-    assert res["decision"] == "deliver" and res["choice"] == "chat"
-    assert seen["questions"]["agent"]["type"] == "choice"
-    assert json.dumps(seen["questions"]["agent"]["criteria"]) == json.dumps({"chat": "talk", "x": "do x"})
-    assert "User: hola" in seen["state"]
 
 
 def test_sessions_listing_is_flattened_per_agent():
@@ -180,14 +177,6 @@ def test_sessions_listing_is_flattened_per_agent():
         'agent Pulpo: one claude terminal open — working on "Nodo Jev"',
         'agent Pulpo: one local terminal open',
     ]
-
-
-def test_confident_pick_keeps_a_strong_runner_up():
-    def selector(text, options, context=""):
-        return la.scope_router.decide({"answers": {"agent": {"probabilities": {"run_shell": 0.59, "list_agents": 0.31, "chat": 0.05}}}})
-    chat = FakeChat({"content": "ok"})
-    _agent(chat, selector).handle(la.Turn("x"))
-    assert chat.seen_tools == [["list_agents", "run_shell"]]
 
 
 def test_yes_never_covers_another_agents_message():
@@ -203,9 +192,8 @@ def test_yes_never_covers_another_agents_message():
 
 def test_tool_confirmation_sees_the_turns_origin():
     seen = []
-    chat = FakeChat({"tool_calls": [{"function": {"name": "run_shell", "arguments": {"command": "ls"}}}]},
-                    {"content": "ok"})
-    agent = _agent(chat, confirm=lambda p, o: seen.append(o) or False)
+    agent = _agent(FakeFlow(_calls(("run_shell", {"command": "ls"})), _answer("ok")),
+                   confirm=lambda p, o: seen.append(o) or False)
     agent.handle(la.Turn("ls", "agent", "Wavi"))
     assert seen == ["agent"]
 
@@ -215,7 +203,7 @@ def test_automatic_replies_are_never_answered():
 
 
 def test_replies_to_one_sender_are_capped_per_minute():
-    rt = la.LocalRuntime(_agent(FakeChat()), bridge_argv=None, out=io.StringIO())
+    rt = la.LocalRuntime(_agent(FakeFlow()), bridge_argv=None, out=io.StringIO())
     assert [rt.may_reply("Wavi", now=t) for t in range(la.REPLIES_PER_MINUTE + 1)] == [True] * la.REPLIES_PER_MINUTE + [False]
     assert rt.may_reply("Teli", now=5) is True
     assert rt.may_reply("Wavi", now=100) is True
@@ -225,7 +213,7 @@ def test_spoken_answer_and_title_are_never_cut(monkeypatch):
     sent = []
     monkeypatch.setattr(la, "_sh", lambda argv, **k: sent.append(argv) or "")
     long = "x" * 900
-    agent = _agent(FakeChat({"content": "Un título bastante más largo que treinta y cuatro caracteres"}))
+    agent = _agent(FakeFlow(_answer("Un título bastante más largo que treinta y cuatro caracteres")))
     rt = la.LocalRuntime(agent, bridge_argv=None, out=io.StringIO())
     rt.deliver(la.Turn("hola", "human"), long)
     assert sent[-1][2] == long
@@ -236,8 +224,6 @@ def test_spoken_answer_and_title_are_never_cut(monkeypatch):
 
 
 def test_title_falls_back_to_the_whole_topic(monkeypatch):
-    def down(messages, tools):
-        raise OSError("ollama down")
-    rt = la.LocalRuntime(_agent(down), bridge_argv=None, out=io.StringIO())
+    rt = la.LocalRuntime(_agent(FakeFlow(la.StepError("Pulpo down"))), bridge_argv=None, out=io.StringIO())
     rt.last_topic = "una consulta larga sobre los puertos de la base de datos local"
     assert rt.make_title() == rt.last_topic

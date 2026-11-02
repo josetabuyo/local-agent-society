@@ -55,7 +55,7 @@ DEFAULT_RUNTIMES = {
     "local": {
         "intelligent": True,
         "accepts": [KIND_MESSAGE, KIND_COMMAND],
-        "scope": "local model (Ollama chat + LocalModels selector): conversational, small tools, answers back",
+        "scope": "local model through Pulpo's las-local flow: conversational, small tools, answers back",
     },
     "shell": {
         "intelligent": False,
