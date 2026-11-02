@@ -1888,15 +1888,23 @@ def route_text(body: RouteRequest):
     """Pick the agent (level=agent) or the session of `agent` (level=session)
     `text` belongs to. Returns the decision — deliver | pending — with the
     ranked candidates; with deliver=true a confident pick is also sent."""
-    from cli.scope_router import route
-    criteria = _route_candidates(body.level, body.agent)
-    text = _route_fix_names(body.text)
-    result = route(text, criteria, body.level)
-    result["candidates"] = len(criteria)
+    from cli.scope_router import route, route_via_pulpo
+    # Pulpo's "las-dictation" flow decides when it's up; this backend's own
+    # pipeline is the fallback (cli/scope_router.py, route_via_pulpo).
+    result = route_via_pulpo(body.text, body.level, body.agent, body.from_agent)
+    if result is not None:
+        text = result["text"]
+    else:
+        criteria = _route_candidates(body.level, body.agent)
+        text = _route_fix_names(body.text)
+        result = route(text, criteria, body.level)
+        result["candidates"] = len(criteria)
+        result["engine"] = "local"
     result["text"] = text   # what gets delivered — names fixed; clients send this, not what they heard
     if body.deliver and result["decision"] == "deliver":
         result["delivered"] = _route_deliver(text, result["choice"], body.level, body.agent, body.from_agent)
-    _route_log({"text": text, **({"heard": body.text} if text != body.text else {}), "level": body.level, "agent": body.agent, "decision": result["decision"],
+    _route_log({"text": text, **({"heard": body.text} if text != body.text else {}), "engine": result.get("engine"),
+                **({"run_id": result["run_id"]} if result.get("run_id") else {}), "level": body.level, "agent": body.agent, "decision": result["decision"],
                 "choice": result["choice"], "ranked": result["ranked"], "reason": result["reason"],
                 "delivered": bool(result.get("delivered"))})
     return result

@@ -1479,7 +1479,8 @@ ipcMain.handle('agent:sessions', async (_event, name) => {
 // only shows the pick and sends the human's final choice. The model can take
 // a while when it is cold, so a generous timeout — a timeout is an error the
 // card shows, never a silent drop.
-const ROUTE_TIMEOUT_MS = 30000;
+// Pulpo's flow may take its full 15 s before the local fallback runs (≤12 s).
+const ROUTE_TIMEOUT_MS = 40000;
 
 ipcMain.handle('route:ask', async (_event, text) => {
   try {

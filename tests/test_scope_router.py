@@ -104,6 +104,7 @@ def backend(tmp_path, monkeypatch):
     for attr in ("REGISTRY_FILE", "SESSIONS_FILE", "INACTIVE_FILE", "WAKE_ENABLED_FILE"):
         monkeypatch.setattr(main, attr, tmp_path / f"{attr.lower()}.json")
     monkeypatch.setattr(main, "ROUTE_LOG_FILE", tmp_path / "route_log.jsonl")
+    monkeypatch.setattr(sr, "ROUTE_ENGINE", "local")   # never reach a real Pulpo from a test
     published = []
     monkeypatch.setattr(main, "_vortexia_publish",
                         lambda topic, envelope, retain=False: (published.append((topic, envelope)), True)[1])
@@ -258,3 +259,52 @@ def test_warm_without_model_or_with_a_failing_call_is_false_not_an_error(monkeyp
     def boom(body):
         raise urllib.error.URLError("refused")
     assert sr.warm("d3:4b-nvfp4", caller=boom) is False
+
+
+# ── Pulpo's "las-dictation" flow decides; the backend falls back to itself ────
+
+PULPO_OK = {"run_id": "wrun_1", "response": {"decision": "deliver", "choice": "Wavi", "confidence": 0.72, "margin": 0.57,
+            "ranked": [{"name": "Wavi", "p": 0.72}, {"name": "Monkey", "p": 0.15}], "reason": None,
+            "text": "mandale un whatsapp a Wavi", "router": {"local": True}}}
+
+
+def test_route_via_pulpo_sends_the_flow_contract_and_returns_its_decision(monkeypatch):
+    monkeypatch.setattr(sr, "ROUTE_ENGINE", "pulpo")
+    calls = []
+    res = sr.route_via_pulpo("mandale un guasap a guabi", "session", "Pulpo", "Wavi",
+                             caller=lambda url, body, timeout: (calls.append((url, body, timeout)), PULPO_OK)[1])
+    url, body, timeout = calls[0]
+    assert url == sr.PULPO_FLOW_URL and body["wait"] is True and body["timeout_ms"] == sr.PULPO_FLOW_TIMEOUT_MS
+    assert body["data"] == {"text": "mandale un guasap a guabi", "level": "session", "from_agent": "Wavi", "agent": "Pulpo"}
+    assert timeout > sr.PULPO_FLOW_TIMEOUT_MS / 1000   # the flow's own 504 comes back before the socket gives up
+    assert res["choice"] == "Wavi" and res["engine"] == "pulpo" and res["run_id"] == "wrun_1"
+
+
+@pytest.mark.parametrize("outcome", [urllib.error.URLError("refused"), TimeoutError(), {"run_id": "x", "error": "timeout"},
+                                     {"response": {"decision": "maybe"}}, None])
+def test_route_via_pulpo_is_none_when_pulpo_is_down_slow_or_odd(monkeypatch, outcome):
+    monkeypatch.setattr(sr, "ROUTE_ENGINE", "pulpo")
+    def caller(url, body, timeout):
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+    assert sr.route_via_pulpo("hola", caller=caller) is None
+
+
+def test_route_via_pulpo_off_when_engine_is_local(monkeypatch):
+    monkeypatch.setattr(sr, "ROUTE_ENGINE", "local")
+    assert sr.route_via_pulpo("hola", caller=lambda *a: PULPO_OK) is None
+
+
+def test_route_endpoint_uses_pulpo_then_falls_back(backend, monkeypatch):
+    monkeypatch.setattr(sr, "route_via_pulpo", lambda *a, **k: dict(PULPO_OK["response"], engine="pulpo", run_id="wrun_1"))
+    monkeypatch.setattr(sr, "route", lambda *a, **k: pytest.fail("local pipeline must not run when Pulpo decided"))
+    res = TestClient(backend.app).post("/route", json={"text": "mandale un guasap a guabi"}).json()
+    assert res["engine"] == "pulpo" and res["choice"] == "Wavi" and res["text"] == "mandale un whatsapp a Wavi"
+    log = [json.loads(l) for l in backend.ROUTE_LOG_FILE.read_text().splitlines()]
+    assert log[-1]["engine"] == "pulpo" and log[-1]["run_id"] == "wrun_1"
+
+    monkeypatch.setattr(sr, "route_via_pulpo", lambda *a, **k: None)
+    monkeypatch.setattr(sr, "route", lambda text, crit, level="agent": sr.decide(response({"Wavi": 0.9, "LocalAgentSociety": 0.05})))
+    res = TestClient(backend.app).post("/route", json={"text": "mandale un whatsapp"}).json()
+    assert res["engine"] == "local" and res["choice"] == "Wavi"

@@ -190,7 +190,65 @@ def status(*, getter=_get_json) -> dict:
     if not out["router"]:
         out["missing"].append("LocalModels router")
     out["available"] = not out["missing"]
+    # Pulpo is optional: without it the backend decides by itself.
+    out["engine"] = "pulpo" if ROUTE_ENGINE == "pulpo" and pulpo_up() else "local"
     return out
+
+
+# ── the decision, as a Pulpo flow ────────────────────────────────────────────
+#
+# The routing pipeline (vocabulary fix → live candidates → d3 → deliver /
+# pending) lives as Pulpo's "las-dictation" flow, where it can be seen, edited
+# and tested in Pulpo's editor. Pulpo owns the flow; LAS only calls it and
+# delivers. It decides, never delivers. The response is this module's own
+# shape (route()). When Pulpo is down, slow (HTTP 504) or answers garbage,
+# the backend runs route() itself, so 🧭 never depends on Pulpo being up.
+# LAS_ROUTE_ENGINE=local skips Pulpo entirely.
+
+PULPO_FLOW_URL = os.getenv("LAS_PULPO_FLOW_URL", "http://localhost:9010/api/flows/las-dictation/trigger/entrada")
+ROUTE_ENGINE = os.getenv("LAS_ROUTE_ENGINE", "pulpo")
+PULPO_FLOW_TIMEOUT_MS = int(os.getenv("LAS_PULPO_FLOW_TIMEOUT_MS", "15000"))
+
+
+def _post_json(url: str, body: dict, timeout: float) -> dict:
+    req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def route_via_pulpo(text: str, level: str = "agent", agent: str | None = None, from_agent: str | None = None,
+                    *, caller=_post_json) -> dict | None:
+    """Pulpo's decision, or None (→ caller falls back to route()). Never raises."""
+    if ROUTE_ENGINE != "pulpo":
+        return None
+    data = {"text": text, "level": level, "from_agent": from_agent or "LocalAgentSociety"}
+    if agent:
+        data["agent"] = agent
+    try:
+        out = caller(PULPO_FLOW_URL, {"wait": True, "timeout_ms": PULPO_FLOW_TIMEOUT_MS, "data": data},
+                     PULPO_FLOW_TIMEOUT_MS / 1000 + 3)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
+    res = (out or {}).get("response")
+    if not isinstance(res, dict) or res.get("decision") not in ("deliver", "pending") or not isinstance(res.get("ranked"), list):
+        return None
+    res.setdefault("text", text)
+    res["engine"] = "pulpo"
+    res["run_id"] = out.get("run_id")
+    return res
+
+
+def pulpo_up(timeout: float = 0.5) -> bool:
+    """Is anything listening on the flow's host:port? (Cheap: no Next.js compile.)"""
+    import socket
+    from urllib.parse import urlparse
+    u = urlparse(PULPO_FLOW_URL)
+    try:
+        with socket.create_connection((u.hostname or "localhost", u.port or 80), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 # ── warm-up: load d3 while the human is still talking ────────────────────────
