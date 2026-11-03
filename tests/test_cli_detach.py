@@ -50,3 +50,31 @@ def test_open_saves_the_command_and_spawns_the_proc_bridge_detached(tmp_path, mo
     argv = seen["argv"]
     assert argv[2:5] == ["proc", "--agent", "Robo"] and argv[argv.index("--exec") + 1] == "pulpo agent run"
     assert seen["cwd"] == tmp_path and seen["env"]["LAS_LOCALE"] == "es-AR"
+
+
+def test_las_any_program_runs_it_connected_and_unknown_words_still_error(monkeypatch):
+    """`las pulpo agent run`: a first word that is no subcommand but a program on PATH runs connected."""
+    import cli.main as m
+    import cli.commands.bridge as b
+    ran = []
+    monkeypatch.setattr(m.shutil, "which", lambda w: "/bin/" + w if w == "pulpo" else None)
+    monkeypatch.setattr(b, "run_connected", lambda argv: ran.append(argv))
+    res = CliRunner().invoke(m.cli, ["pulpo", "agent", "run", "--yes"])
+    assert res.exit_code == 0, res.output
+    assert ran == [["pulpo", "agent", "run", "--yes"]]
+    assert CliRunner().invoke(m.cli, ["nonexistent-xyz"]).exit_code != 0
+    assert m.cli.get_command(None, "speak") is not None, "real subcommands win over PATH programs"
+
+
+def test_run_connected_execs_the_proc_bridge_with_the_whole_command_line(monkeypatch):
+    import cli.commands.bridge as b
+    seen = {}
+    monkeypatch.setattr(b, "resolve_agent_name", lambda n: "Robo")
+    monkeypatch.setattr(b, "_chain", lambda name: None)
+    monkeypatch.setattr(b, "_sign_terminal", lambda name, runtime: seen.update(runtime=runtime))
+    monkeypatch.setattr(b, "_exec", lambda argv: seen.update(argv=argv))
+    b.run_connected(["pulpo", "agent", "run", "two words"])
+    assert seen["runtime"] == "pulpo"
+    argv = seen["argv"]
+    assert argv[2:5] == ["proc", "--agent", "Robo"] and argv[argv.index("--exec") + 1] == "pulpo agent run 'two words'"
+    assert "--log" not in argv, "a terminal session, not a detached one"

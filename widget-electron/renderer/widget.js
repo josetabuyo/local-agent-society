@@ -1096,13 +1096,11 @@ speakerEl.addEventListener('click', async () => {
 // the same destination the old SpeechRecognition.onresult used.
 
 const micEl = document.getElementById('mic');
-const routeEl = document.getElementById('route');
 const MAX_RECORDING_MS = 5400000; // 90 min safety net if the user forgets to click stop (long dictations; whisper-base runs ~7x realtime locally, so a full window is ~13 min of transcription)
 
 let mediaRecorder = null;
 let recordedChunks = [];
 let micState = 'idle'; // 'idle' | 'listening' | 'transcribing'
-let micMode = 'self';  // 'self' (🎤: this agent) | 'route' (🧭: the router picks the agent)
 let discardRecording = false; // a bubble's cancel: stop, throw the audio away, send nothing
 let maxDurationTimer = null;
 let countdownTimers = [];
@@ -1118,15 +1116,8 @@ function setMicState(next) {
   if ((next === 'listening') !== (micState === 'listening')) window.las.setMicRecording(agentName, next === 'listening');
   micState = next;
   reportMic(next);
-  // Whichever button started the dictation shows its phases.
-  const btn = micMode === 'route' ? routeEl : micEl;
-  for (const el of [micEl, routeEl]) {
-    el.classList.toggle('active', el === btn && next === 'listening');
-    el.classList.toggle('busy', el === btn && next === 'transcribing');
-  }
-  routeEl.title = next === 'idle' || micMode !== 'route'
-    ? 'General mic: dictate without choosing an agent — the router sends it to whoever it fits'
-    : (next === 'listening' ? 'Recording for the router… click to stop' : 'Transcribing…');
+  micEl.classList.toggle('active', next === 'listening');
+  micEl.classList.toggle('busy', next === 'transcribing');
   if (next === 'listening') {
     micEl.title = 'Recording… click to stop';
   } else if (next === 'transcribing') {
@@ -1403,10 +1394,6 @@ async function stopRecordingAndTranscribe() {
       // last-used one, all, or one — the children button) is the agent's
       // own `sessions.target` in its .las-agent.json, applied by the
       // backend when it routes the send (docs/adr/0005).
-      if (micMode === 'route') {
-        routeDictation(result.text);   // the card takes it from here; not awaited — the mic is free again
-        return;
-      }
       const sendResult = await window.las.sendToSelf(agentName, result.text);
       if (sendResult && sendResult.ok) reportMic('sent', { text: result.text });
       if (!sendResult || !sendResult.ok) {
@@ -1537,8 +1524,7 @@ function stopLiveTranscription() {
   return st;
 }
 
-async function startRecording(mode = 'self') {
-  micMode = mode;
+async function startRecording() {
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -1580,174 +1566,11 @@ micEl.addEventListener('click', (e) => {
     if (micState === 'listening') {
       stopRecordingAndTranscribe();
     } else if (micState === 'idle') {
-      startRecording('self');
+      startRecording();
     }
     // clicks while 'transcribing' are ignored — nothing meaningful to toggle
   }, 220);
 });
-
-// 🧭 General mic: same recording, but the text goes to the scope router
-// (backend POST /route) instead of this agent. Click to start, click again
-// (or 🎤) to stop.
-//
-// 🧭 is optional: it needs LocalModels' router and Ollama with the decision
-// model (backend GET /route/status). Without them it stays dimmed, and a
-// click puts a one-line notice of what's missing in the log instead of
-// recording a dictation that could go nowhere. Checked on load and again on
-// every click, so installing them later turns it on without a restart.
-const ROUTE_NEEDS = 'needs Ollama + the d3 model + the LocalModels router (≈4 GB RAM while in use)';
-
-function applyRouteStatus(st) {
-  const ok = Boolean(st && st.available);
-  routeEl.classList.toggle('unavailable', !ok);
-  routeEl.title = ok ? 'General mic — dictate, the router picks the agent'
-    : `General mic unavailable: ${ROUTE_NEEDS}`;
-  return ok;
-}
-
-function routeNotice(st) {
-  const missing = (st && st.missing && st.missing.length) ? st.missing.join(', ') : 'router';
-  const row = document.createElement('div');
-  row.className = 'entry routed route-notice';
-  const desc = document.createElement('span');
-  desc.className = 'desc';
-  desc.textContent = `🧭 General mic unavailable — missing: ${missing}. It ${ROUTE_NEEDS}. Install them and click 🧭 again.`;
-  row.append(desc);
-  logEl.appendChild(row);
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-window.las.routeStatus().then(applyRouteStatus).catch(() => applyRouteStatus(null));
-
-routeEl.addEventListener('click', async () => {
-  if (micState === 'listening') { stopRecordingAndTranscribe(); return; }
-  if (micState !== 'idle') return;
-  let st = null;
-  try { st = await window.las.routeStatus(); } catch { /* backend down → unavailable */ }
-  if (!applyRouteStatus(st)) { routeNotice(st); return; }
-  if (micState !== 'idle') return;
-  // d3 loads while the human talks — warm by the time Whisper is done.
-  window.las.routeWarm();
-  startRecording('route');
-});
-
-// ── a routed dictation, in the conversation ─────────────────────────────────
-// The 🧭 dictation is the human's words, so it is a mic bubble (right side,
-// the user-msg kind — still exactly three kinds) living in the log like any
-// other; under it, the router's pick and the controls:
-//   deliver → "🧭 → Wavi · 83% (4s)" counting down, with Send now / Change;
-//             ✕ sends nothing; at zero it is sent to the pick.
-//   pending → "🧭 who is this for?" + chips of the best candidates (and this
-//             agent, always) — waits for a tap; nothing goes anywhere alone.
-// Once sent it stays in the history as "🧭 → Wavi". Every send goes through
-// POST /route/choose, which logs the router's pick next to the human's.
-const ROUTE_COUNTDOWN_S = 4;
-
-function pct(p) { return `${Math.round((p || 0) * 100)}%`; }
-
-function routedEntry(text) {
-  const row = document.createElement('div');
-  row.className = 'entry user-msg routed';
-  const bubble = document.createElement('span');
-  bubble.className = 'bubble';
-  const said = document.createElement('span');
-  said.textContent = text;
-  const controls = document.createElement('span');
-  controls.className = 'route-row';
-  bubble.append(said, controls);
-  const desc = document.createElement('span');
-  desc.className = 'desc';
-  row.append(bubble, desc);
-  logEl.appendChild(row);
-  const entry = { row, said, controls, desc, timer: null };
-  entry.set = (label, buttons = []) => {
-    clearInterval(entry.timer);
-    entry.timer = null;
-    desc.textContent = `🧭 ${label}`;
-    controls.replaceChildren(...buttons);
-    controls.classList.toggle('hidden', !buttons.length);
-    logEl.scrollTop = logEl.scrollHeight;
-  };
-  return entry;
-}
-
-function routeButton(label, onClick, cls = '') {
-  const b = document.createElement('button');
-  b.className = `route-chip ${cls}`.trim();
-  b.textContent = label;
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-function cancelButton(entry) {
-  return routeButton('✕', () => {
-    window.las.log('info', 'mic', 'route: dismissed — nothing sent');
-    entry.set('not sent');
-    entry.row.classList.add('route-cancelled');
-  }, 'route-x');
-}
-
-function showRouteChips(entry, text, res, label) {
-  const names = (res.ranked || []).slice();
-  if (!names.some((r) => r.name === agentName)) names.push({ name: agentName, p: null });
-  entry.set(label, [
-    ...names.map((r) => routeButton(r.p == null ? r.name : `${r.name} · ${pct(r.p)}`, () => sendRouted(entry, text, r.name, res.choice))),
-    cancelButton(entry),
-  ]);
-}
-
-async function sendRouted(entry, text, choice, suggested) {
-  entry.set(`→ ${choice}…`);
-  const out = await window.las.routeChoose(text, choice, suggested);
-  if (out && out.ok) {
-    reportMic('sent', { text });
-    // To this very agent, the dictation comes back through its own inbox as
-    // a plain mic bubble — keep one, not two.
-    if (choice === agentName) entry.row.remove();
-    else entry.set(`→ ${choice}`);
-  } else {
-    const err = (out && out.error) || 'unknown error';
-    showRouteChips(entry, text, { ranked: [{ name: choice, p: null }], choice: suggested }, `not sent (${err}) — retry?`);
-    reportMic('failed', { error: `not delivered: ${err}` });
-  }
-}
-
-async function routeDictation(text) {
-  const entry = routedEntry(text);
-  entry.set('routing…');
-  const res = await window.las.routeAsk(text);
-  if (!res || res.decision === 'error') {
-    showRouteChips(entry, text, { ranked: [] }, 'router unavailable — send it here?');
-    return;
-  }
-  // The backend fixes misheard agent names ("guabi" → "Wavi"): from here on
-  // the bubble shows, and the agent receives, its corrected text.
-  if (res.text) {
-    text = res.text;
-    entry.said.textContent = text;
-  }
-  if (res.decision !== 'deliver') {
-    showRouteChips(entry, text, res, 'who is this for?');
-    return;
-  }
-  let left = ROUTE_COUNTDOWN_S;
-  const buttons = [
-    routeButton('Send now', () => sendRouted(entry, text, res.choice, res.choice), 'route-go'),
-    routeButton('Change', () => showRouteChips(entry, text, res, 'send it to…')),
-    cancelButton(entry),
-  ];
-  entry.set(`→ ${res.choice} · ${pct(res.confidence)} (${left}s)`, buttons);
-  entry.timer = setInterval(() => {
-    left -= 1;
-    if (left > 0) {
-      entry.desc.textContent = `🧭 → ${res.choice} · ${pct(res.confidence)} (${left}s)`;
-      return;
-    }
-    clearInterval(entry.timer);
-    entry.timer = null;
-    sendRouted(entry, text, res.choice, res.choice);
-  }, 1000);
-}
 
 // A speech bubble's "answer by voice" (main.js onBubbleAction) drives this
 // widget's mic from afar — the widget stays on its own Space, the bubble is
@@ -1763,7 +1586,7 @@ window.las.onMicRequest((command) => {
       stopRecordingAndTranscribe();
     }
   } else if (micState === 'idle') {
-    startRecording('self');
+    startRecording();
   } else {
     reportMic('failed', { error: `mic busy (${micState})` });
   }

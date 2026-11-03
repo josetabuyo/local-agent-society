@@ -228,9 +228,9 @@ test('widget/ (Swift) has been removed — this Electron app is the sole widget'
 
 // ── face buttons (restored from widget/tray.swift) ──────────────────────────
 
-test('index.html renders all 6 face buttons (gear + 5, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot, "route" = the general mic)', () => {
+test('index.html renders all 5 face buttons (gear + 4, "open" in the retired palette\'s slot, "children" in the retired focus/scope slot; no 🧭 — a command is connected from a terminal with `las <command>`)', () => {
   const html = readSrc('renderer', 'index.html');
-  for (const id of ['gear', 'open', 'speaker', 'route', 'mic', 'children']) {
+  for (const id of ['gear', 'open', 'speaker', 'mic', 'children']) {
     assert.match(html, new RegExp(`id="${id}"`), `missing button #${id}`);
   }
 });
@@ -331,9 +331,8 @@ test('mic sends recorded audio to transcribeAudio and routes text through the sa
 test('mic button has a distinct busy/transcribing visual state, separate from the recording (active) state', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, "function setMicState(next) {");
-  // the button that started the dictation (🎤 or 🧭) carries the state
-  assert.match(body, /classList\.toggle\('active',\s*el === btn && next === 'listening'\)/);
-  assert.match(body, /classList\.toggle\('busy',\s*el === btn && next === 'transcribing'\)/);
+  assert.match(body, /micEl\.classList\.toggle\('active',\s*next === 'listening'\)/);
+  assert.match(body, /micEl\.classList\.toggle\('busy',\s*next === 'transcribing'\)/);
 });
 
 test('mic recording has a max-duration safety net so a forgotten click-to-stop does not record forever', () => {
@@ -1080,7 +1079,7 @@ test('bubbles: the actions go to the agent — focus (Space switch), focus + mic
   assert.match(preload, /onMicRequest/);
   const renderer = readSrc('renderer', 'widget.js');
   assert.match(renderer, /onMicRequest\(\(command\) => \{/);
-  assert.match(renderer, /else if \(micState === 'idle'\) \{\s*startRecording\('self'\);/, 'a voice answer never interrupts a recording in flight');
+  assert.match(renderer, /else if \(micState === 'idle'\) \{\s*startRecording\(\);/, 'a voice answer never interrupts a recording in flight');
   assert.match(renderer, /command === 'cancel'[\s\S]*discardRecording = true/, 'cancel throws the audio away');
   assert.match(renderer, /if \(discardRecording\) \{[\s\S]*recordedChunks = \[\];[\s\S]*reportMic\('cancelled'\)/, 'a cancelled dictation transcribes and sends nothing');
   assert.match(renderer, /reportMic\('sent', \{ text: result\.text \}\)/, 'the bubble learns what was sent');
@@ -1831,36 +1830,6 @@ test('update notice: the gear gets a dot and the panel a row only while an updat
   assert.match(readSrc('renderer/widget.css'), /#gear\.has-update::after/);
 });
 
-// ── general mic (🧭): the scope router picks the agent ─────────────────────
-
-test('the general mic sends its dictation to the scope router, never to this agent directly, and shows the pick before sending', () => {
-  const widget = stripComments(readSrc('renderer', 'widget.js'));
-  assert.match(widget, /startRecording\('route'\)/);
-  // route mode branches off BEFORE the self-send
-  const branch = widget.indexOf("if (micMode === 'route')");
-  assert.ok(branch > 0 && branch < widget.indexOf('window.las.sendToSelf(agentName, result.text)'));
-  // a confident pick waits a countdown and can be changed or cancelled; a pending one waits for a tap
-  assert.match(widget, /ROUTE_COUNTDOWN_S/);
-  assert.match(widget, /'Change'/);
-  assert.match(widget, /who is this for\?/);
-  // this agent is always offered, so a dead router never strands the text
-  assert.match(widget, /names\.push\(\{ name: agentName/);
-  // every send goes through /route/choose (correction log), via main.js
-  const preload = stripComments(readSrc('preload.js'));
-  assert.match(preload, /routeAsk:.*'route:ask'/);
-  assert.match(preload, /routeChoose:.*'route:choose'/);
-  const main = stripComments(readSrc('main.js'));
-  assert.match(main, /\/route`/);
-  assert.match(main, /\/route\/choose`/);
-});
-
-test('a routed dictation lives in the conversation as a mic bubble (user-msg) — no separate card that pushes the face buttons', () => {
-  const widget = stripComments(readSrc('renderer', 'widget.js'));
-  const body = extractFunctionBody(widget, 'function routedEntry(text) {');
-  assert.match(body, /'entry user-msg routed'/);
-  assert.match(body, /logEl\.appendChild\(row\)/);
-  assert.doesNotMatch(readSrc('renderer', 'index.html'), /routeCard/);
-});
 
 test('every final dictation goes through the vocabulary fix (backend /dictation/fix); the live preview does not, and a dead backend keeps the text', () => {
   const main = stripComments(readSrc('main.js'));
@@ -1870,20 +1839,3 @@ test('every final dictation goes through the vocabulary fix (backend /dictation/
   assert.match(body, /return text;\s*\}$/);
 });
 
-test('🧭 only records when this Mac can route: it asks /route/status first, and a missing router is a notice, not a dictation', () => {
-  const main = stripComments(readSrc('main.js'));
-  assert.match(main, /ipcMain\.handle\('route:status'[\s\S]*?\/route\/status/);
-  assert.match(stripComments(readSrc('preload.js')), /routeStatus: \(\) => ipcRenderer\.invoke\('route:status'\)/);
-  const widget = stripComments(readSrc('renderer', 'widget.js'));
-  const click = widget.match(/routeEl\.addEventListener\('click', async \(\) => \{[\s\S]*?\n\}\);/);
-  assert.ok(click, 'route click handler not found');
-  assert.match(click[0], /routeStatus\(\)[\s\S]*if \(!applyRouteStatus\(st\)\) \{ routeNotice\(st\); return; \}[\s\S]*startRecording\('route'\)/);
-  assert.match(readSrc('renderer', 'widget.css'), /\.facebtn\.unavailable/);
-});
-
-test('🧭 warms the decision model as recording starts, so the pick is not a cold load', () => {
-  assert.match(stripComments(readSrc('main.js')), /ipcMain\.handle\('route:warm'[\s\S]*?\/route\/warm/);
-  assert.match(stripComments(readSrc('preload.js')), /routeWarm: \(\) => ipcRenderer\.invoke\('route:warm'\)/);
-  const widget = stripComments(readSrc('renderer', 'widget.js'));
-  assert.match(widget, /window\.las\.routeWarm\(\);\s*startRecording\('route'\)/);
-});

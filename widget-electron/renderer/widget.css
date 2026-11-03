@@ -361,7 +361,7 @@ html, body {
  * Bottom button row: ALL face buttons live here now, gear included — moved
  * off its earlier top-right absolute position on request, so there's a
  * single row along the bottom edge and nothing floating up top. Order:
- * gear on the left, then open/speaker/route/mic/children.
+ * gear on the left, then open/speaker/mic/children.
  * Flex layout (rather than the Swift version's fixed pixel x-coordinates)
  * so it holds up across this app's resizable window.
  */
@@ -658,39 +658,3 @@ html, body {
 }
 
 
-/* General mic (🧭): a routed dictation is a mic bubble (user-msg) with the
- * router's pick in its desc line and the controls inside the bubble. */
-.log .entry.routed .route-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 5px;
-}
-
-.log .entry.routed .route-row.hidden {
-  display: none;
-}
-
-.log .entry.routed.route-cancelled .bubble {
-  opacity: 0.5;
-  text-decoration: line-through;
-}
-
-.route-chip {
-  border: 1px solid var(--bubble-border, rgba(20, 20, 20, 0.35));
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 10.5px;
-  padding: 1px 7px;
-}
-
-.route-chip:hover,
-.route-chip.route-go {
-  background: var(--bubble-border, rgba(20, 20, 20, 0.2));
-}
-
-/* 🧭 without its router: dimmed, still clickable (the click explains why). */
-.facebtn.unavailable { opacity: 0.35; filter: grayscale(1); }
-.log .entry.route-notice .desc { white-space: normal; }

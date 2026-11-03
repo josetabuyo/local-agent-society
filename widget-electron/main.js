@@ -1475,57 +1475,6 @@ ipcMain.handle('agent:sessions', async (_event, name) => {
 // path; this app never looks for the file itself). The children button
 // writes `sessions.target` / `sessions.cc_default` here — the same file
 // `las agent target` writes, so CLI and widget can never disagree.
-// General mic (🧭): the backend's scope router picks the agent; the widget
-// only shows the pick and sends the human's final choice. The model can take
-// a while when it is cold, so a generous timeout — a timeout is an error the
-// card shows, never a silent drop.
-// Pulpo's flow may take its full 15 s before the local fallback runs (≤12 s).
-const ROUTE_TIMEOUT_MS = 40000;
-
-ipcMain.handle('route:ask', async (_event, text) => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/route`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal: AbortSignal.timeout(ROUTE_TIMEOUT_MS) });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) return { decision: 'error', error: json.detail || `HTTP ${res.status}` };
-    log.info('mic', `route:ask → ${json.decision} ${json.choice || '-'} ${json.confidence != null ? json.confidence.toFixed(2) : ''} ${json.reason || ''}`);
-    return json;
-  } catch (err) {
-    log.error('mic', `route:ask failed: ${err && err.message ? err.message : err}`);
-    return { decision: 'error', error: String(err && err.message ? err.message : err) };
-  }
-});
-
-// Can this Mac route at all (LocalModels router + Ollama + decision model)?
-ipcMain.handle('route:status', async () => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/route/status`, { signal: AbortSignal.timeout(5000) });
-    return res.ok ? await res.json() : { available: false, missing: [`backend HTTP ${res.status}`] };
-  } catch (err) {
-    return { available: false, missing: ['LAS backend'] };
-  }
-});
-
-// Fire-and-forget: load the decision model while the human is still talking.
-ipcMain.handle('route:warm', async () => {
-  try {
-    await fetch(`${REGISTRY_URL}/route/warm`, { method: 'POST', signal: AbortSignal.timeout(3000) });
-  } catch { /* a cold model only means a slower pick */ }
-  return true;
-});
-
-ipcMain.handle('route:choose', async (_event, text, choice, suggested) => {
-  try {
-    const res = await fetch(`${REGISTRY_URL}/route/choose`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, choice, suggested: suggested || null }), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) return { ok: false, error: json.detail || `HTTP ${res.status}` };
-    log.info('mic', `route:choose → ${choice}${suggested && suggested !== choice ? ` (router said ${suggested})` : ''} chars=${text.length}`);
-    return { ok: true, choice };
-  } catch (err) {
-    log.error('mic', `route:choose failed: ${err && err.message ? err.message : err}`);
-    return { ok: false, error: String(err && err.message ? err.message : err) };
-  }
-});
-
 ipcMain.handle('agent:config', async (_event, name) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`);

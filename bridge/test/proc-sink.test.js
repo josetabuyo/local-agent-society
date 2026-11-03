@@ -65,3 +65,20 @@ test('ProcSink: the answer to a mic dictation (origin human, from the agent itse
   assert.equal(spoken.length, 1, 'an agent-origin message to self is only logged');
   await s.stop();
 });
+
+test('detached ExecSink: one run per message, its output spoken for the mic, sent to another agent, never echoed into itself; housekeeping kinds skipped', async () => {
+  const { ExecSink } = await import('../src/sinks/exec.js');
+  const { makeAnswer } = await import('../src/answer.js');
+  const sent = [], spoken = [];
+  const out = { text: '', write(s) { this.text += s; } };
+  const answer = makeAnswer({ agent: 'Me', send: async (to, t) => sent.push([to, t]), speak: async (t) => spoken.push(t), out });
+  const sink = new ExecSink({ command: 'printf "re: "; cat', shell: '/bin/sh', echo: out, answer });
+  const ctx = (from, source, kind = 'message') => ({ agent: 'Me', envelope: { id: 'i', from, source, kind, text: 'hola' }, reply: async () => assert.fail('detached never uses ctx.reply') });
+  await sink.deliver(ctx('Me', 'human'));
+  await sink.deliver(ctx('Ana', 'agent'));
+  await sink.deliver(ctx('Me', 'agent'));
+  await sink.deliver(ctx('Me', 'human', 'title-request'));
+  assert.deepEqual(spoken, ['re: hola']);
+  assert.deepEqual(sent, [['Ana', 're: hola']]);
+  assert.match(out.text, /reply to self, not sent/);
+});

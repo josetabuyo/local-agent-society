@@ -36,6 +36,7 @@ Sinks (the low-level `las bridge <sink>` form):
 import errno
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -765,6 +766,18 @@ def codex_opens_picker(args: list) -> bool:
         if not a.startswith("-"):
             return False  # a session id (or name)
     return True
+
+
+def run_connected(argv: list) -> None:
+    """`las <command…>` (cli/main.py): this terminal runs `command` connected to LAS
+    as a session of the agent here — the bridge starts it once and speaks the
+    ADR 0006 stdio contract with it; what it prints to stderr shows up here.
+    The session's runtime is the command's first word (`pulpo`)."""
+    name = resolve_agent_name(None)
+    _chain(name)
+    runtime = Path(argv[0]).name
+    _sign_terminal(name, runtime)
+    _exec(bridge_argv("proc", name, ["--exec", shlex.join(argv)]))
 
 
 def run_codex_interactive(name: str, agent_dir: str, codex_args=(), intercept_url=None, port=None) -> int:

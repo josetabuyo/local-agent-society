@@ -2,7 +2,7 @@
 
 Whisper writes a word it doesn't expect the way it sounds to a Spanish ear:
 "Wavi" comes out "guabi", "git" comes out "JIT", "JSON" comes out "yeison".
-After every final transcription (the widget's 🎤 and 🧭 alike, through the
+After every final transcription (the widget's 🎤, through the
 backend's POST /dictation/fix) each word whose sound matches a known term is
 rewritten to that term. Known terms come from three places:
 
@@ -12,7 +12,7 @@ rewritten to that term. Known terms come from three places:
        term                 one term, matched by sound
        heard => term        an explicit spelling that sound-matching misses
 
-Matching is deterministic (cli/scope_router.sound_key), never a model call:
+Matching is deterministic (sound_key below), never a model call:
 a word is rewritten only when its sound key equals exactly one term's key,
 and a key two different terms share is never used.
 """
@@ -20,15 +20,71 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from pathlib import Path
 
-from cli.scope_router import fix_names, name_fixes, sound_key
+# ── agent names as dictation hears them ──────────────────────────────────────
+#
+# Whisper writes names it doesn't know the way they sound: "Wavi" comes out
+# "guabi", "uabi", "wabi". Every word whose Spanish sound
+# matches an agent's name is rewritten to the name, so both the model and the
+# agent that receives the text read "Wavi". An agent can add spellings the
+# sound key misses with `heard_as` in its .las-agent.json.
+
+_DIGRAPHS = [(r"g[uü](?=[aeiou])", "w"), (r"h?u(?=[aeio])", "w"), (r"qu(?=[ei])", "k"), (r"c(?=[ei])", "s"),
+             (r"ch", "x"), (r"ll", "y"), (r"c|q", "k"), (r"z", "s"), (r"h", ""), (r"[vw]", "b"), (r"j", "g"), (r"ee", "i")]
+
+
+def sound_key(word: str) -> str:
+    """A rough Spanish-ear phonetic key: guabi, uabi, wabi and Wavi all → "babi"."""
+    w = unicodedata.normalize("NFKD", word.lower())
+    w = "".join(ch for ch in w if not unicodedata.combining(ch) or ch == "\u0308")
+    w = w.replace("u\u0308", "ü")
+    w = re.sub(r"[^a-zñü]", "", w)
+    for pat, rep in _DIGRAPHS:
+        w = re.sub(pat, rep, w)
+    w = w.replace("y", "i")
+    return re.sub(r"(.)\1+", r"\1", w)
+
+
+def name_fixes(configs: dict[str, dict]) -> dict[str, str]:
+    """sound key / lowercase alias → canonical agent name. Only one-word names
+    of 4+ letters (short keys collide with ordinary words); a key two agents
+    share is dropped — ambiguous, so never rewritten."""
+    fixes: dict[str, str] = {}
+    clash: set[str] = set()
+    for name, cfg in configs.items():
+        keys = set()
+        if re.fullmatch(r"[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{4,}", name):
+            keys.add(sound_key(name))
+        for alias in cfg.get("heard_as") or []:
+            if isinstance(alias, str) and alias.strip():
+                keys.add(alias.strip().lower())
+        for k in keys:
+            if k in fixes and fixes[k] != name:
+                clash.add(k)
+            fixes[k] = name
+    return {k: v for k, v in fixes.items() if k not in clash}
+
+
+def fix_names(text: str, fixes: dict[str, str]) -> str:
+    """Rewrite each word (or multi-word heard_as alias) that sounds like an agent's name to that name."""
+    for alias, name in sorted(((a, n) for a, n in fixes.items() if " " in a), key=lambda x: -len(x[0])):
+        text = re.sub(rf"(?i)\b{re.escape(alias)}\b", name, text)
+
+    def one(m: re.Match) -> str:
+        word = m.group(0)
+        name = fixes.get(word.lower()) or fixes.get(sound_key(word))
+        return name if name and len(word) >= 3 else word   # agents need 4+ letters to get a key at all (name_fixes)
+    return re.sub(r"[A-Za-zÁÉÍÓÚáéíóúÑñÜü]+", one, text)
+
+
 
 USER_FILE = Path(os.getenv("LAS_VOCABULARY_FILE", str(Path.home() / ".las" / "vocabulary.txt")))
 MIN_TERM_LEN = 3   # "git" must count; shorter keys collide with ordinary words
 
 # Words programmers say in English mid-Spanish. Matched by SOUND
-# (scope_router.sound_key: b/v/w, c/k/q, z/s, ll/y, silent h… are one), so
+# (sound_key: b/v/w, c/k/q, z/s, ll/y, silent h… are one), so
 # "bakend", "doquer", "cubernetes" all land here without listing them.
 DEFAULT_TERMS = [
     # git & review
@@ -144,4 +200,4 @@ def add_entry(entry: str, path: Path | None = None) -> None:
         f.write(entry.strip() + "\n")
 
 
-__all__ = ["build_fixes", "fix_text", "add_entry", "load_user_file", "sound_key", "USER_FILE", "DEFAULT_TERMS", "DEFAULT_HEARD"]
+__all__ = ["build_fixes", "fix_text", "add_entry", "load_user_file", "sound_key", "name_fixes", "fix_names", "USER_FILE", "DEFAULT_TERMS", "DEFAULT_HEARD"]

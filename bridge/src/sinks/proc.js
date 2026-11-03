@@ -10,6 +10,7 @@
  */
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
+import { makeAnswer } from '../answer.js';
 
 export const PROC_CONTRACT = '1';
 const KILL_AFTER_MS = 5000;
@@ -43,6 +44,7 @@ export class ProcSink {
     spawnImpl = spawn, log = (msg) => process.stderr.write(`[las-bridge] ${msg}\n`), out = process.stderr, killAfterMs = KILL_AFTER_MS }) {
     if (!command) throw new TypeError('ProcSink needs a command');
     Object.assign(this, { command, agent, sid, cwd, env, send, setTitle, speak, shell, spawnImpl, log, out, killAfterMs });
+    this.answer = makeAnswer({ agent, send, speak, out });
     this.name = 'proc';
     this.child = null;
     this.lastFrom = null;
@@ -80,23 +82,8 @@ export class ProcSink {
     try {
       if (msg.type === 'title') await this.setTitle(msg.text);
       else {
-        const to = msg.to || this.lastFrom;
-        if (!to) throw new Error('reply with no "to" and no message handled yet');
-        // Its own agent's mailbox may be this very session: a reply there comes
-        // straight back in, and an echoing command loops forever. Log it instead.
-        if (to === this.agent) {
-          // The mic's dictation comes "from" the agent itself: the human is
-          // waiting for that answer, so it is spoken (and lands in the widget's
-          // history) instead of sent. Anything else to self is only logged.
-          if (this.lastOrigin === 'human' && !msg.to && this.speak) {
-            await this.speak(msg.text);
-            this.out.write(`[spoken to the human] ${msg.text}\n`);
-          } else {
-            this.out.write(`[reply to self, not sent] ${msg.text}\n`);
-          }
-          return;
-        }
-        await this.send(to, msg.text);
+        // An explicit "to" is the command's own choice, never the mic's answer.
+        await this.answer({ to: msg.to || this.lastFrom, text: msg.text, origin: msg.to ? null : this.lastOrigin });
       }
     } catch (err) {
       this.log(`${this.agent}: ${msg.type} failed (${err && err.message ? err.message : err})`);

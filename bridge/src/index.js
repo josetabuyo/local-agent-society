@@ -6,6 +6,7 @@ export { StdoutSink } from './sinks/stdout.js';
 export { ShellSink } from './sinks/shell.js';
 export { ExecSink } from './sinks/exec.js';
 export { ProcSink, parseProcLine, procMessageLine } from './sinks/proc.js';
+export { makeAnswer, makeSpeaker } from './answer.js';
 export { normalize, KIND, SOURCE, MIC_SELFTEST_PING, isMicSelfTest, micSelfTestPong } from './envelope.js';
 export { resolveAgent, findAgentConfig } from './agent.js';
 export { resolveMqttPort } from './port.js';

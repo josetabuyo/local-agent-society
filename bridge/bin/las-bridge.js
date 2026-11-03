@@ -22,7 +22,7 @@ import { parseArgs } from 'node:util';
 import { idleClaudeServer } from '../src/sinks/claude-channel.js';
 import {
   Bridge, MailboxSource, Pipeline, dedupInterceptor, ignoreKindsInterceptor, senderPolicyInterceptor,
-  micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, channelLaunchProblem, StdoutSink, ShellSink, ExecSink, ProcSink,
+  micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, channelLaunchProblem, StdoutSink, ShellSink, ExecSink, ProcSink, makeAnswer, makeSpeaker,
   KIND, resolveAgent, StatusFile, makeSender,
 } from '../src/index.js';
 import { SessionRegistry, DefaultWatcher, newSessionId, sessionInboxTopic, sessionMailboxClientId } from '../src/sessions.js';
@@ -103,8 +103,7 @@ switch (sinkName) {
       process.stderr.write('las-bridge exec: --exec CMD is required\n');
       process.exit(64);
     }
-    sink = new ExecSink({ command: opts.exec, cwd: process.cwd() });
-    break;
+    break; // built below: a detached one (--log) needs the session's answer routing
   case 'proc':
     if (!opts.exec) {
       process.stderr.write('las-bridge proc: --exec CMD is required\n');
@@ -116,20 +115,20 @@ switch (sinkName) {
 // This process is one SESSION of the agent (docs/adr/0004 phase 2): it has
 // its own inbox, and holds the agent-level one only while it is the default.
 const commandWord = (cmd) => cmd.trim().split(/\s+/)[0].split(/[\\/]/).pop();
-const runtime = opts.runtime || (sinkName === 'exec' ? (commandWord(opts.exec) === 'codex' ? 'codex' : 'exec')
+const runtime = opts.runtime || (sinkName === 'exec' ? (commandWord(opts.exec) === 'codex' ? 'codex' : opts.log ? commandWord(opts.exec) : 'exec')
   : sinkName === 'proc' ? commandWord(opts.exec) : sinkName === 'claude' ? 'claude' : sinkName);
 const sid = newSessionId(runtime);
-const detached = sinkName === 'proc' ? { command: opts.exec, log: opts.log || '' } : null;
+// Detached (docs/adr/0006) = started in the background with a log (`las detach`).
+// `las <command…>` in a terminal runs the same proc sink, but as a terminal
+// session: findable (⌖), closable by its tty, and the default like any terminal.
+const isDetached = (sinkName === 'proc' || sinkName === 'exec') && Boolean(opts.log);
+const detached = isDetached ? { command: opts.exec, log: opts.log || '', mode: sinkName === 'proc' ? 'process' : 'each' } : null;
 const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, log });
+const speak = makeSpeaker({ agent: agent.name, voice: agent.config && agent.config.voice });
 if (sinkName === 'proc') {
-  const speak = async (text) => {
-    const res = await fetch(`${process.env.LAS_REGISTRY_URL || 'http://localhost:8700'}/queue/speak`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, voice: (agent.config && agent.config.voice) || 'Samantha', name: agent.name }),
-    });
-    if (!res.ok) throw new Error(`speak failed: HTTP ${res.status}`);
-  };
   sink = new ProcSink({ command: opts.exec, agent: agent.name, sid, cwd: process.cwd(), send, setTitle: (t) => session.setTitle(t), speak, log });
+} else if (sinkName === 'exec') {
+  sink = new ExecSink({ command: opts.exec, cwd: process.cwd(), answer: isDetached ? makeAnswer({ agent: agent.name, send, speak }) : null });
 }
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
 const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });

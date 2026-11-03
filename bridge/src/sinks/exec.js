@@ -8,7 +8,7 @@
 import { spawn } from 'node:child_process';
 
 export class ExecSink {
-  constructor({ command, cwd = process.cwd(), shell = process.env.SHELL || '/bin/sh', maxOutput = 64 * 1024, spawnImpl = spawn, echo = process.stderr }) {
+  constructor({ command, cwd = process.cwd(), shell = process.env.SHELL || '/bin/sh', maxOutput = 64 * 1024, spawnImpl = spawn, echo = process.stderr, answer = null }) {
     if (!command) throw new TypeError('ExecSink needs a command');
     this.name = 'exec';
     this.command = command;
@@ -17,14 +17,20 @@ export class ExecSink {
     this.maxOutput = maxOutput;
     this.spawnImpl = spawnImpl;
     this.echo = echo;
+    // A detached session (ADR 0006) routes its answers through answer.js
+    // (spoken for the mic, never echoed into itself); otherwise: reply to the sender.
+    this.answer = answer;
   }
 
   deliver(ctx) {
     const { envelope, agent } = ctx;
+    // Detached, the command is a one-shot request runner: housekeeping kinds
+    // (a title request…) are not requests for it.
+    if (this.answer && !['message', 'command'].includes(envelope.kind)) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const child = this.spawnImpl(this.shell, ['-lc', this.command], {
         cwd: this.cwd,
-        env: { ...process.env, LAS_AGENT: agent, LAS_FROM: envelope.from, LAS_KIND: envelope.kind, LAS_SOURCE: envelope.source, LAS_TEXT: envelope.text, LAS_MSG_ID: envelope.id },
+        env: { ...process.env, LAS_AGENT: agent, LAS_AGENT_DIR: this.cwd, LAS_FROM: envelope.from, LAS_KIND: envelope.kind, LAS_SOURCE: envelope.source, LAS_TEXT: envelope.text, LAS_MSG_ID: envelope.id },
         stdio: ['pipe', 'pipe', 'inherit'],
       });
       let out = '';
@@ -39,7 +45,9 @@ export class ExecSink {
         const text = out.trim();
         if (text) {
           try {
-            await ctx.reply(text.slice(0, this.maxOutput));
+            const reply = text.slice(0, this.maxOutput);
+            if (this.answer) await this.answer({ to: envelope.from, text: reply, origin: envelope.source });
+            else await ctx.reply(reply);
           } catch (err) {
             this.echo.write(`[las-bridge] reply failed: ${err && err.message ? err.message : err}\n`);
           }

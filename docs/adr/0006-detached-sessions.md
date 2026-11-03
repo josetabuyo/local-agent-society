@@ -81,9 +81,15 @@ sets it. LAS may suggest a default (Pulpo's) but runs whatever is there.
 
 ### Surfaces
 
-- `las detach [--cmd CMD]` open · `las detach --stop` close · `las detach --log` read.
+- `las <command…>` in any terminal: a first word that is no `las` subcommand
+  but a program on PATH runs connected, as a terminal session of the agent
+  in that folder (`las pulpo agent run`). Like `las codex`: ⌖ finds it, ✕
+  hangs it up, it becomes the default when opened.
+- `las detach [--cmd CMD]` the same with no terminal · `--each` one run per
+  message instead (text on stdin, its stdout is the answer: `pulpo agent`) ·
+  `las detach --stop` close · `las detach --log` read.
 - `las agent sessions`: runtime = the command's first word (`pulpo`), plus its title.
-- It never becomes the default session (opening or messaging a background
+- A detached one never becomes the default session (opening or messaging a background
   process is not "using" it): the mic and a plain send stay where they were,
   unless it is the agent's only session. Reach it with `--session pulpo`.
 - Widget 👥: same row; ✕ closes it; the ⌖ (find terminal) becomes 📄 (open the log).
@@ -93,3 +99,10 @@ sets it. LAS may suggest a default (Pulpo's) but runs whatever is there.
 - One sink, one contract; Pulpo (or anything) plugs in without LAS code.
 - No AI, model or flow in LAS.
 - Not supervised across reboots in v1 (that's ADR 0003's single supervisor).
+
+## Update 2026-11-03
+
+The widget's 🧭 general mic and LAS's scope router (backend `/route*`,
+`cli/scope_router.py`, `las route`) are retired: choosing which terminal hears
+something is a task for the agent listening, not a LAS feature. No launcher
+button runs a command either — `las <command…>` from any terminal does.

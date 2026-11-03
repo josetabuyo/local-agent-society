@@ -112,16 +112,6 @@ contextBridge.exposeInMainWorld('las', {
    * (.las-agent.json, the children button), applied by the backend. */
   sendToSelf: (name, text) => ipcRenderer.invoke('vortexia:send', name, text),
 
-  /** General mic: ask the backend's scope router (POST /route) who `text`
-   * belongs to. Resolves to its decision ({decision, choice, ranked, …}) or
-   * {decision: 'error', error}. Never sends anything by itself. */
-  routeAsk: (text) => ipcRenderer.invoke('route:ask', text),
-  routeStatus: () => ipcRenderer.invoke('route:status'),
-  routeWarm: () => ipcRenderer.invoke('route:warm'),
-
-  /** General mic: deliver `text` to `choice` as a human dictation (POST
-   * /route/choose); `suggested` = the router's pick, for its correction log. */
-  routeChoose: (text, choice, suggested) => ipcRenderer.invoke('route:choose', text, choice, suggested),
 
   /** Connected runtime sessions of this agent — its children — with the
    * agent's `target`/`cc_default` choice (children button, settings). */
@@ -150,6 +140,7 @@ contextBridge.exposeInMainWorld('las', {
 
   /** Open a detached session's log file in the OS's default viewer. */
   openSessionLog: (logPath) => ipcRenderer.invoke('agent:session-log', logPath),
+
 
   /** Local Whisper transcription (main.js's "audio transcription" section) —
    * replaces the broken Electron SpeechRecognition/webkitSpeechRecognition.

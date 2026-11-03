@@ -1804,62 +1804,9 @@ def inject_message(name: str, body: InjectRequest):
     return {"ok": True, "injected": result["injected"], "queued": False, "via": "vortexia", "federated": result["relayed"]}
 
 
-# ── scope router (cli/scope_router.py) ───────────────────────────────────────
-#
-# Text with no recipient — the widget's general mic, the phone, `las route` —
-# is matched against the scope ladder by LocalModels' decision model. This
-# backend is its only caller (one resident local model). Nothing is ever
-# dropped: a weak or failed pick comes back `pending` with the best few, and
-# POST /route/choose delivers the human's pick. Every outcome is logged to
-# ROUTE_LOG_FILE (text → candidates → what was finally chosen), the set the
-# thresholds get calibrated on.
+# ── dictation vocabulary (cli/vocabulary.py) ─────────────────────────────────
 
-ROUTE_LOG_FILE = DATA_DIR / "route_log.jsonl"
-_route_log_lock = threading.Lock()
-
-
-class RouteRequest(BaseModel):
-    text:       str = Field(max_length=MESSAGE_MAX_CHARS)
-    _text_not_blank = field_validator("text")(_non_blank)
-    level:      str = "agent"            # "agent" (whole society) | "session" (one agent's terminals)
-    agent:      Optional[str] = None     # required for level=session
-    deliver:    bool = False             # send it when the decision is "deliver"
-    from_agent: Optional[str] = None     # sender label; default: the chosen agent itself (reads as mic)
-
-
-class RouteChoice(BaseModel):
-    text:       str = Field(max_length=MESSAGE_MAX_CHARS)
-    _text_not_blank = field_validator("text")(_non_blank)
-    choice:     str
-    level:      str = "agent"
-    agent:      Optional[str] = None
-    from_agent: Optional[str] = None
-    suggested:  Optional[str] = None     # what the router had picked, for the correction log
-
-
-def _route_log(entry: dict) -> None:
-    try:
-        with _route_log_lock, ROUTE_LOG_FILE.open("a") as f:
-            f.write(json.dumps({"ts": int(time.time() * 1000), **entry}, ensure_ascii=False) + "\n")
-    except OSError as exc:
-        logger.warning(f"[route] could not write {ROUTE_LOG_FILE}: {exc}")
-
-
-def _route_candidates(level: str, agent: Optional[str], rung: str = "short") -> dict:
-    from cli.scope_router import agent_candidates, session_candidates
-    registry = load_json(REGISTRY_FILE, {})
-    if level == "agent":
-        return agent_candidates({name: _agent_config(name, registry) for name in registry}, rung)
-    if level == "session":
-        if not agent or agent not in registry:
-            raise HTTPException(status_code=404, detail="level=session needs a registered `agent`")
-        with _sessions_lock:
-            sessions = _load_sessions(agent)
-        return session_candidates(_session_summaries(agent, sessions))
-    raise HTTPException(status_code=422, detail="level must be 'agent' or 'session'")
-
-
-def _route_fix_names(text: str) -> str:
+def _fix_dictation(text: str) -> str:
     """Words Whisper misheard — agent names ("guabi" → "Wavi"), software terms
     ("JIT" → "git"), the user's ~/.las/vocabulary.txt — put back right
     (cli/vocabulary.py)."""
@@ -1874,77 +1821,9 @@ class DictationFix(BaseModel):
 
 @app.post("/dictation/fix")
 def dictation_fix(body: DictationFix):
-    """The widget calls this after every final transcription (🎤 and 🧭)."""
-    fixed = _route_fix_names(body.text) if body.text.strip() else body.text
+    """The widget calls this after every final transcription."""
+    fixed = _fix_dictation(body.text) if body.text.strip() else body.text
     return {"text": fixed, "changed": fixed != body.text}
-
-
-def _route_deliver(text: str, choice: str, level: str, agent: Optional[str], from_agent: Optional[str]) -> dict:
-    """Deliver as a human dictation: from == to == the agent reads as mic in its widget."""
-    to = agent if level == "session" else choice
-    return _route_send(to=to, scope=None, message=text, source="human", sender=from_agent or to,
-                       session=choice if level == "session" else None)
-
-
-@app.get("/route/status")
-def route_status():
-    """Can this Mac route? The widget's 🧭 asks before recording."""
-    from cli.scope_router import status
-    return status()
-
-
-@app.post("/route/warm")
-def route_warm():
-    """Start loading the decision model in the background; returns at once.
-    The widget calls it when 🧭 starts recording."""
-    from cli.scope_router import warm
-    threading.Thread(target=warm, daemon=True, name="route-warm").start()
-    return {"warming": True}
-
-
-@app.post("/route")
-def route_text(body: RouteRequest):
-    """Pick the agent (level=agent) or the session of `agent` (level=session)
-    `text` belongs to. Returns the decision — deliver | pending — with the
-    ranked candidates; with deliver=true a confident pick is also sent."""
-    from cli.scope_router import route, route_via_pulpo
-    # Pulpo's "las-dictation" flow decides when it's up; this backend's own
-    # pipeline is the fallback (cli/scope_router.py, route_via_pulpo).
-    result = route_via_pulpo(body.text, body.level, body.agent, body.from_agent)
-    if result is not None:
-        text = result["text"]
-    else:
-        criteria = _route_candidates(body.level, body.agent)
-        detail = _route_candidates(body.level, body.agent, rung="long") if body.level == "agent" else None
-        text = _route_fix_names(body.text)
-        result = route(text, criteria, body.level, detail=detail)
-        result["candidates"] = len(criteria)
-        result["engine"] = "local"
-    result["text"] = text   # what gets delivered — names fixed; clients send this, not what they heard
-    if body.deliver and result["decision"] == "deliver":
-        result["delivered"] = _route_deliver(text, result["choice"], body.level, body.agent, body.from_agent)
-    _route_log({"text": text, **({"heard": body.text} if text != body.text else {}), "engine": result.get("engine"),
-                **({"run_id": result["run_id"]} if result.get("run_id") else {}), "level": body.level, "agent": body.agent, "decision": result["decision"],
-                "choice": result["choice"], "ranked": result["ranked"], "reason": result["reason"],
-                "delivered": bool(result.get("delivered"))})
-    return result
-
-
-@app.post("/route/choose")
-def route_choose(body: RouteChoice):
-    """Deliver a human's pick for a pending (or redirected) route, and log it
-    as a correction when it differs from what the router suggested."""
-    criteria = _route_candidates(body.level, body.agent)
-    if body.level == "agent" and body.choice not in load_json(REGISTRY_FILE, {}):
-        raise HTTPException(status_code=404, detail=f"no agent named {body.choice!r}")
-    if body.level == "session" and body.choice not in criteria:
-        raise HTTPException(status_code=404, detail=f"{body.agent} has no titled session {body.choice!r}")
-    text = _route_fix_names(body.text)
-    delivered = _route_deliver(text, body.choice, body.level, body.agent, body.from_agent)
-    _route_log({"text": text, "level": body.level, "agent": body.agent, "decision": "chosen",
-                "choice": body.choice, "suggested": body.suggested,
-                "correction": bool(body.suggested and body.suggested != body.choice)})
-    return {"ok": True, "choice": body.choice, "delivered": delivered}
 
 
 @app.post("/agents/{name}/vortexia/register")

@@ -1,3 +1,5 @@
+import shutil
+
 import click
 from cli.commands.system import status, start_cmd, stop_cmd, restart_cmd, logs, install, uninstall, update
 from cli.commands.speak import speak
@@ -8,13 +10,31 @@ from cli.commands.queue import queue
 from cli.commands.boarding import boarding
 from cli.commands.completion import completion
 from cli.commands.shell_init import shell_init
-from cli.commands.route import route
 from cli.commands.vocab import vocab_cmd
 from cli.commands.bridge import bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
 from cli.commands.detach import detach_cmd
 
 
-@click.group()
+class LasGroup(click.Group):
+    """`las <any command…>`: when the first word is not a `las` subcommand but a
+    program on PATH, run it connected to LAS in this terminal — a session of
+    this folder's agent, like `las claude` or `las codex` (docs/adr/0006):
+    `las pulpo agent run`. The command speaks the ADR 0006 stdio contract."""
+
+    def get_command(self, ctx, name):
+        found = super().get_command(ctx, name)
+        if found is not None or not shutil.which(name):
+            return found
+        from cli.commands.bridge import run_connected
+
+        @click.command(name, context_settings={"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []})
+        @click.argument("args", nargs=-1, type=click.UNPROCESSED)
+        def connected(args):
+            run_connected([name, *args])
+        return connected
+
+
+@click.group(cls=LasGroup)
 def cli():
     """Local Agent Society — CLI.
 
@@ -53,5 +73,4 @@ cli.add_command(codex_cmd, name="codex")
 cli.add_command(shell_cmd, name="shell")
 cli.add_command(detach_cmd, name="detach")
 cli.add_command(shell_init, name="shell-init")
-cli.add_command(route)
 cli.add_command(vocab_cmd, name="vocab")
