@@ -11,15 +11,15 @@ from cli.commands.boarding import boarding
 from cli.commands.completion import completion
 from cli.commands.shell_init import shell_init
 from cli.commands.vocab import vocab_cmd
-from cli.commands.bridge import bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
+from cli.commands.bridge import attach_cmd, bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
 from cli.commands.detach import detach_cmd
 
 
 class LasGroup(click.Group):
     """`las <any command…>`: when the first word is not a `las` subcommand but a
-    program on PATH, run it connected to LAS in this terminal — a session of
-    this folder's agent, like `las claude` or `las codex` (docs/adr/0006):
-    `las pulpo agent run`. The command speaks the ADR 0006 stdio contract."""
+    program on PATH, connect it to this folder's agent with no terminal — each
+    message runs it once with the text as one more argument (docs/adr/0006):
+    `las pulpo luganense`. `las attach <command…>` keeps it in this terminal."""
 
     def get_command(self, ctx, name):
         found = super().get_command(ctx, name)
@@ -72,5 +72,6 @@ cli.add_command(claude_relay_cmd, name="claudeRelay")
 cli.add_command(codex_cmd, name="codex")
 cli.add_command(shell_cmd, name="shell")
 cli.add_command(detach_cmd, name="detach")
+cli.add_command(attach_cmd, name="attach")
 cli.add_command(shell_init, name="shell-init")
 cli.add_command(vocab_cmd, name="vocab")

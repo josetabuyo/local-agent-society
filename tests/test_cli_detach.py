@@ -66,15 +66,26 @@ def test_las_any_program_runs_it_connected_and_unknown_words_still_error(monkeyp
     assert m.cli.get_command(None, "speak") is not None, "real subcommands win over PATH programs"
 
 
-def test_run_connected_execs_the_proc_bridge_with_the_whole_command_line(monkeypatch):
+def test_las_command_connects_it_detached_each_message_one_run_with_the_text_as_an_argument(tmp_path, monkeypatch):
+    import cli.commands.bridge as b
+    (tmp_path / ".las-agent.json").write_text('{"name": "Robo"}')
+    monkeypatch.setattr(b, "resolve_agent_name", lambda n: "Robo")
+    monkeypatch.setattr(d, "agent_dir_of", lambda n: tmp_path)
+    seen = {}
+    monkeypatch.setattr(d, "open_detached", lambda name, agent_dir, config, command, **kw: (seen.update(command=command, **kw), (7, tmp_path / "l.log"))[1])
+    b.run_connected(["pulpo", "luganense", "two words"])
+    assert seen == {"command": "pulpo luganense 'two words'", "each": True, "text_as_arg": True}
+
+
+def test_las_attach_runs_the_same_in_this_terminal(monkeypatch):
     import cli.commands.bridge as b
     seen = {}
     monkeypatch.setattr(b, "resolve_agent_name", lambda n: "Robo")
     monkeypatch.setattr(b, "_chain", lambda name: None)
     monkeypatch.setattr(b, "_sign_terminal", lambda name, runtime: seen.update(runtime=runtime))
     monkeypatch.setattr(b, "_exec", lambda argv: seen.update(argv=argv))
-    b.run_connected(["pulpo", "agent", "run", "two words"])
-    assert seen["runtime"] == "pulpo"
+    CliRunner().invoke(b.attach_cmd, ["pulpo", "las"])
     argv = seen["argv"]
-    assert argv[2:5] == ["proc", "--agent", "Robo"] and argv[argv.index("--exec") + 1] == "pulpo agent run 'two words'"
+    assert seen["runtime"] == "pulpo" and argv[2:5] == ["exec", "--agent", "Robo"]
+    assert argv[argv.index("--exec") + 1] == "pulpo las" and argv[argv.index("--text-as") + 1] == "arg"
     assert "--log" not in argv, "a terminal session, not a detached one"

@@ -106,3 +106,13 @@ The widget's 🧭 general mic and LAS's scope router (backend `/route*`,
 `cli/scope_router.py`, `las route`) are retired: choosing which terminal hears
 something is a task for the agent listening, not a LAS feature. No launcher
 button runs a command either — `las <command…>` from any terminal does.
+
+## Update 2026-11-03 (2) — `las <command…>` is detached and per message by default
+
+José: the default is ONE run per message, detached. `las pulpo luganense`
+registers a session (runtime `pulpo`, title `pulpo luganense`) and returns;
+each message runs `pulpo luganense '<text>'` (the text as one more argument,
+stdin empty, `LAS_*` env as for `exec`), and the run's stdout is the answer,
+routed by `bridge/src/answer.js` (spoken for the mic, sent to another agent,
+never echoed into itself). `las attach <command…>` keeps it in the terminal.
+The long-lived JSON-lines contract above stays for `las detach --cmd`.

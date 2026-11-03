@@ -82,3 +82,14 @@ test('detached ExecSink: one run per message, its output spoken for the mic, sen
   assert.deepEqual(sent, [['Ana', 're: hola']]);
   assert.match(out.text, /reply to self, not sent/);
 });
+
+test('ExecSink textAs=arg: the text is ONE more argument, quoted whatever it holds; stdin is empty', async () => {
+  const { ExecSink, quoteArg } = await import('../src/sinks/exec.js');
+  const out = { text: '', write(s) { this.text += s; } };
+  const got = [];
+  const probe = new ExecSink({ command: 'printf "[%s]" ', shell: '/bin/sh', echo: out, textAs: 'arg', answer: async ({ text }) => got.push(text) });
+  await probe.deliver({ agent: 'Me', envelope: { id: '1', from: 'Ana', source: 'human', kind: 'message', text: "it's $HOME `x` \"q\"" } });
+  assert.deepEqual(got, ["[it's $HOME `x` \"q\"]"]);
+  assert.equal(quoteArg("a'b", 'linux'), "'a'\\''b'");
+  assert.equal(quoteArg('a"b', 'win32'), '"a\\"b"');
+});

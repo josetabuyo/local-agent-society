@@ -7,8 +7,15 @@
  */
 import { spawn } from 'node:child_process';
 
+/** One argument for `sh -lc` (POSIX) or `cmd /c` (Windows), however odd the text. */
+export function quoteArg(text, platform = process.platform) {
+  const t = String(text);
+  if (platform === 'win32') return `"${t.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1').replace(/%/g, '"%"')}"`;
+  return `'${t.replace(/'/g, `'\\''`)}'`;
+}
+
 export class ExecSink {
-  constructor({ command, cwd = process.cwd(), shell = process.env.SHELL || '/bin/sh', maxOutput = 64 * 1024, spawnImpl = spawn, echo = process.stderr, answer = null }) {
+  constructor({ command, cwd = process.cwd(), shell = process.env.SHELL || '/bin/sh', maxOutput = 64 * 1024, spawnImpl = spawn, echo = process.stderr, answer = null, textAs = 'stdin' }) {
     if (!command) throw new TypeError('ExecSink needs a command');
     this.name = 'exec';
     this.command = command;
@@ -20,6 +27,9 @@ export class ExecSink {
     // A detached session (ADR 0006) routes its answers through answer.js
     // (spoken for the mic, never echoed into itself); otherwise: reply to the sender.
     this.answer = answer;
+    // 'stdin' (the default): the text is the command's input. 'arg' (`las <command…>`):
+    // it is appended as ONE more argument — `pulpo luganense 'what the mic heard'`.
+    this.textAs = textAs;
   }
 
   deliver(ctx) {
@@ -28,7 +38,10 @@ export class ExecSink {
     // (a title request…) are not requests for it.
     if (this.answer && !['message', 'command'].includes(envelope.kind)) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const child = this.spawnImpl(this.shell, ['-lc', this.command], {
+      const isWin = process.platform === 'win32';
+      const line = this.textAs === 'arg' ? `${this.command} ${quoteArg(envelope.text)}` : this.command;
+      const [file, args] = isWin ? [process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', line]] : [this.shell, ['-lc', line]];
+      const child = this.spawnImpl(file, args, {
         cwd: this.cwd,
         env: { ...process.env, LAS_AGENT: agent, LAS_AGENT_DIR: this.cwd, LAS_FROM: envelope.from, LAS_KIND: envelope.kind, LAS_SOURCE: envelope.source, LAS_TEXT: envelope.text, LAS_MSG_ID: envelope.id },
         stdio: ['pipe', 'pipe', 'inherit'],
@@ -55,7 +68,7 @@ export class ExecSink {
         resolve();
       });
       child.stdin.on('error', () => {});
-      child.stdin.end(envelope.text);
+      child.stdin.end(this.textAs === 'arg' ? '' : envelope.text);
     });
   }
 }

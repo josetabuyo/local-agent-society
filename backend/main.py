@@ -542,6 +542,7 @@ class SessionRegisterRequest(BaseModel):
     pid:     int
     cwd:     str = ""
     detached: Optional[dict] = None   # {command, log} — a session with no terminal (docs/adr/0006)
+    title:   str = Field(default="", max_length=144)   # a command session's initial title: its command line
 
 
 class SessionTitleRequest(BaseModel):
@@ -900,7 +901,7 @@ def register_session(name: str, body: SessionRegisterRequest):
     with _sessions_lock:
         sessions = _load_sessions(name)
         # A bridge that re-registers the same sid (backend restart) keeps the title it was given.
-        title = sessions.get(body.sid, {}).get("title", "")
+        title = sessions.get(body.sid, {}).get("title", "") or " ".join(body.title.split())
         sessions[body.sid] = {"sid": body.sid, "agent": name, "runtime": body.runtime, "pid": body.pid, "cwd": body.cwd, "title": title, "startedAt": now, "lastActiveAt": now}
         if body.detached:
             # Opening a background process is not "using" it: the mic and a plain

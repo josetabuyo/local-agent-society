@@ -769,15 +769,35 @@ def codex_opens_picker(args: list) -> bool:
 
 
 def run_connected(argv: list) -> None:
-    """`las <command…>` (cli/main.py): this terminal runs `command` connected to LAS
-    as a session of the agent here — the bridge starts it once and speaks the
-    ADR 0006 stdio contract with it; what it prints to stderr shows up here.
-    The session's runtime is the command's first word (`pulpo`)."""
+    """`las <command…>` (cli/main.py): connect `command` to LAS as a session of the
+    agent in this folder, with NO terminal: every message to it runs the command
+    once, the text as one more argument (`pulpo luganense 'what the mic heard'`),
+    and what it prints is the answer — spoken for the mic (docs/adr/0006).
+    It shows in 👥 named after its first word; this terminal is free again."""
+    from cli.commands.detach import DetachError, agent_dir_of, open_detached
+    from cli.agent_config import read_agent_config
+    from cli.path_utils import agent_config_path
+    name = resolve_agent_name(None)
+    agent_dir = agent_dir_of(name)
+    path = agent_config_path(agent_dir)
+    command = shlex.join(argv)
+    try:
+        pid, log_path = open_detached(name, agent_dir, read_agent_config(path) if path else {}, command, each=True, text_as_arg=True)
+    except DetachError as err:
+        click.echo(f"Error: {err}", err=True)
+        raise SystemExit(1)
+    click.echo(f"{name}: `{command}` connected, no terminal (pid {pid}) — pick it in 👥 and the mic runs it.")
+    click.echo(f"  log: {log_path}   ·   close: ✕ in 👥 or `las detach --stop`   ·   in a terminal: las attach {command}")
+
+
+@click.command("attach", context_settings={"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []})
+@click.argument("argv", nargs=-1, required=True, type=click.UNPROCESSED)
+def attach_cmd(argv):
+    """`las attach <command…>`: like `las <command…>`, but in THIS terminal — what each run prints shows here, Ctrl-C closes it."""
     name = resolve_agent_name(None)
     _chain(name)
-    runtime = Path(argv[0]).name
-    _sign_terminal(name, runtime)
-    _exec(bridge_argv("proc", name, ["--exec", shlex.join(argv)]))
+    _sign_terminal(name, Path(argv[0]).name)
+    _exec(bridge_argv("exec", name, ["--exec", shlex.join(argv), "--text-as", "arg"]))
 
 
 def run_codex_interactive(name: str, agent_dir: str, codex_args=(), intercept_url=None, port=None) -> int:

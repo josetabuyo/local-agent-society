@@ -26,7 +26,7 @@ LOG_DIR = Path(os.getenv("LAS_SESSION_LOG_DIR", str(Path.home() / ".las" / "logs
 # What `las detach` suggests when the agent has no long-lived command yet —
 # Pulpo's conversational agent on a local model, speaking the ADR 0006 stdio
 # contract. Any command that honours it works.
-SUGGESTED_COMMAND = "pulpo agent run"
+SUGGESTED_COMMAND = "pulpo las run"
 STARTUP_WAIT_S = 3.0
 
 
@@ -81,16 +81,18 @@ class DetachError(RuntimeError):
     pass
 
 
-def open_detached(name: str, agent_dir: Path, config: dict, command: str, *, each: bool = False, sessions=detached_sessions) -> tuple:
+def open_detached(name: str, agent_dir: Path, config: dict, command: str, *, each: bool = False, text_as_arg: bool = False, sessions=detached_sessions) -> tuple:
     """Start `command` as a detached session of `name`; (pid, log path). Raises DetachError if it dies right away.
 
     each=False: one long-lived process speaking JSON lines (bridge sink `proc`).
-    each=True: the command runs once per message, text on stdin (sink `exec`)."""
+    each=True: the command runs once per message (sink `exec`), the text on stdin
+    — or, with text_as_arg, as one more argument (`las <command…>`)."""
     log_path = new_log_path(name)
     env = {**os.environ, "LAS_LOCALE": config.get("locale", "")}
     if sys.platform != "win32":
         env["SHELL"] = login_shell()
-    proc = spawn_detached(bridge_argv("exec" if each else "proc", name, ["--exec", command, "--log", str(log_path)]), cwd=agent_dir, log_path=log_path, env=env)
+    extra = ["--exec", command, "--log", str(log_path)] + (["--text-as", "arg"] if each and text_as_arg else [])
+    proc = spawn_detached(bridge_argv("exec" if each else "proc", name, extra), cwd=agent_dir, log_path=log_path, env=env)
     deadline = time.time() + STARTUP_WAIT_S
     while time.time() < deadline:
         if proc.poll() is not None:
@@ -101,7 +103,7 @@ def open_detached(name: str, agent_dir: Path, config: dict, command: str, *, eac
     return proc.pid, log_path
 
 
-def _open(name: str, command: str | None, each: bool = False) -> None:
+def _open(name: str, command: str | None) -> None:
     agent_dir = agent_dir_of(name)
     path = agent_config_path(agent_dir)
     config = read_agent_config(path) if path else {}
@@ -113,7 +115,7 @@ def _open(name: str, command: str | None, each: bool = False) -> None:
         click.echo(f"{name} has no detached command yet. Set one, e.g.:\n  las detach --cmd \"{SUGGESTED_COMMAND}\"", err=True)
         raise SystemExit(1)
     try:
-        pid, log_path = open_detached(name, agent_dir, config, command, each=each)
+        pid, log_path = open_detached(name, agent_dir, config, command)
     except DetachError as err:
         click.echo(f"Error: {err}", err=True)
         raise SystemExit(1)
@@ -147,16 +149,16 @@ def _log(name: str, follow: bool) -> None:
 @click.command("detach")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 @click.option("--cmd", "command", default=None, help=f'The command to run (saved in .las-agent.json → detached.command), e.g. "{SUGGESTED_COMMAND}".')
-@click.option("--each", is_flag=True, help="One run of the command PER MESSAGE (text on stdin, its output is the answer), e.g. `pulpo agent`.")
 @click.option("--stop", is_flag=True, help="Close this agent's detached session(s).")
 @click.option("--log", "show_log", is_flag=True, help="Show the detached session's log.")
 @click.option("-f", "--follow", is_flag=True, help="With --log: keep following it.")
-def detach_cmd(name, command, each, stop, show_log, follow):
-    """Open a session with no terminal: any command that speaks the LAS contract (docs/adr/0006).
+def detach_cmd(name, command, stop, show_log, follow):
+    """A LONG-LIVED command with no terminal, speaking the JSON-lines contract (docs/adr/0006).
+
+    For a command run once per message, `las <command…>` is the simpler way.
 
     \b
       las detach --cmd "pulpo agent run"   # set the command and open it
-      las detach --each --cmd "pulpo agent" # one run per message instead
       las detach                           # open it again
       las detach --log [-f]                # what it printed
       las detach --stop                    # close it (also ✕ in the widget's 👥)
@@ -167,4 +169,4 @@ def detach_cmd(name, command, each, stop, show_log, follow):
     elif show_log:
         _log(name, follow)
     else:
-        _open(name, command, each)
+        _open(name, command)

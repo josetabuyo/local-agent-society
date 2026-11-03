@@ -36,6 +36,7 @@ const { values: opts, positionals } = parseArgs({
     exec: { type: 'string' },
     runtime: { type: 'string' },
     log: { type: 'string' },
+    'text-as': { type: 'string' },
     yes: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
     quiet: { type: 'boolean', default: false },
@@ -115,7 +116,7 @@ switch (sinkName) {
 // This process is one SESSION of the agent (docs/adr/0004 phase 2): it has
 // its own inbox, and holds the agent-level one only while it is the default.
 const commandWord = (cmd) => cmd.trim().split(/\s+/)[0].split(/[\\/]/).pop();
-const runtime = opts.runtime || (sinkName === 'exec' ? (commandWord(opts.exec) === 'codex' ? 'codex' : opts.log ? commandWord(opts.exec) : 'exec')
+const runtime = opts.runtime || (sinkName === 'exec' ? (commandWord(opts.exec) === 'codex' ? 'codex' : opts.log || opts['text-as'] === 'arg' ? commandWord(opts.exec) : 'exec')
   : sinkName === 'proc' ? commandWord(opts.exec) : sinkName === 'claude' ? 'claude' : sinkName);
 const sid = newSessionId(runtime);
 // Detached (docs/adr/0006) = started in the background with a log (`las detach`).
@@ -123,12 +124,16 @@ const sid = newSessionId(runtime);
 // session: findable (⌖), closable by its tty, and the default like any terminal.
 const isDetached = (sinkName === 'proc' || sinkName === 'exec') && Boolean(opts.log);
 const detached = isDetached ? { command: opts.exec, log: opts.log || '', mode: sinkName === 'proc' ? 'process' : 'each' } : null;
-const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, log });
+const commandSession = isDetached || opts['text-as'] === 'arg';
+const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, title: commandSession ? opts.exec : '', log });
 const speak = makeSpeaker({ agent: agent.name, voice: agent.config && agent.config.voice });
 if (sinkName === 'proc') {
   sink = new ProcSink({ command: opts.exec, agent: agent.name, sid, cwd: process.cwd(), send, setTitle: (t) => session.setTitle(t), speak, log });
 } else if (sinkName === 'exec') {
-  sink = new ExecSink({ command: opts.exec, cwd: process.cwd(), answer: isDetached ? makeAnswer({ agent: agent.name, send, speak }) : null });
+  // `las <command…>` (detached or `las attach`): answers routed like a detached session's, text as the last argument.
+  const connected = isDetached || opts['text-as'] === 'arg';
+  sink = new ExecSink({ command: opts.exec, cwd: process.cwd(), textAs: opts['text-as'] === 'arg' ? 'arg' : 'stdin',
+    answer: connected ? makeAnswer({ agent: agent.name, send, speak }) : null });
 }
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
 const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });
