@@ -23,8 +23,8 @@ from cli.commands.bridge import bridge_argv
 from cli.path_utils import agent_config_path
 
 LOG_DIR = Path(os.getenv("LAS_SESSION_LOG_DIR", str(Path.home() / ".las" / "logs" / "sessions")))
-# What `las detach` suggests when the agent has no command yet. Any command
-# that honours the contract works; this is only the first one we know of.
+# What `las detach` suggests when the agent has no command yet — Pulpo's
+# conversational agent on a local model. Any command that honours the contract works.
 SUGGESTED_COMMAND = "pulpo agent run"
 STARTUP_WAIT_S = 3.0
 

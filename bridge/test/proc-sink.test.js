@@ -51,3 +51,17 @@ test('ProcSink: one long-lived command, env, replies to the sender, title, log, 
 test('ProcSink needs a command', () => {
   assert.throws(() => new ProcSink({}), TypeError);
 });
+
+test('ProcSink: the answer to a mic dictation (origin human, from the agent itself) is spoken, not sent', async () => {
+  const spoken = [];
+  const { s, sent, out } = sink({ command: `while read -r line; do echo '{"type":"reply","text":"hola"}'; done`, speak: async (t) => spoken.push(t) });
+  s.start();
+  await s.deliver({ envelope: { id: '1', from: 'Me', source: 'human', kind: 'message', text: 'dictado', ts: 1 } });
+  await until(() => spoken.length === 1);
+  assert.deepEqual(spoken, ['hola']);
+  assert.equal(sent.length, 0);
+  await s.deliver({ envelope: { id: '2', from: 'Me', source: 'agent', kind: 'message', text: 'x', ts: 2 } });
+  await until(() => out.text.includes('reply to self'));
+  assert.equal(spoken.length, 1, 'an agent-origin message to self is only logged');
+  await s.stop();
+});

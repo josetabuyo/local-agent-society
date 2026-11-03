@@ -54,8 +54,11 @@ asks for a `title` line; anything else may be ignored.
 ```
 
 A `reply` without `to` goes to the `from` of the most recent message. A reply
-addressed to the session's own agent is logged, never sent: that mailbox may
-be this very session, and an echo would loop forever. Any
+addressed to the session's own agent is never sent: that mailbox may be this
+very session, and an echo would loop forever. When the message being answered
+came from the mic (`origin: "human"`), that reply is SPOKEN in the agent's
+voice instead (so it also lands in the widget's history); otherwise it is
+only logged. Any
 stdout line that is not one of these JSON objects goes to the log, as does
 all of stderr. A message is acknowledged to the mailbox once written to stdin.
 

@@ -122,7 +122,14 @@ const sid = newSessionId(runtime);
 const detached = sinkName === 'proc' ? { command: opts.exec, log: opts.log || '' } : null;
 const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, log });
 if (sinkName === 'proc') {
-  sink = new ProcSink({ command: opts.exec, agent: agent.name, sid, cwd: process.cwd(), send, setTitle: (t) => session.setTitle(t), log });
+  const speak = async (text) => {
+    const res = await fetch(`${process.env.LAS_REGISTRY_URL || 'http://localhost:8700'}/queue/speak`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text, voice: (agent.config && agent.config.voice) || 'Samantha', name: agent.name }),
+    });
+    if (!res.ok) throw new Error(`speak failed: HTTP ${res.status}`);
+  };
+  sink = new ProcSink({ command: opts.exec, agent: agent.name, sid, cwd: process.cwd(), send, setTitle: (t) => session.setTitle(t), speak, log });
 }
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
 const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });

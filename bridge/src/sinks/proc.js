@@ -39,13 +39,14 @@ export function procMessageLine(envelope) {
 }
 
 export class ProcSink {
-  constructor({ command, agent, sid, cwd = process.cwd(), env = {}, send, setTitle = async () => {}, shell = process.env.SHELL || '/bin/sh',
+  constructor({ command, agent, sid, cwd = process.cwd(), env = {}, send, setTitle = async () => {}, speak = null, shell = process.env.SHELL || '/bin/sh',
     spawnImpl = spawn, log = (msg) => process.stderr.write(`[las-bridge] ${msg}\n`), out = process.stderr, killAfterMs = KILL_AFTER_MS }) {
     if (!command) throw new TypeError('ProcSink needs a command');
-    Object.assign(this, { command, agent, sid, cwd, env, send, setTitle, shell, spawnImpl, log, out, killAfterMs });
+    Object.assign(this, { command, agent, sid, cwd, env, send, setTitle, speak, shell, spawnImpl, log, out, killAfterMs });
     this.name = 'proc';
     this.child = null;
     this.lastFrom = null;
+    this.lastOrigin = null;
     this.onexit = null;
   }
 
@@ -84,7 +85,15 @@ export class ProcSink {
         // Its own agent's mailbox may be this very session: a reply there comes
         // straight back in, and an echoing command loops forever. Log it instead.
         if (to === this.agent) {
-          this.out.write(`[reply to self, not sent] ${msg.text}\n`);
+          // The mic's dictation comes "from" the agent itself: the human is
+          // waiting for that answer, so it is spoken (and lands in the widget's
+          // history) instead of sent. Anything else to self is only logged.
+          if (this.lastOrigin === 'human' && !msg.to && this.speak) {
+            await this.speak(msg.text);
+            this.out.write(`[spoken to the human] ${msg.text}\n`);
+          } else {
+            this.out.write(`[reply to self, not sent] ${msg.text}\n`);
+          }
           return;
         }
         await this.send(to, msg.text);
@@ -97,6 +106,7 @@ export class ProcSink {
   deliver(ctx) {
     if (!this.child) throw new Error('command is not running');
     this.lastFrom = ctx.envelope.from;
+    this.lastOrigin = ctx.envelope.source;
     return new Promise((resolve, reject) => {
       this.child.stdin.write(procMessageLine(ctx.envelope), (err) => (err ? reject(err) : resolve()));
     });

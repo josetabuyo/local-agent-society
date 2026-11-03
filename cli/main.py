@@ -11,7 +11,6 @@ from cli.commands.shell_init import shell_init
 from cli.commands.route import route
 from cli.commands.vocab import vocab_cmd
 from cli.commands.bridge import bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
-from cli.commands.local import local_cmd
 from cli.commands.detach import detach_cmd
 
 
@@ -52,7 +51,6 @@ cli.add_command(claude_cmd, name="claude")
 cli.add_command(claude_relay_cmd, name="claudeRelay")
 cli.add_command(codex_cmd, name="codex")
 cli.add_command(shell_cmd, name="shell")
-cli.add_command(local_cmd, name="local")
 cli.add_command(detach_cmd, name="detach")
 cli.add_command(shell_init, name="shell-init")
 cli.add_command(route)

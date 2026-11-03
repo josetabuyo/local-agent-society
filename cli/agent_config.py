@@ -52,11 +52,6 @@ DEFAULT_RUNTIMES = {
         "accepts": [KIND_MESSAGE, KIND_COMMAND],
         "scope": "Codex TUI: natural-language coding tasks typed into it",
     },
-    "local": {
-        "intelligent": True,
-        "accepts": [KIND_MESSAGE, KIND_COMMAND],
-        "scope": "local model through Pulpo's las-local flow: conversational, small tools, answers back",
-    },
     "shell": {
         "intelligent": False,
         "accepts": [KIND_COMMAND],

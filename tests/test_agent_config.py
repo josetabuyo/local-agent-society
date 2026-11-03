@@ -11,7 +11,7 @@ from cli.agent_config import (DEFAULT_RUNTIMES, default_sessions_config, merge_c
 def test_defaults_target_the_last_used_session_without_cc_and_describe_the_three_runtimes():
     cfg = default_sessions_config()
     assert cfg["target"] == "default" and cfg["cc_default"] is False
-    assert set(cfg["runtimes"]) == {"claude", "codex", "local", "shell"}
+    assert set(cfg["runtimes"]) == {"claude", "codex", "shell"}
     assert cfg["runtimes"]["shell"]["intelligent"] is False and cfg["runtimes"]["shell"]["accepts"] == ["command"]
     assert cfg["runtimes"]["claude"]["intelligent"] is True and "message" in cfg["runtimes"]["claude"]["accepts"]
     cfg["runtimes"]["shell"]["scope"] = "mutated"
@@ -84,7 +84,7 @@ def test_strict_read_refuses_a_broken_file_but_not_a_missing_one(tmp_path):
 def test_the_first_sessions_patch_seeds_the_whole_section_with_its_descriptors():
     merged = merge_config_patch({"name": "Robo"}, {"sessions": {"target": "shell"}})
     assert merged["sessions"]["target"] == "shell" and merged["sessions"]["cc_default"] is False
-    assert set(merged["sessions"]["runtimes"]) == {"claude", "codex", "local", "shell"}
+    assert set(merged["sessions"]["runtimes"]) == {"claude", "codex", "shell"}
     again = merge_config_patch(merged, {"sessions": {"cc_default": True}})
     assert again["sessions"]["target"] == "shell", "a later patch merges, it does not reseed"
 
@@ -113,5 +113,5 @@ def test_normalize_fills_only_what_is_missing_in_a_fixed_order(tmp_path):
     assert out["locale"] == "es-MX" and out["pronunciation"] == "Robo" and out["short_description"] == "kept"
     assert out["scope_docs"] == ["docs/who.md"], "an explicit choice of identity docs is never replaced"
     assert out["sessions"]["target"] == "shell" and out["sessions"]["runtimes"]["shell"] == {"scope": "mine"}
-    assert set(out["sessions"]["runtimes"]) == {"claude", "codex", "local", "shell"}
+    assert set(out["sessions"]["runtimes"]) == {"claude", "codex", "shell"}
     assert normalized_agent_config(out, tmp_path) == out, "idempotent"
