@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 import random
+import signal
 import socket
 import uuid
 from pathlib import Path
@@ -540,6 +541,7 @@ class SessionRegisterRequest(BaseModel):
     runtime: str = Field(min_length=1, max_length=40)   # claude | codex | shell | stdout | exec
     pid:     int
     cwd:     str = ""
+    detached: Optional[dict] = None   # {command, log} — a session with no terminal (docs/adr/0006)
 
 
 class SessionTitleRequest(BaseModel):
@@ -900,6 +902,12 @@ def register_session(name: str, body: SessionRegisterRequest):
         # A bridge that re-registers the same sid (backend restart) keeps the title it was given.
         title = sessions.get(body.sid, {}).get("title", "")
         sessions[body.sid] = {"sid": body.sid, "agent": name, "runtime": body.runtime, "pid": body.pid, "cwd": body.cwd, "title": title, "startedAt": now, "lastActiveAt": now}
+        if body.detached:
+            # Opening a background process is not "using" it: the mic and a plain
+            # send stay with whatever session was the default (docs/adr/0006).
+            if any(s for k, s in sessions.items() if k != body.sid):
+                sessions[body.sid]["lastActiveAt"] = 0
+            sessions[body.sid]["detached"] = {"command": str(body.detached.get("command", "")), "log": str(body.detached.get("log", ""))}
         _save_sessions(name, sessions)
         published = _publish_default_session(name, sessions)
         view = _sessions_view(name, sessions)
@@ -1015,7 +1023,18 @@ def session_beacon(name: str, sid: str):
 
 @app.post("/agents/{name}/sessions/{sid}/close")
 def close_session(name: str, sid: str):
-    """Close one session's terminal (SIGHUP its tty) and drop it the way a leaving bridge would."""
+    """Close one session's terminal (SIGHUP its tty) and drop it the way a leaving bridge would.
+
+    A detached session (docs/adr/0006) has no terminal: its bridge gets SIGTERM
+    and stops the command itself (stdin closed, SIGTERM, kill after 5 s)."""
+    with _sessions_lock:
+        session = _load_sessions(name).get(sid)
+    if session and session.get("detached"):
+        try:
+            os.kill(int(session["pid"]), signal.SIGTERM)
+        except (OSError, TypeError, ValueError):
+            pass   # already gone — dropping the record is all that is left
+        return {**unregister_session(name, sid), "detached": True}
     _, tty = _session_tty(name, sid)
     if not hangup_tty(tty):
         raise HTTPException(status_code=409, detail=f"could not hang up {tty}")

@@ -129,7 +129,8 @@ export class Bridge {
     this.status?.bump();
     // Activity: this session is the one being used — unless it was only the
     // widget asking every session for a title, which must not reshuffle the default.
-    if (this.session && envelope.kind !== KIND.TITLE_REQUEST) this.session.touch();
+    // A detached process (ADR 0006) is never "the one you're using": it doesn't take the default.
+    if (this.session && envelope.kind !== KIND.TITLE_REQUEST && !this.session.detached) this.session.touch();
     return { handledBy: null };
   }
 

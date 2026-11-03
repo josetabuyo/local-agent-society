@@ -148,6 +148,9 @@ contextBridge.exposeInMainWorld('las', {
    * backend's sessions view, or null. */
   closeSession: (name, sid) => ipcRenderer.invoke('agent:session-close', name, sid),
 
+  /** Open a detached session's log file in the OS's default viewer. */
+  openSessionLog: (logPath) => ipcRenderer.invoke('agent:session-log', logPath),
+
   /** Local Whisper transcription (main.js's "audio transcription" section) —
    * replaces the broken Electron SpeechRecognition/webkitSpeechRecognition.
    * `pcmBuffer` must be an ArrayBuffer of mono Float32 PCM samples at 16kHz

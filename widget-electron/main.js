@@ -1619,8 +1619,18 @@ ipcMain.handle('agent:session-find', async (_event, name, sid) => {
 // (the terminal closes as if its window had been closed) and drops it.
 ipcMain.handle('agent:session-close', async (_event, name, sid) => {
   const json = await postBackend(`${sessionPath(name, sid)}/close`, `close ${name}/${sid}`);
-  if (json) log.info('children', `${name}/${sid}: closed ${json.tty}`);
+  if (json) log.info('children', `${name}/${sid}: closed ${json.detached ? 'detached process' : json.tty}`);
   return json;
+});
+
+// A detached session's 📄: its log lives under ~/.las/logs/sessions (ADR 0006);
+// only a file there is opened, so the renderer cannot open arbitrary paths.
+const SESSION_LOG_DIR = path.join(os.homedir(), '.las', 'logs', 'sessions');
+ipcMain.handle('agent:session-log', async (_event, logPath) => {
+  const resolved = path.resolve(String(logPath || ''));
+  if (path.dirname(resolved) !== SESSION_LOG_DIR) return { ok: false, error: 'not a session log' };
+  const failure = await shell.openPath(resolved);
+  return failure ? { ok: false, error: failure } : { ok: true };
 });
 
 // -- mic gate: nothing speaks while any widget records ----------------------

@@ -35,8 +35,8 @@ export function defaultSessionTopic(agent) {
 
 /** HTTP client for the backend's session endpoints. Every call fails soft: a backend that is down must not take a bridge down. */
 export class SessionRegistry {
-  constructor({ agent, sid, runtime, cwd = process.cwd(), pid = process.pid, fetchImpl = globalThis.fetch, registryUrl = REGISTRY_URL, log = () => {} }) {
-    Object.assign(this, { agent, sid, runtime, cwd, pid, fetchImpl, registryUrl, log });
+  constructor({ agent, sid, runtime, cwd = process.cwd(), pid = process.pid, detached = null, fetchImpl = globalThis.fetch, registryUrl = REGISTRY_URL, log = () => {} }) {
+    Object.assign(this, { agent, sid, runtime, cwd, pid, detached, fetchImpl, registryUrl, log });
   }
 
   async _call(method, path, body) {
@@ -55,7 +55,14 @@ export class SessionRegistry {
   }
 
   register() {
-    return this._call('POST', '/sessions', { sid: this.sid, runtime: this.runtime, pid: this.pid, cwd: this.cwd });
+    const body = { sid: this.sid, runtime: this.runtime, pid: this.pid, cwd: this.cwd };
+    // A detached session (docs/adr/0006) has no terminal: the backend closes it by pid and shows its log instead.
+    if (this.detached) body.detached = this.detached;
+    return this._call('POST', '/sessions', body);
+  }
+
+  setTitle(title) {
+    return this._call('PUT', `/sessions/${encodeURIComponent(this.sid)}/title`, { title });
   }
 
   touch() {

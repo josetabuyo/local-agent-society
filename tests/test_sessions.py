@@ -367,3 +367,39 @@ def test_close_keeps_the_session_when_the_hangup_fails(app, tty_calls, monkeypat
     monkeypatch.setattr(main, "hangup_tty", lambda tty: False)
     assert client.post("/agents/Robo/sessions/shell-1/close").status_code == 409
     assert [s["sid"] for s in client.get("/agents/Robo/sessions").json()["sessions"]] == ["shell-1"]
+
+
+# ── detached sessions (docs/adr/0006) ─────────────────────────────────────────
+
+def _register_detached(client, sid="pulpo-7", pid=7):
+    r = client.post("/agents/Robo/sessions", json={"sid": sid, "runtime": "pulpo", "pid": pid, "cwd": "/x",
+                                                   "detached": {"command": "pulpo agent run", "log": "/l/Robo-1.log"}})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_a_detached_session_is_listed_with_its_command_and_log_but_never_takes_the_default(app):
+    _, client = app
+    _register(client, "claude-1", "claude")
+    view = _register_detached(client)
+    assert view["default"] == "claude-1", "opening a background process is not using it: the mic stays put"
+    row = next(s for s in view["sessions"] if s["sid"] == "pulpo-7")
+    assert row["detached"] == {"command": "pulpo agent run", "log": "/l/Robo-1.log"}
+    assert "detached" not in next(s for s in view["sessions"] if s["sid"] == "claude-1")
+
+
+def test_a_detached_session_alone_is_the_default(app):
+    _, client = app
+    assert _register_detached(client)["default"] == "pulpo-7"
+
+
+def test_close_of_a_detached_session_signals_its_bridge_instead_of_a_tty(app, tty_calls, monkeypatch):
+    main, client = app
+    _register(client, "claude-1", "claude", pid=5)
+    _register_detached(client, pid=7)
+    killed = []
+    monkeypatch.setattr(main.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    view = client.post("/agents/Robo/sessions/pulpo-7/close").json()
+    assert killed == [(7, main.signal.SIGTERM)]
+    assert view["detached"] is True and [s["sid"] for s in view["sessions"]] == ["claude-1"]
+    assert not any(c[0] == "hangup" for c in tty_calls)

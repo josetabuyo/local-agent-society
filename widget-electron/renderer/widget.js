@@ -1832,11 +1832,11 @@ function targetRows() {
   }
   for (const [runtime, sessions] of byRuntime) {
     if (sessions.length === 1) {
-      rows.push({ value: runtime, label: sessionLabel(sessions[0]), scope: sessions[0].scope, sid: sessions[0].sid });
+      rows.push({ value: runtime, label: sessionLabel(sessions[0]), scope: sessions[0].scope, sid: sessions[0].sid, detached: sessions[0].detached });
       continue;
     }
     // knownSessions is most-recently-used first: sessions[0] is what the runtime name resolves to.
-    sessions.forEach((s, i) => rows.push({ value: s.sid, label: sessionLabel(s), scope: s.scope, sid: s.sid, alias: i === 0 ? runtime : undefined }));
+    sessions.forEach((s, i) => rows.push({ value: s.sid, label: sessionLabel(s), scope: s.scope, sid: s.sid, detached: s.detached, alias: i === 0 ? runtime : undefined }));
   }
   return rows;
 }
@@ -1927,7 +1927,7 @@ function renderChildrenMenu() {
   if (!knownSessions.length) {
     const hint = document.createElement('div');
     hint.className = 'open-row';
-    hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell</span>';
+    hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell / las detach</span>';
     childrenMenuEl.appendChild(hint);
   }
   for (const row of rows) {
@@ -1944,7 +1944,7 @@ function renderChildrenMenu() {
       closeChildrenMenu();
     });
     el.appendChild(btn);
-    if (row.sid) el.append(...sessionActionButtons(row.sid));
+    if (row.sid) el.append(...sessionActionButtons(row.sid, row.detached));
     childrenMenuEl.appendChild(el);
   }
   if (knownSessions.some((s) => s.intelligent !== false)) {
@@ -1987,9 +1987,10 @@ function iconButton(text, title, onClick) {
  * in Ghostty, is focused — window to front, Space switched) and close (its
  * tty is hung up, like closing the window). Close takes a second click
  * within CLOSE_CONFIRM_MS: no modal dialog, no accidental kill.
+ * A detached session (docs/adr/0006) has no terminal to find: 📄 opens its log.
  */
-function sessionActionButtons(sid) {
-  const find = iconButton('⌖', 'Find this terminal — bring it to the front', async () => {
+function sessionActionButtons(sid, detached) {
+  const find = detached ? iconButton('📄', 'Open this background process\'s log', () => window.las.openSessionLog(detached.log)) : iconButton('⌖', 'Find this terminal — bring it to the front', async () => {
     const res = await window.las.findSession(agentName, sid);
     if (res && res.focused) closeChildrenMenu();
     else find.title = res && res.ok ? 'Look for the terminal titled "◉ … here ◉" (it rang its bell)' : 'Could not reach this terminal';

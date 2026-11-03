@@ -703,14 +703,17 @@ def sessions(name, use_sid, society, refresh, wait_s):
 def _print_sessions(name: str, view: dict) -> None:
     rows = view.get("sessions", [])
     if not rows:
-        click.echo(f"{name}: no connected sessions — open one with `las claude` (`--account NAME` for a second login), `las codex` or `las shell` in its folder.")
+        click.echo(f"{name}: no connected sessions — open one with `las claude` (`--account NAME` for a second login), `las codex`, `las shell` or `las detach` in its folder.")
         return
     for s in rows:
         mark = "*" if s.get("default") else " "
-        age = int((time.time() * 1000 - s.get("lastActiveAt", 0)) / 1000)
+        last = s.get("lastActiveAt", 0)
+        used = f"used {int((time.time() * 1000 - last) / 1000)}s ago" if last else "never used"
+        if s.get("detached"):
+            used += " · detached"
         brain = "" if s.get("intelligent", True) else "  [not intelligent: commands only]"
         title = f"  \"{s['title']}\"" if s.get("title") else ""
-        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<11} pid {s.get('pid', '?'):<7} used {age}s ago  {s.get('cwd', '')}{title}{brain}")
+        click.echo(f"{mark} {s['sid']:<28} {s.get('runtime', '?'):<11} pid {s.get('pid', '?'):<7} {used}  {s.get('cwd', '')}{title}{brain}")
 
 
 def _parent_pid(pid: int) -> int | None:

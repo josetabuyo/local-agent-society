@@ -10,6 +10,8 @@
  *            ones to run here (--yes to skip the prompt, --all for any text)
  *   exec     run --exec CMD per message with the text on stdin (Codex, a
  *            local model, any tool) and send its output back to the sender
+ *   proc     a DETACHED session (docs/adr/0006): start --exec CMD once and
+ *            speak JSON lines with it over stdio (--log PATH names its log)
  *
  * Common: --agent NAME (default: nearest .las-agent.json), --runtime NAME (what
  * `las agent sessions` shows; default = the sink), --intercept-url URL
@@ -20,7 +22,7 @@ import { parseArgs } from 'node:util';
 import { idleClaudeServer } from '../src/sinks/claude-channel.js';
 import {
   Bridge, MailboxSource, Pipeline, dedupInterceptor, ignoreKindsInterceptor, senderPolicyInterceptor,
-  micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, channelLaunchProblem, StdoutSink, ShellSink, ExecSink,
+  micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, channelLaunchProblem, StdoutSink, ShellSink, ExecSink, ProcSink,
   KIND, resolveAgent, StatusFile, makeSender,
 } from '../src/index.js';
 import { SessionRegistry, DefaultWatcher, newSessionId, sessionInboxTopic, sessionMailboxClientId } from '../src/sessions.js';
@@ -33,6 +35,7 @@ const { values: opts, positionals } = parseArgs({
     'intercept-url': { type: 'string' },
     exec: { type: 'string' },
     runtime: { type: 'string' },
+    log: { type: 'string' },
     yes: { type: 'boolean', default: false },
     all: { type: 'boolean', default: false },
     quiet: { type: 'boolean', default: false },
@@ -40,7 +43,7 @@ const { values: opts, positionals } = parseArgs({
   },
 });
 
-const SINKS = ['claude', 'stdout', 'shell', 'exec'];
+const SINKS = ['claude', 'stdout', 'shell', 'exec', 'proc'];
 const sinkName = positionals[0];
 if (opts.help || !SINKS.includes(sinkName)) {
   process.stderr.write(`usage: las-bridge <${SINKS.join('|')}> [--agent NAME] [--exec CMD] [--runtime NAME] [--yes] [--all] [--intercept-url URL] [--port N] [--quiet]\n`);
@@ -102,13 +105,25 @@ switch (sinkName) {
     }
     sink = new ExecSink({ command: opts.exec, cwd: process.cwd() });
     break;
+  case 'proc':
+    if (!opts.exec) {
+      process.stderr.write('las-bridge proc: --exec CMD is required\n');
+      process.exit(64);
+    }
+    break; // built below: it needs the session id
 }
 
 // This process is one SESSION of the agent (docs/adr/0004 phase 2): it has
 // its own inbox, and holds the agent-level one only while it is the default.
-const runtime = opts.runtime || (sinkName === 'exec' ? (opts.exec.trim().split(/\s+/)[0] === 'codex' ? 'codex' : 'exec') : sinkName === 'claude' ? 'claude' : sinkName);
+const commandWord = (cmd) => cmd.trim().split(/\s+/)[0].split(/[\\/]/).pop();
+const runtime = opts.runtime || (sinkName === 'exec' ? (commandWord(opts.exec) === 'codex' ? 'codex' : 'exec')
+  : sinkName === 'proc' ? commandWord(opts.exec) : sinkName === 'claude' ? 'claude' : sinkName);
 const sid = newSessionId(runtime);
-const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), log });
+const detached = sinkName === 'proc' ? { command: opts.exec, log: opts.log || '' } : null;
+const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, log });
+if (sinkName === 'proc') {
+  sink = new ProcSink({ command: opts.exec, agent: agent.name, sid, cwd: process.cwd(), send, setTitle: (t) => session.setTitle(t), log });
+}
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
 const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });
 const status = new StatusFile({ agent: agent.name, sink: sink.name, sid });
@@ -145,6 +160,10 @@ if (sink instanceof ClaudeChannelSink) {
   // process alive — a zombie holding the mailbox. Stdin end == parent gone.
   process.stdin.once('end', () => shutdown(0));
   process.stdin.once('close', () => shutdown(0));
+}
+if (sink instanceof ProcSink) {
+  // The command exiting on its own ends the session (ADR 0006: no restarts).
+  sink.onexit = (code) => shutdown(code === 0 ? 0 : 1); // Bridge.run() starts it
 }
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));

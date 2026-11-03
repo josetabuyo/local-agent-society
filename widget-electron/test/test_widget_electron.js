@@ -151,9 +151,17 @@ test('the children menu finds and closes a session through the backend, with the
   assert.match(mainSrc, /runOsascript\(GHOSTTY_FOCUS_TITLE_SCRIPT, \[json\.beacon\]\)/,
     'the beacon is an argument, never interpolated into the script');
   const widgetSrc = readSrc('renderer/widget.js');
-  assert.match(widgetSrc, /if \(row\.sid\) el\.append\(\.\.\.sessionActionButtons\(row\.sid\)\)/,
+  assert.match(widgetSrc, /if \(row\.sid\) el\.append\(\.\.\.sessionActionButtons\(row\.sid, row\.detached\)\)/,
     'only session rows (not default/all) get find/close');
   assert.doesNotMatch(stripComments(widgetSrc), /\bconfirm\(/, 'close confirms with a second click, never a blocking dialog');
+});
+
+test('a detached session (ADR 0006) gets 📄 open-log instead of find, and only a session log can be opened', () => {
+  const widgetSrc = readSrc('renderer/widget.js');
+  assert.match(widgetSrc, /detached \? iconButton\('📄'[^)]*\(\) => window\.las\.openSessionLog\(detached\.log\)\)/);
+  assert.match(readSrc('preload.js'), /openSessionLog: \(logPath\) => ipcRenderer\.invoke\('agent:session-log', logPath\)/);
+  const mainSrc = readSrc('main.js');
+  assert.match(mainSrc, /ipcMain\.handle\('agent:session-log'[\s\S]*?path\.dirname\(resolved\) !== SESSION_LOG_DIR[\s\S]*?shell\.openPath\(resolved\)/);
 });
 
 // ── voice-selection hashing ──────────────────────────────────────────────────
