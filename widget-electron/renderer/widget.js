@@ -1750,7 +1750,7 @@ function renderChildrenMenu() {
   if (!knownSessions.length) {
     const hint = document.createElement('div');
     hint.className = 'open-row';
-    hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell / las detach</span>';
+    hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell / las &lt;command&gt;</span>';
     childrenMenuEl.appendChild(hint);
   }
   for (const row of rows) {

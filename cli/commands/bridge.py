@@ -774,20 +774,19 @@ def run_connected(argv: list) -> None:
     once, the text as one more argument (`pulpo luganense 'what the mic heard'`),
     and what it prints is the answer — spoken for the mic (docs/adr/0006).
     It shows in 👥 named after its first word; this terminal is free again."""
-    from cli.commands.detach import DetachError, agent_dir_of, open_detached
     from cli.agent_config import read_agent_config
+    from cli.connected import ConnectError, agent_dir_of, connect
     from cli.path_utils import agent_config_path
     name = resolve_agent_name(None)
-    agent_dir = agent_dir_of(name)
-    path = agent_config_path(agent_dir)
     command = shlex.join(argv)
     try:
-        pid, log_path = open_detached(name, agent_dir, read_agent_config(path) if path else {}, command, each=True, text_as_arg=True)
-    except DetachError as err:
+        agent_dir = agent_dir_of(name)
+        path = agent_config_path(agent_dir)
+        pid, log_path = connect(name, agent_dir, command, locale=(read_agent_config(path) if path else {}).get("locale", ""))
+    except ConnectError as err:
         click.echo(f"Error: {err}", err=True)
         raise SystemExit(1)
-    click.echo(f"{name}: `{command}` connected, no terminal (pid {pid}) — pick it in 👥 and the mic runs it.")
-    click.echo(f"  log: {log_path}   ·   close: ✕ in 👥 or `las detach --stop`   ·   in a terminal: las attach {command}")
+    click.echo(f"{name}: `{command}` connected (pid {pid}). Pick it in 👥 and the mic runs it; ✕ closes it.")
 
 
 @click.command("attach", context_settings={"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []})

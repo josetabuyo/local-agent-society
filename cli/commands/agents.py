@@ -703,7 +703,7 @@ def sessions(name, use_sid, society, refresh, wait_s):
 def _print_sessions(name: str, view: dict) -> None:
     rows = view.get("sessions", [])
     if not rows:
-        click.echo(f"{name}: no connected sessions — open one with `las claude` (`--account NAME` for a second login), `las codex`, `las shell` or `las detach` in its folder.")
+        click.echo(f"{name}: no connected sessions — open one with `las claude` (`--account NAME` for a second login), `las codex`, `las shell` or `las <command…>` in its folder.")
         return
     for s in rows:
         mark = "*" if s.get("default") else " "

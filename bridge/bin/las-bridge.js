@@ -10,8 +10,8 @@
  *            ones to run here (--yes to skip the prompt, --all for any text)
  *   exec     run --exec CMD per message with the text on stdin (Codex, a
  *            local model, any tool) and send its output back to the sender
- *   proc     a DETACHED session (docs/adr/0006): start --exec CMD once and
- *            speak JSON lines with it over stdio (--log PATH names its log)
+ *            (--text-as arg: the text is one more argument instead; --log PATH:
+ *            a detached session, docs/adr/0006 — `las <command…>`)
  *
  * Common: --agent NAME (default: nearest .las-agent.json), --runtime NAME (what
  * `las agent sessions` shows; default = the sink), --intercept-url URL
@@ -22,7 +22,7 @@ import { parseArgs } from 'node:util';
 import { idleClaudeServer } from '../src/sinks/claude-channel.js';
 import {
   Bridge, MailboxSource, Pipeline, dedupInterceptor, ignoreKindsInterceptor, senderPolicyInterceptor,
-  micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, channelLaunchProblem, StdoutSink, ShellSink, ExecSink, ProcSink, makeAnswer, makeSpeaker,
+  micSelfTestInterceptor, httpInterceptor, ClaudeChannelSink, channelLaunchProblem, StdoutSink, ShellSink, ExecSink, makeAnswer, makeSpeaker,
   KIND, resolveAgent, StatusFile, makeSender,
 } from '../src/index.js';
 import { SessionRegistry, DefaultWatcher, newSessionId, sessionInboxTopic, sessionMailboxClientId } from '../src/sessions.js';
@@ -44,7 +44,7 @@ const { values: opts, positionals } = parseArgs({
   },
 });
 
-const SINKS = ['claude', 'stdout', 'shell', 'exec', 'proc'];
+const SINKS = ['claude', 'stdout', 'shell', 'exec'];
 const sinkName = positionals[0];
 if (opts.help || !SINKS.includes(sinkName)) {
   process.stderr.write(`usage: las-bridge <${SINKS.join('|')}> [--agent NAME] [--exec CMD] [--runtime NAME] [--yes] [--all] [--intercept-url URL] [--port N] [--quiet]\n`);
@@ -105,35 +105,25 @@ switch (sinkName) {
       process.exit(64);
     }
     break; // built below: a detached one (--log) needs the session's answer routing
-  case 'proc':
-    if (!opts.exec) {
-      process.stderr.write('las-bridge proc: --exec CMD is required\n');
-      process.exit(64);
-    }
-    break; // built below: it needs the session id
 }
 
 // This process is one SESSION of the agent (docs/adr/0004 phase 2): it has
 // its own inbox, and holds the agent-level one only while it is the default.
 const commandWord = (cmd) => cmd.trim().split(/\s+/)[0].split(/[\\/]/).pop();
 const runtime = opts.runtime || (sinkName === 'exec' ? (commandWord(opts.exec) === 'codex' ? 'codex' : opts.log || opts['text-as'] === 'arg' ? commandWord(opts.exec) : 'exec')
-  : sinkName === 'proc' ? commandWord(opts.exec) : sinkName === 'claude' ? 'claude' : sinkName);
+  : sinkName === 'claude' ? 'claude' : sinkName);
 const sid = newSessionId(runtime);
-// Detached (docs/adr/0006) = started in the background with a log (`las detach`).
-// `las <command…>` in a terminal runs the same proc sink, but as a terminal
-// session: findable (⌖), closable by its tty, and the default like any terminal.
-const isDetached = (sinkName === 'proc' || sinkName === 'exec') && Boolean(opts.log);
-const detached = isDetached ? { command: opts.exec, log: opts.log || '', mode: sinkName === 'proc' ? 'process' : 'each' } : null;
+// Detached (docs/adr/0006) = started in the background with a log (`las <command…>`).
+// `las attach <command…>` is the same exec sink as a terminal session.
+const isDetached = sinkName === 'exec' && Boolean(opts.log);
+const detached = isDetached ? { command: opts.exec, log: opts.log } : null;
 const commandSession = isDetached || opts['text-as'] === 'arg';
 const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, title: commandSession ? opts.exec : '', log });
 const speak = makeSpeaker({ agent: agent.name, voice: agent.config && agent.config.voice });
-if (sinkName === 'proc') {
-  sink = new ProcSink({ command: opts.exec, agent: agent.name, sid, cwd: process.cwd(), send, setTitle: (t) => session.setTitle(t), speak, log });
-} else if (sinkName === 'exec') {
-  // `las <command…>` (detached or `las attach`): answers routed like a detached session's, text as the last argument.
-  const connected = isDetached || opts['text-as'] === 'arg';
+if (sinkName === 'exec') {
+  // `las <command…>` / `las attach`: text as the last argument, answers spoken for the mic (answer.js).
   sink = new ExecSink({ command: opts.exec, cwd: process.cwd(), textAs: opts['text-as'] === 'arg' ? 'arg' : 'stdin',
-    answer: connected ? makeAnswer({ agent: agent.name, send, speak }) : null });
+    answer: commandSession ? makeAnswer({ agent: agent.name, send, speak }) : null });
 }
 const sessionSource = new MailboxSource({ agent: agent.name, topic: sessionInboxTopic(agent.name, sid), clientId: sessionMailboxClientId(agent.name, sid), port: opts.port, log });
 const defaultWatcher = new DefaultWatcher({ agent: agent.name, port: opts.port, log });
@@ -171,10 +161,6 @@ if (sink instanceof ClaudeChannelSink) {
   // process alive — a zombie holding the mailbox. Stdin end == parent gone.
   process.stdin.once('end', () => shutdown(0));
   process.stdin.once('close', () => shutdown(0));
-}
-if (sink instanceof ProcSink) {
-  // The command exiting on its own ends the session (ADR 0006: no restarts).
-  sink.onexit = (code) => shutdown(code === 0 ? 0 : 1); // Bridge.run() starts it
 }
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));

@@ -1,6 +1,5 @@
 /**
- * Where a detached session's answer goes (docs/adr/0006) — shared by the
- * per-message ExecSink and the long-lived ProcSink so the rule lives once:
+ * Where a connected command's answer goes (docs/adr/0006):
  *
  *   - to another agent → sent to it, like any reply;
  *   - to this session's own agent, answering the mic (origin human) → SPOKEN in
