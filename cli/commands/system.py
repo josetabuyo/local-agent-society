@@ -87,5 +87,31 @@ def uninstall():
 
 @click.command()
 def update():
-    """Pull latest and reinstall."""
+    """Pull latest, reinstall, and show what's new."""
     _run_script("update.sh")
+
+
+@click.command()
+@click.option("--since", "since", default=None, help="Show the changes after this commit/tag (default: before the last update).")
+@click.option("-n", "count", type=int, default=None, help="Show the last N changes instead.")
+def changelog(since, count):
+    """What's new in Local Agent Society — the news `las update` printed.
+
+    \b
+      las changelog              # what the last `las update` brought
+      las changelog -n 30        # the last 30 changes
+      las changelog --since v1.0 # everything after a commit or tag
+    """
+    from cli import updater
+
+    new = updater.head()
+    if count:
+        old = updater.git("rev-parse", f"HEAD~{count}") or updater.git("rev-list", "--max-parents=0", "HEAD")
+    else:
+        old = since or updater.git("rev-parse", "ORIG_HEAD") or updater.git("rev-parse", "HEAD~20")
+    commits = updater.commits_between(old, new) if old and old != new else []
+    if not commits:
+        click.echo(f"Nothing new between {old[:7]} and {new[:7]} — try `las changelog -n 20`.")
+        return
+    click.echo(f"\n  {updater.bold('What’s new')} {updater.dim(f'{old[:7]} → {new[:7]} · v{updater.version()}')}")
+    click.echo(updater.render_changelog(commits) + "\n")

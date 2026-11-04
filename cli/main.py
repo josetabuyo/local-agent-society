@@ -1,7 +1,7 @@
 import shutil
 
 import click
-from cli.commands.system import status, start_cmd, stop_cmd, restart_cmd, logs, install, uninstall, update
+from cli.commands.system import status, start_cmd, stop_cmd, restart_cmd, logs, install, uninstall, update, changelog
 from cli.commands.speak import speak
 from cli.commands.agents import agent, agents_list, link, widget, widgets_all
 from cli.commands.ports import ports
@@ -54,6 +54,7 @@ cli.add_command(logs)
 cli.add_command(install)
 cli.add_command(uninstall)
 cli.add_command(update)
+cli.add_command(changelog)
 cli.add_command(speak)
 cli.add_command(agents_list, name="agents")
 cli.add_command(agent)

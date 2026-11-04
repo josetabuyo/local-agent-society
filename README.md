@@ -52,7 +52,7 @@ The backend fetches this checkout's upstream every 15 minutes (`backend/updates.
 - every widget's ⚙ gets an orange dot within a minute, and the settings panel opens with *Update available (N new)* — hover it for the commit list, click *Copy las update* to put the command on the clipboard;
 - `las claude`, `las codex`, `las shell` and `las start` print one line saying so.
 
-The *All widgets → Updates* row shows when it last checked and has *Check now*. Apply with `las update` (git pull + install.sh). `LAS_NO_UPDATE_CHECK=1` turns the background fetch off.
+The *All widgets → Updates* row shows when it last checked and has *Check now*. Apply with `las update`: it pulls, reinstalls quietly (a ✓ per step, the full output in `~/.las/logs/update-*.log`) and ends with what's new, grouped from the commit subjects — `las changelog` shows it again. `LAS_NO_UPDATE_CHECK=1` turns the background fetch off.
 
 ---
 
@@ -77,7 +77,8 @@ las start / stop                        # start or stop the backend (via launchd
 las logs                                # tail backend log
 las install                             # run install.sh (compile widget, launchd, CLI)
 las uninstall                           # run uninstall.sh (remove the system)
-las update                              # run update.sh (git pull + reinstall)
+las update                              # git pull + reinstall, then what's new
+las changelog [-n N] [--since REF]      # what's new (default: what the last update brought)
 las completion [--shell zsh|bash|fish] [--install]  # set up shell tab completion
 las shell-init [--install]    # zsh: tint the terminal background with the agent's widget color on every cd
 ```
