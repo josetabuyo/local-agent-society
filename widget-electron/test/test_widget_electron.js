@@ -572,7 +572,7 @@ test('settings, Open and children are drawers of one controller; exactly one ope
 test('a drawer grows the window by its own measured height and shrinks it back on close; re-renders re-fit', () => {
   const src = readSrc('renderer', 'widget.js');
   const fit = extractFunctionBody(src, 'function fitWindowToDrawer() {');
-  assert.match(fit, /window\.las\.setExpanded\(true,\s*compactHeight \+ el\.offsetHeight \+ DRAWER_GAP_PX\)/);
+  assert.match(fit, /window\.las\.setExpanded\(true,\s*compactHeight \+ el\.offsetHeight \+ drawerSplitterEl\.offsetHeight \+ DRAWER_GAP_PX\)/);
   const close = extractFunctionBody(src, 'function closeDrawer(name) {');
   assert.match(close, /window\.las\.setExpanded\(false\)/);
   assert.match(extractFunctionBody(src, 'async function moveOpenAction(from, to)'), /fitWindowToDrawer\(\)/, 'reordering re-renders the Open menu');
@@ -1845,3 +1845,33 @@ test('every final dictation goes through the vocabulary fix (backend /dictation/
   assert.match(body, /return text;\s*\}$/);
 });
 
+
+// ── drawer splitter: the line between the log and the open drawer moves ─────
+
+test('drawer splitter: a remembered split reopens as left, shrunk proportionally only when the screen is short', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'renderer', 'widget.js'), 'utf8');
+  const fn = extractFunction(src, 'function fitSplit(');
+  const fit = new Function('DRAWER_MIN_PX', `${fn}; return fitSplit;`)(48);
+  assert.deepEqual(fit({ log: 200, drawer: 380 }, 120, 16, 2000), { log: 200, drawer: 380 }, 'room enough: exactly as left');
+  assert.deepEqual(fit({ log: 300, drawer: 300 }, 100, 0, 400), { log: 150, drawer: 150 }, 'short screen: both shrink, same proportion');
+  assert.deepEqual(fit({ log: 0, drawer: 10 }, 100, 16, 2000), { log: 0, drawer: 48 }, 'the drawer never goes below its minimum; the log may vanish');
+});
+
+test('drawer splitter: drag trades height inside the window, persists per drawer, double-click forgets', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
+  assert.match(html, /id="drawerSplitter" class="drawer-splitter hidden"/);
+  const src = fs.readFileSync(path.join(ROOT, 'renderer', 'widget.js'), 'utf8');
+  const open = extractFunctionBody(src, 'function openDrawer(');
+  assert.match(open, /drawerSplitterEl\.classList\.remove\('hidden'\)/);
+  assert.match(open, /applyDrawerSplit\(name\)/);
+  assert.match(open, /chromeHeight = naturalCompactHeight - logEl\.clientHeight/, 'the chrome is measured once, with no drawer open');
+  assert.match(extractFunctionBody(src, 'function closeDrawer('), /drawerSplitterEl\.classList\.add\('hidden'\)/);
+  assert.match(extractFunctionBody(src, 'function fitWindowToDrawer('), /drawerSplitterEl\.offsetHeight/, 'the splitter counts in the expanded height');
+  const drag = src.slice(src.indexOf("drawerSplitterEl.addEventListener('pointerdown'"), src.indexOf("drawerSplitterEl.addEventListener('dblclick'"));
+  assert.match(drag, /compactHeight = total - px - DRAWER_EXTRAS_PX/, 'the window keeps its height: the log gives what the drawer takes');
+  assert.doesNotMatch(drag, /setExpanded|resizeBy/, 'a splitter drag never resizes the window');
+  assert.match(drag, /persist\(\{ drawerSplit:/);
+  const css = fs.readFileSync(path.join(ROOT, 'renderer', 'widget.css'), 'utf8');
+  assert.match(css, /\.drawer-splitter \{[^}]*height: 8px/, 'CSS height matches DRAWER_SPLITTER_PX');
+  assert.match(src, /const DRAWER_SPLITTER_PX = 8;/);
+});

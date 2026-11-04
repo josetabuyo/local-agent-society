@@ -134,8 +134,10 @@
     const area = el('div', 'society-panel');
     container.appendChild(area);
     const width = area.clientWidth || container.clientWidth || 260;
-    const positions = M.layout(items, saved, width, PANEL_MIN_HEIGHT);
-    area.style.height = `${M.panelHeight(positions, PANEL_MIN_HEIGHT)}px`;
+    // A drawer the user sized gives the body a real height: the board fills it.
+    const room = Math.max(PANEL_MIN_HEIGHT, container.clientHeight);
+    const positions = M.layout(items, saved, width, room);
+    area.style.height = `${M.panelHeight(positions, room)}px`;
     for (const item of items) area.appendChild(tile(item, positions[item.key], handlers));
     area.addEventListener('click', (e) => {
       if (e.target === area) area.querySelectorAll('.society-tile.menu-open').forEach((o) => o.classList.remove('menu-open'));

@@ -659,6 +659,58 @@ html, body {
 
 
 
+/* The drawer splitter (widget.js "drawer splitter"): a grip on the open
+ * drawer's top edge. Its height is DRAWER_SPLITTER_PX in widget.js. */
+.drawer-splitter {
+  flex: none;
+  height: 8px;
+  margin-top: 4px;
+  margin-bottom: -4px;
+  cursor: ns-resize;
+  -webkit-app-region: no-drag;
+  position: relative;
+}
+
+.drawer-splitter.hidden {
+  display: none;
+}
+
+.drawer-splitter::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 36px;
+  height: 4px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.drawer-splitter:hover::after,
+.drawer-splitter.dragging::after {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+/* A drawer the splitter sized: fixed height, contents scroll (List) or
+ * fill it (Panel). */
+.drawer-sized:not(.hidden) {
+  box-sizing: border-box;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.open-menu.drawer-sized:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-sized > .society-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* ── society drawer (children menu): List / Panel tabs ──────────────────────
  * Sessions (terminals, commands) and las-friends from one model
  * (society-model.js), drawn by society-views.js. Chips and mini stickies are

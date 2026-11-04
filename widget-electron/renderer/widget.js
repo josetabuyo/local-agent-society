@@ -346,9 +346,14 @@ function openDrawer(name) {
     previous.el.classList.add('hidden');
     if (previous.onClose) previous.onClose();
   }
-  if (activeDrawer === null) compactHeight = window.innerHeight;
+  if (activeDrawer === null) {
+    naturalCompactHeight = compactHeight = window.innerHeight;
+    chromeHeight = naturalCompactHeight - logEl.clientHeight;
+  }
   activeDrawer = name;
   el.classList.remove('hidden');
+  drawerSplitterEl.classList.remove('hidden');
+  applyDrawerSplit(name);
   // Any open drawer locks the face fully revealed (see revealLocked): the
   // title stays put and the icons stay visible until the drawer closes.
   // Latch "revealed" too, so closing it doesn't hand control back to
@@ -365,17 +370,113 @@ function fitWindowToDrawer() {
   const { el } = drawerElements[activeDrawer];
   requestAnimationFrame(() => {
     if (activeDrawer === null) return;
-    window.las.setExpanded(true, compactHeight + el.offsetHeight + DRAWER_GAP_PX);
+    window.las.setExpanded(true, compactHeight + el.offsetHeight + drawerSplitterEl.offsetHeight + DRAWER_GAP_PX);
   });
 }
 
 function closeDrawer(name) {
   if (activeDrawer !== name) return;
   drawerElements[name].el.classList.add('hidden');
+  drawerSplitterEl.classList.add('hidden');
   activeDrawer = null;
   compactHeight = null;
   window.las.setExpanded(false);
 }
+
+// ── drawer splitter: trade height between the chat and the open drawer ───
+//
+// The bar on the drawer's top edge. Dragging it keeps the window's height
+// and moves the line between the log (above) and the drawer (below): up =
+// more drawer, down = more chat. Both heights are remembered per drawer
+// (prefs.drawerSplit[name] = {log, drawer} in px), so the drawer reopens
+// exactly as it was left; double-click forgets them (natural height again).
+
+const drawerSplitterEl = document.getElementById('drawerSplitter');
+const DRAWER_MIN_PX = 48;
+const DRAWER_SPLITTER_PX = 8; // .drawer-splitter's CSS height
+const DRAWER_EXTRAS_PX = DRAWER_SPLITTER_PX + DRAWER_GAP_PX;
+let naturalCompactHeight = null; // the closed window's height, before any split moved compactHeight
+let chromeHeight = 0; // the closed face minus its log: name, buttons, padding — never shrinks
+
+/** A remembered {log, drawer} split, shrunk proportionally when the screen can't hold it. */
+function fitSplit(saved, chrome, extras, avail) {
+  let log = Math.max(0, saved.log);
+  let drawer = Math.max(DRAWER_MIN_PX, saved.drawer);
+  const room = avail - chrome - extras;
+  if (log + drawer > room && room > 0) {
+    const k = room / (log + drawer);
+    log = Math.floor(log * k);
+    drawer = Math.max(DRAWER_MIN_PX, Math.floor(drawer * k));
+  }
+  return { log, drawer };
+}
+
+function setDrawerHeight(el, px) {
+  el.classList.toggle('drawer-sized', px !== null);
+  el.style.height = px === null ? '' : `${px}px`;
+}
+
+/** Size a freshly opened drawer (and the log above it) from its remembered split, or leave both natural. */
+function applyDrawerSplit(name) {
+  const { el } = drawerElements[name];
+  const saved = prefs.drawerSplit && prefs.drawerSplit[name];
+  if (!saved || !(saved.drawer > 0)) {
+    setDrawerHeight(el, null);
+    compactHeight = naturalCompactHeight;
+    return;
+  }
+  const avail = window.screen && window.screen.availHeight ? window.screen.availHeight : Infinity;
+  const split = fitSplit(saved, chromeHeight, DRAWER_EXTRAS_PX, avail);
+  setDrawerHeight(el, split.drawer);
+  compactHeight = chromeHeight + split.log;
+}
+
+/** The Panel board fills whatever height its drawer now has. */
+function drawerResized(name) {
+  if (name === 'children' && childrenMenuOpen && currentSocietyTab() === 'panel') renderChildrenMenu();
+}
+
+drawerSplitterEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || !activeDrawer) return;
+  e.preventDefault();
+  const name = activeDrawer;
+  const { el } = drawerElements[name];
+  const total = window.innerHeight;
+  const startY = e.clientY;
+  const startPx = el.offsetHeight;
+  const maxPx = Math.max(DRAWER_MIN_PX, total - chromeHeight - DRAWER_EXTRAS_PX);
+  let px = startPx;
+  drawerSplitterEl.setPointerCapture(e.pointerId);
+  drawerSplitterEl.classList.add('dragging');
+  const move = (ev) => {
+    px = Math.max(DRAWER_MIN_PX, Math.min(maxPx, startPx - (ev.clientY - startY)));
+    setDrawerHeight(el, px);
+    compactHeight = total - px - DRAWER_EXTRAS_PX;
+  };
+  const up = async () => {
+    drawerSplitterEl.removeEventListener('pointermove', move);
+    drawerSplitterEl.removeEventListener('pointerup', up);
+    drawerSplitterEl.removeEventListener('pointercancel', up);
+    drawerSplitterEl.classList.remove('dragging');
+    if (px === startPx) return;
+    const split = { log: compactHeight - chromeHeight, drawer: px };
+    await persist({ drawerSplit: { ...(prefs.drawerSplit || {}), [name]: split } });
+    drawerResized(name);
+  };
+  drawerSplitterEl.addEventListener('pointermove', move);
+  drawerSplitterEl.addEventListener('pointerup', up);
+  drawerSplitterEl.addEventListener('pointercancel', up);
+});
+
+drawerSplitterEl.addEventListener('dblclick', async () => {
+  if (!activeDrawer) return;
+  const name = activeDrawer;
+  const { [name]: _forgotten, ...rest } = prefs.drawerSplit || {};
+  await persist({ drawerSplit: rest });
+  applyDrawerSplit(name);
+  drawerResized(name);
+  fitWindowToDrawer();
+});
 
 let settingsOpen = false;
 registerDrawer('settings', settingsEl, () => setSettingsOpen(false, true));
@@ -1052,6 +1153,14 @@ window.addEventListener('mousemove', (e) => {
 
 window.addEventListener('mouseup', () => {
   resizing = false;
+});
+
+// A corner resize with a drawer open: the drawer keeps its height and the
+// log takes the difference — remembered, so the next re-fit (a re-render)
+// doesn't snap the window back.
+window.addEventListener('resize', () => {
+  if (!resizing || !activeDrawer) return;
+  compactHeight = window.innerHeight - drawerElements[activeDrawer].el.offsetHeight - DRAWER_EXTRAS_PX;
 });
 
 // ── face buttons ─────────────────────────────────────────────────────────
