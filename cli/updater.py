@@ -34,7 +34,18 @@ HEALTH_URL = "http://localhost:8700/health"
 
 # ── colors ─────────────────────────────────────────────────────────────────
 
-_COLOR = sys.stdout.isatty() and not os.getenv("NO_COLOR") and os.getenv("TERM") != "dumb"
+# A live terminal gets the spinner; color also goes to a captured output that
+# renders ANSI — Claude Code's `! las update` (CLAUDECODE), or FORCE_COLOR /
+# CLICOLOR_FORCE. NO_COLOR and TERM=dumb always win.
+_LIVE = sys.stdout.isatty()
+
+
+def _forced(var: str) -> bool:
+    return os.getenv(var, "0") not in ("", "0")
+
+
+_COLOR = (_LIVE or _forced("FORCE_COLOR") or _forced("CLICOLOR_FORCE") or _forced("CLAUDECODE")) \
+    and not os.getenv("NO_COLOR") and os.getenv("TERM") != "dumb"
 
 
 def _sgr(code: str, text: str) -> str:
@@ -215,7 +226,7 @@ class Step:
         return proc.returncode == 0
 
     def _spin(self, done: threading.Event, start: float) -> None:
-        if not _COLOR:
+        if not (_LIVE and _COLOR):
             return
         for frame in itertools.cycle(self.FRAMES):
             if done.wait(0.08):
@@ -226,7 +237,7 @@ class Step:
     def finish(self, ok: bool, seconds: float | None = None) -> None:
         mark = green("✓") if ok else red("✗")
         took = f" {dim(f'{seconds:.1f}s')}" if seconds is not None else ""
-        clear = "\r\033[K" if _COLOR else ""
+        clear = "\r\033[K" if (_LIVE and _COLOR) else ""
         print(f"{clear}  {mark} {self.title}{took}", flush=True)
 
 

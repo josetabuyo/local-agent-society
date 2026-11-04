@@ -113,5 +113,6 @@ def changelog(since, count):
     if not commits:
         click.echo(f"Nothing new between {old[:7]} and {new[:7]} — try `las changelog -n 20`.")
         return
-    click.echo(f"\n  {updater.bold('What’s new')} {updater.dim(f'{old[:7]} → {new[:7]} · v{updater.version()}')}")
-    click.echo(updater.render_changelog(commits) + "\n")
+    # click strips ANSI from a non-tty; the updater already decided (Claude Code's `!` renders it).
+    click.echo(f"\n  {updater.bold('What’s new')} {updater.dim(f'{old[:7]} → {new[:7]} · v{updater.version()}')}", color=updater._COLOR)
+    click.echo(updater.render_changelog(commits) + "\n", color=updater._COLOR)
