@@ -7,6 +7,8 @@
 </head>
 <body>
   <div id="widget" class="widget">
+    <!-- The top strip: drag moves the widget, double-click toggles sticky ↔ icon size (widget.js "size toggle"). -->
+    <div id="titleStrip" class="title-strip" title="Double-click: icon size"></div>
     <div class="topbar">
       <div id="name" class="name">Agent</div>
       <button id="door" class="facebtn door-corner" title="Deactivate (close widget, mark inactive)">&#128682;</button>
@@ -117,6 +119,9 @@
     <div id="keyboardDrawer" class="open-menu keyboard-drawer hidden">
       <textarea id="keyboardInput" rows="2" placeholder="Write… Enter sends · Shift+Enter new line · Esc closes" spellcheck="true"></textarea>
     </div>
+
+    <!-- Icon size (widget.js "icon size"): the widget as a mini widget, only its name. -->
+    <div id="iconFace" class="icon-face"></div>
 
     <div id="resizeHandle" class="resize-handle" title="Drag to resize"></div>
   </div>

@@ -44,6 +44,22 @@ const doorEl = document.getElementById('door');
 
 document.title = agentName;
 
+// Any uncaught renderer error lands in session/widget.log — a script that dies
+// at load leaves a blank face and nothing else to go on.
+window.addEventListener('error', (e) => {
+  window.las.log('error', 'renderer', `${new URLSearchParams(window.location.search).get('role') || 'widget'} ${agentName}: ${e.message} @ ${e.filename}:${e.lineno}`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  window.las.log('error', 'renderer', `${agentName}: unhandled rejection: ${e.reason && e.reason.stack ? e.reason.stack : e.reason}`);
+});
+
+// This page runs in two roles: the widget itself, and (role=popup) the
+// button bar + drawers of a widget shrunk to icon size, in a window of its
+// own (main.js "the icon's popup"). The popup has no log and no vortexia.
+const pageParams = new URLSearchParams(window.location.search);
+const isPopup = pageParams.get('role') === 'popup';
+const popupGrowsUp = isPopup && pageParams.get('grow') === 'up';
+
 // ── name sizing/line-breaking ────────────────────────────────────────────────
 // Ported from the retired Swift widget's fitFontSizeAndSplit/smartSplit
 // (swift-widget-final tag, widget/tray.swift): shrink the name from a
@@ -275,6 +291,7 @@ function applyColorVars(color, opacity) {
 }
 
 function applyPrefsToDom() {
+  applyIconMode();
   applyColorVars(prefs.color, prefs.opacity);
 
   colorEl.value = prefs.color;
@@ -288,9 +305,122 @@ function applyPrefsToDom() {
   updateSpeakerIcon();
 }
 
+// ── size toggle + icon size: the widget as a mini widget ──────────────────
+//
+// Double-click on the widget's top strip → icon size: the smallest a widget
+// can be (main.js ICON_SIZE), the same mini widget a society panel draws for
+// a friend (society-views.js miniWidget) — only the agent's name. On the
+// icon: double-click its top half → the sticky again; double-click its lower
+// half, or hold → its popup (button bar + drawers, a window of its own).
+// Drag moves either. Messages still arrive and are still spoken: only the
+// face changed. A resize never changes the size class.
+
+const iconFaceEl = document.getElementById('iconFace');
+const titleStripEl = document.getElementById('titleStrip');
+const ICON_HOLD_MS = 600;
+const ICON_DRAG_THRESHOLD_PX = 3;
+
+/**
+ * Drag-to-move for an element that can't be a drag region (it needs its
+ * clicks): moves the window through main; `onHold` fires after ICON_HOLD_MS
+ * held still.
+ */
+function makeWindowMover(el, onHold = null) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    let lastX = e.screenX;
+    let lastY = e.screenY;
+    const startX = e.screenX;
+    const startY = e.screenY;
+    let dragging = false;
+    let hold = onHold ? setTimeout(() => { hold = null; if (!dragging) onHold(); }, ICON_HOLD_MS) : null;
+    const move = (ev) => {
+      if (!dragging && Math.hypot(ev.screenX - startX, ev.screenY - startY) < ICON_DRAG_THRESHOLD_PX) return;
+      if (hold) { clearTimeout(hold); hold = null; }
+      dragging = true;
+      window.las.moveBy(ev.screenX - lastX, ev.screenY - lastY);
+      lastX = ev.screenX;
+      lastY = ev.screenY;
+    };
+    const up = () => {
+      if (hold) { clearTimeout(hold); hold = null; }
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+    };
+    el.setPointerCapture(e.pointerId);
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  });
+}
+
+makeWindowMover(titleStripEl);
+titleStripEl.addEventListener('dblclick', () => window.las.toggleIconMode());
+
+function applyIconMode() {
+  const on = !isPopup && !!(prefs && prefs.iconMode);
+  widgetEl.classList.toggle('icon-mode', on);
+  iconFaceEl.innerHTML = '';
+  if (!on) return;
+  const item = window.LasSociety.agentItem(agentName, prefs.color);
+  const face = window.LasSocietyViews.miniWidget(item, { alpha: Number(prefs.opacity) || 0.72 });
+  face.title = `${agentName}\nDouble-click top half: full size · lower half or hold: buttons · drag: move`;
+  iconFaceEl.appendChild(face);
+}
+
+makeWindowMover(iconFaceEl, () => window.las.togglePopup());
+iconFaceEl.addEventListener('dblclick', (e) => {
+  const r = iconFaceEl.getBoundingClientRect();
+  if (e.clientY - r.top < r.height / 2) window.las.toggleIconMode();
+  else window.las.togglePopup();
+});
+
+window.las.onIconMode((on) => {
+  prefs = { ...prefs, iconMode: on };
+  if (on && activeDrawer) closeDrawer(activeDrawer);
+  applyPrefsToDom();
+  reportVisibility();
+  // The name was measured while hidden (icon) or for the old size: measure it again at the new one.
+  setTimeout(fitNameToBox, 50);
+  setTimeout(fitNameToBox, 250);
+});
+
+// ── the popup role: only the button bar, drawers grow the popup window ────
+if (isPopup) {
+  widgetEl.classList.add('role-popup');
+  // Opened above its anchor: it grows up, its bar at the bottom, nearest the anchor (main.js popupPlacement).
+  widgetEl.classList.toggle('grow-up', popupGrowsUp);
+  // Fully revealed: done further down, where the reveal constants exist — revealing here threw (TDZ).
+  // Every face button in one row: the 🚪 joins the bar (there is no title bar here).
+  // Same order as a mini widget's bar: 🚪 first.
+  document.querySelector('.bar-left').prepend(doorEl);
+  window.las.onPopupDrawer((drawer) => openPopupDrawer(drawer));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !activeDrawer) window.las.togglePopup();
+  });
+}
+
+/** Open one of the face's drawers by name (the icon asked for settings, say). */
+function openPopupDrawer(drawer) {
+  if (drawer === 'settings' && !settingsOpen) setSettingsOpen(true);
+  else if (drawer === 'children' && !childrenMenuOpen) showChildrenMenu();
+  else if (drawer === 'keyboard') openKeyboard();
+}
+
+function reportPopupReady() {
+  const bar = document.querySelector('.buttonbar');
+  const pad = parseFloat(getComputedStyle(widgetEl).paddingBottom) || 0;
+  window.las.popupReady(Math.ceil(bar.getBoundingClientRect().bottom + pad));
+  const drawer = pageParams.get('drawer');
+  if (drawer) openPopupDrawer(drawer);
+}
+
 async function init() {
   prefs = await window.las.getPrefs(agentName);
   applyPrefsToDom();
+  // Not requestAnimationFrame: the popup is created hidden, and a hidden window never runs one.
+  if (isPopup) setTimeout(reportPopupReady, 0);
   initTileSettings();
   reportVisibility();   // tells main whether this agent may grow (expandWhenHidden)
   // The mic's target is the agent's own choice (its .las-agent.json), not a
@@ -370,6 +500,7 @@ function fitWindowToDrawer() {
   const { el } = drawerElements[activeDrawer];
   requestAnimationFrame(() => {
     if (activeDrawer === null) return;
+    capDrawer(el); // a drawer that grew after opening (rows loaded) still never runs off the screen
     window.las.setExpanded(true, compactHeight + el.offsetHeight + drawerSplitterEl.offsetHeight + DRAWER_GAP_PX);
   });
 }
@@ -379,8 +510,10 @@ function closeDrawer(name) {
   drawerElements[name].el.classList.add('hidden');
   drawerSplitterEl.classList.add('hidden');
   activeDrawer = null;
+  // Only the drawer goes: the face comes back at the height it has now (a splitter drag kept), wherever the widget is now.
+  const face = compactHeight;
   compactHeight = null;
-  window.las.setExpanded(false);
+  window.las.setExpanded(false, face);
 }
 
 // ── drawer splitter: trade height between the chat and the open drawer ───
@@ -398,17 +531,26 @@ const DRAWER_EXTRAS_PX = DRAWER_SPLITTER_PX + DRAWER_GAP_PX;
 let naturalCompactHeight = null; // the closed window's height, before any split moved compactHeight
 let chromeHeight = 0; // the closed face minus its log: name, buttons, padding — never shrinks
 
-/** A remembered {log, drawer} split, shrunk proportionally when the screen can't hold it. */
-function fitSplit(saved, chrome, extras, avail) {
-  let log = Math.max(0, saved.log);
-  let drawer = Math.max(DRAWER_MIN_PX, saved.drawer);
-  const room = avail - chrome - extras;
-  if (log + drawer > room && room > 0) {
-    const k = room / (log + drawer);
-    log = Math.floor(log * k);
-    drawer = Math.max(DRAWER_MIN_PX, Math.floor(drawer * k));
-  }
-  return { log, drawer };
+/**
+ * The drawer's height when it opens: its remembered height (else its natural
+ * one), capped by the room the screen has on its growing side — never below
+ * DRAWER_MIN_PX. The log above is NOT part of this: opening a drawer never
+ * resizes what is already on screen (the golden rule — the buttons the user
+ * just pressed stay where they are).
+ */
+function fitSplit(wanted, room) {
+  const drawer = Math.max(DRAWER_MIN_PX, wanted);
+  return { drawer: room > 0 ? Math.max(DRAWER_MIN_PX, Math.min(drawer, room)) : drawer };
+}
+
+/** Screen room for a drawer on the side this window grows to (down; up for a popup opened above its anchor). */
+function drawerRoom() {
+  const scr = window.screen || {};
+  const top = Number.isFinite(scr.availTop) ? scr.availTop : 0;
+  const bottom = top + (scr.availHeight || Infinity);
+  const face = compactHeight || window.innerHeight;
+  if (isPopup && popupGrowsUp) return window.screenY + window.innerHeight - top - face - DRAWER_EXTRAS_PX;
+  return bottom - window.screenY - face - DRAWER_EXTRAS_PX;
 }
 
 function setDrawerHeight(el, px) {
@@ -416,19 +558,25 @@ function setDrawerHeight(el, px) {
   el.style.height = px === null ? '' : `${px}px`;
 }
 
-/** Size a freshly opened drawer (and the log above it) from its remembered split, or leave both natural. */
+/**
+ * Size a freshly opened drawer: its remembered height, else natural — capped
+ * by the screen room (then it scrolls). The face above keeps its exact size:
+ * compactHeight is what the window was before the drawer opened.
+ */
 function applyDrawerSplit(name) {
   const { el } = drawerElements[name];
-  const saved = prefs.drawerSplit && prefs.drawerSplit[name];
-  if (!saved || !(saved.drawer > 0)) {
-    setDrawerHeight(el, null);
-    compactHeight = naturalCompactHeight;
-    return;
-  }
-  const avail = window.screen && window.screen.availHeight ? window.screen.availHeight : Infinity;
-  const split = fitSplit(saved, chromeHeight, DRAWER_EXTRAS_PX, avail);
-  setDrawerHeight(el, split.drawer);
-  compactHeight = chromeHeight + split.log;
+  compactHeight = naturalCompactHeight;
+  const saved = !isPopup && prefs.drawerSplit && prefs.drawerSplit[name];
+  setDrawerHeight(el, null);
+  const wanted = saved && saved.drawer > 0 ? saved.drawer : null;
+  capDrawer(el, wanted);
+}
+
+/** Fix the drawer at `wanted` px (or leave it natural), never taller than the screen room. */
+function capDrawer(el, wanted = null) {
+  const room = drawerRoom();
+  if (wanted !== null) return setDrawerHeight(el, fitSplit(wanted, room).drawer);
+  if (!el.classList.contains('drawer-sized') && room > 0 && el.offsetHeight > room) setDrawerHeight(el, fitSplit(el.offsetHeight, room).drawer);
 }
 
 /** The Panel board fills whatever height its drawer now has. */
@@ -499,6 +647,18 @@ function setSettingsOpen(open, fromDrawer = false) {
 }
 
 gearEl.addEventListener('click', () => setSettingsOpen(!settingsOpen));
+
+// Another widget changed this agent's prefs (a friend's 🔊 in its society panel).
+window.las.onPrefsChanged((next) => {
+  prefs = next;
+  applyPrefsToDom();
+  if (prefs.mute) stopCurrentSpeech();
+});
+// Another widget's ⚙ on this agent's tile: show the settings.
+window.las.onOpenSettings(() => {
+  if (prefs.iconMode && !isPopup) return window.las.togglePopup('settings');
+  if (!settingsOpen) setSettingsOpen(true);
+});
 
 async function persist(patch) {
   prefs = await window.las.setPrefs(agentName, patch);
@@ -637,7 +797,9 @@ const RESTORE_DELAY_MS = 0; // main's reconciler has its own collapse settle; re
 // macOS Space, not by occlusion) — the renderer only reports its visibility,
 // the fallback signal when the Space can't be read, and applies the face.
 function reportVisibility() {
-  window.las.reportVisibility(document.visibilityState === 'hidden', !!prefs.expandWhenHidden);
+  if (isPopup) return;
+  // An icon never balloons into a mosaic tile: it is already the smallest face.
+  window.las.reportVisibility(document.visibilityState === 'hidden', !!prefs.expandWhenHidden && !prefs.iconMode);
 }
 
 window.las.onOcclusionState((expanded) => {
@@ -711,7 +873,7 @@ function setReveal(value, { settle } = {}) {
   widgetEl.classList.toggle('reveal-interactive', v >= REVEAL_INTERACTIVE_THRESHOLD);
 }
 
-setReveal(0);
+setReveal(isPopup ? 1 : 0);
 
 // Any open drawer (settings, Open menu, children menu — an active
 // interaction) and the full-screen occlusion banner (its own always-visible
@@ -720,7 +882,7 @@ setReveal(0);
 // neither centers the title nor hides the icons. Close the drawer and the
 // automatic reveal is back.
 function revealLocked() {
-  return activeDrawer !== null || widgetEl.classList.contains('occlusion-expanded');
+  return isPopup || activeDrawer !== null || widgetEl.classList.contains('occlusion-expanded');
 }
 
 // Two states, not a value that's recomputed on every mousemove forever:
@@ -1140,6 +1302,11 @@ resizeHandleEl.addEventListener('mousedown', (e) => {
   lastX = e.screenX;
   lastY = e.screenY;
   e.preventDefault();
+});
+// Capture the pointer: the window shrinks under the cursor, and without
+// capture the release lands outside it and is never seen here.
+resizeHandleEl.addEventListener('pointerdown', (e) => {
+  if (e.button === 0) resizeHandleEl.setPointerCapture(e.pointerId);
 });
 
 window.addEventListener('mousemove', (e) => {
@@ -1744,11 +1911,20 @@ const keyboardInputEl = document.getElementById('keyboardInput');
 const KEYBOARD_MAX_INPUT_PX = 140;
 let keyboardOpen = false;
 let keyboardSending = false;
+// null = this agent (like the face mic); a society tile's ⌨ aims it at a friend or one session.
+let keyboardDestination = null;
+const KEYBOARD_PLACEHOLDER = keyboardInputEl.placeholder;
 
 registerDrawer('keyboard', keyboardDrawerEl, () => {
   keyboardOpen = false;
   keyboardEl.classList.remove('active');
+  setKeyboardDestination(null);
 });
+
+function setKeyboardDestination(destination) {
+  keyboardDestination = destination;
+  keyboardInputEl.placeholder = destination ? `Write to ${destination.label}… Enter sends · Esc closes` : KEYBOARD_PLACEHOLDER;
+}
 
 function fitKeyboardInput() {
   keyboardInputEl.style.height = 'auto';
@@ -1789,7 +1965,7 @@ async function sendKeyboardText() {
   keyboardSending = true;
   keyboardEl.classList.add('busy');
   try {
-    const sendResult = await sendDictation(null, text);
+    const sendResult = await sendDictation(keyboardDestination, text);
     if (sendResult && sendResult.ok) {
       window.las.log('info', 'keyboard', `sent ${text.length} chars`);
       if (sendResult.fallback_from) {
@@ -1809,8 +1985,9 @@ async function sendKeyboardText() {
 }
 
 keyboardEl.addEventListener('click', () => {
-  if (keyboardOpen) closeKeyboard();
-  else openKeyboard();
+  if (keyboardOpen && !keyboardDestination) return closeKeyboard();
+  setKeyboardDestination(null);
+  openKeyboard();
 });
 
 keyboardInputEl.addEventListener('input', () => {
@@ -1983,6 +2160,7 @@ registerDrawer('children', childrenMenuEl, () => { childrenMenuOpen = false; });
 
 function closeChildrenMenu() {
   childrenMenuOpen = false;
+  window.LasSocietyViews.closeTilePopup();
   closeDrawer('children');
 }
 
@@ -2006,12 +2184,24 @@ async function showChildrenMenu() {
 // its .las-agent.json, through the backend — what `las agent friends` edits.
 
 let knownFriends = [];
+// Each friend's own widget mute (its prefs), for the 🔊 in its tile's button bar.
+const friendMuted = new Map();
 
 /** Sessions, friends and every color the items need. */
 async function refreshSociety() {
   const [, view] = await Promise.all([refreshSessions(), window.las.getFriends(agentName).catch(() => null)]);
   knownFriends = view && Array.isArray(view.friends) ? view.friends : knownFriends;
-  await Promise.all(knownFriends.map((f) => getAgentColor(f.name)));
+  await Promise.all(knownFriends.flatMap((f) => [getAgentColor(f.name), refreshFriendMute(f.name)]));
+}
+
+async function refreshFriendMute(name) {
+  if (/@/.test(name)) return; // on another machine: its prefs live there
+  try {
+    const p = await window.las.getPrefs(name);
+    friendMuted.set(name, !!(p && p.mute));
+  } catch {
+    // keep what we knew
+  }
 }
 
 function societyItems() {
@@ -2020,6 +2210,7 @@ function societyItems() {
     sessions: knownSessions,
     friends: knownFriends,
     colorOf: (name) => (name === agentName ? prefs.color : agentColorCache.get(name)),
+    mutedOf: (name) => friendMuted.get(name) === true,
   });
 }
 
@@ -2047,6 +2238,7 @@ function societyTabs() {
 }
 
 function renderChildrenMenu() {
+  if (currentSocietyTab() !== 'panel') window.LasSocietyViews.closeTilePopup();
   childrenMenuEl.innerHTML = '';
   childrenMenuEl.appendChild(societyTabs());
   const body = document.createElement('div');
@@ -2062,8 +2254,9 @@ function renderChildrenMenu() {
 
 /** What a society item's action does — shared by the List and the Panel. */
 const societyHandlers = {
-  onAction(item, action, button) {
+  onAction(item, action, button, event) {
     if (action === 'mic') return societyMic(item);
+    if (action === 'keyboard') return societyKeyboard(item);
     if (action === 'exit') {
       if (item.kind === 'friend') return closeFriendWidget(item);
       return armConfirm(button, async () => {
@@ -2071,6 +2264,29 @@ const societyHandlers = {
         await reloadChildrenMenu();
       });
     }
+    if (action === 'settings') {
+      // The friend's popup takes the place of this very bar (cover): its buttons
+      // land where these were, and its settings open from there — nothing jumps.
+      const host = button.closest('.tile-popup') || button;
+      const r = host.getBoundingClientRect();
+      const anchor = { x: window.screenX + r.left, y: window.screenY + r.top, width: r.width, height: r.height, cover: true };
+      window.LasSocietyViews.closeTilePopup();
+      return window.las.showAgentSettings(item.agent, anchor);
+    }
+    if (action === 'open') {
+      const how = event && event.type === 'contextmenu' ? 'folder' : 'terminal';
+      return window.las.openAgent(item.agent, how).then((r) => {
+        if (!r || !r.ok) window.las.log('warn', 'friends', `could not open ${how} for ${item.agent}: ${r && r.error}`);
+      });
+    }
+    if (action === 'speaker') return toggleFriendMute(item);
+    if (action === 'find') {
+      return window.las.findSession(agentName, item.sid).then((res) => {
+        if (res && res.focused) closeChildrenMenu();
+        else button.title = res && res.ok ? 'Look for the terminal titled "◉ … here ◉" (it rang its bell)' : 'Could not reach this terminal';
+      });
+    }
+    if (action === 'log') return window.las.openSessionLog(item.detached && item.detached.log);
     if (action === 'unlink') {
       return armConfirm(button, async () => {
         await window.las.linkFriend(agentName, item.agent, false);
@@ -2091,6 +2307,24 @@ function societyMic(item) {
     ? { to: item.agent, label: item.agent }
     : { to: agentName, session: item.sid, label: `${item.runtime} session` };
   startRecording(destination);
+}
+
+/** The item's ⌨: the keyboard drawer, aimed at that friend or that one session. */
+function societyKeyboard(item) {
+  setKeyboardDestination(item.kind === 'friend'
+    ? { to: item.agent, label: item.agent }
+    : { to: agentName, session: item.sid, label: `${item.runtime} session` });
+  const destination = keyboardDestination;
+  openKeyboard();
+  // Opening the keyboard drawer closed this one (one drawer at a time) — and reset the aim.
+  setKeyboardDestination(destination);
+}
+
+/** Mute/unmute a friend's own widget: its pref, applied live by its window. */
+async function toggleFriendMute(item) {
+  const next = await window.las.setPrefs(item.agent, { mute: !item.muted });
+  friendMuted.set(item.agent, !!(next && next.mute));
+  if (childrenMenuOpen) renderChildrenMenu();
 }
 
 async function closeFriendWidget(item) {
@@ -2293,7 +2527,8 @@ childrenEl.addEventListener('contextmenu', (e) => {
 });
 document.addEventListener('mousedown', (e) => {
   if (!childrenMenuOpen) return;
-  if (childrenMenuEl.contains(e.target) || childrenEl.contains(e.target)) return;
+  // The tile popup floats outside the drawer (society-views.js) but belongs to it.
+  if (childrenMenuEl.contains(e.target) || childrenEl.contains(e.target) || e.target.closest('.tile-popup')) return;
   closeChildrenMenu();
 });
 

@@ -21,11 +21,36 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   const DEFAULT_COLOR = '#90c060';
 
-  const KIND_ICONS = { terminal: '\u{1F4BB}', command: '⚙️', friend: '\u{1F91D}' };
+  // Only sessions carry an icon (top-left, next to their runtime); an agent — a friend, or a widget at icon size — is just its name.
+  const KIND_ICONS = { terminal: '\u{1F4BB}', command: '⚙️' };
 
-  /** Every item offers the same two actions, so a view never special-cases a kind. */
-  const ACTIONS = ['mic', 'exit'];
-  const ACTION_ICONS = { mic: '\u{1F3A4}', exit: '\u{1F6AA}' };
+  /**
+   * The actions every item offers — the actions it offers, in the order of a
+   * widget's own button bar (door first, mic last), minus 👥 children: a
+   * friend gets that friend's whole button bar, a session what a single
+   * terminal or command can do. A view draws whatever this returns.
+   */
+  const ACTIONS_BY_KIND = {
+    friend: ['exit', 'settings', 'open', 'speaker', 'keyboard', 'mic'],
+    terminal: ['exit', 'find', 'keyboard', 'mic'],
+    command: ['exit', 'log', 'keyboard', 'mic'],
+  };
+  /** Actions shared by every kind. */
+  const ACTIONS = ['exit', 'keyboard', 'mic'];
+  const ACTION_ICONS = {
+    exit: '\u{1F6AA}', settings: '⚙', open: '⧉', speaker: '\u{1F50A}', muted: '\u{1F507}',
+    keyboard: '⌨', mic: '\u{1F3A4}', find: '⌖', log: '\u{1F4C4}',
+  };
+
+  function actionsFor(item) {
+    return ACTIONS_BY_KIND[item && item.kind] || ACTIONS;
+  }
+
+  /** The icon an action shows for this item (the speaker follows the item's mute). */
+  function actionIcon(item, action) {
+    if (action === 'speaker' && item.muted) return ACTION_ICONS.muted;
+    return ACTION_ICONS[action] || action;
+  }
 
   function shortSid(sid) {
     return String(sid).split('-')[1] || String(sid);
@@ -62,23 +87,49 @@
       mutual: !!f.mutual,
       registered: f.registered !== false,
       widgetClosed: !!f.inactive,
+      muted: !!f.muted,
     };
+  }
+
+  /** An agent's own widget at icon size: the same mini widget a friend gets in a panel. */
+  function agentItem(name, color) {
+    return { key: `agent:${name}`, kind: 'agent', agent: name, label: name, detail: '', color: color || DEFAULT_COLOR };
   }
 
   /**
    * @param {{agentName: string, sessions?: object[], friends?: object[], colorOf?: (name: string) => string}} input
    * @returns {object[]} sessions first (most recently used first, as the backend orders them), then friends in file order
    */
-  function buildItems({ agentName, sessions = [], friends = [], colorOf = () => DEFAULT_COLOR }) {
+  function buildItems({ agentName, sessions = [], friends = [], colorOf = () => DEFAULT_COLOR, mutedOf = () => false }) {
     const own = colorOf(agentName) || DEFAULT_COLOR;
     return [
       ...sessions.map((s) => sessionItem(agentName, s, own)),
-      ...friends.map((f) => friendItem(f, colorOf(f.name) || DEFAULT_COLOR)),
+      ...friends.map((f) => friendItem({ ...f, muted: f.muted || mutedOf(f.name) }, colorOf(f.name) || DEFAULT_COLOR)),
     ];
   }
 
   /** What each action means for this item — the tooltip, and whether it can run now. */
   function describeAction(item, action) {
+    const friend = item.kind === 'friend';
+    // A friend on another machine: its widget, folder and prefs live there — only words travel.
+    const local = friend && item.registered && !item.remote;
+    const away = friend && item.remote ? ` — ${item.agent} lives on ${item.remote}` : '';
+    if (action === 'settings') {
+      return { title: local ? `${item.agent}'s settings — brings its widget here, settings open` : `Settings${away || ' — not registered'}`, enabled: local };
+    }
+    if (action === 'open') {
+      return { title: local ? `Open a terminal at ${item.agent}'s folder (right-click: the folder)` : `Open${away || ' — not registered'}`, enabled: local };
+    }
+    if (action === 'speaker') {
+      if (!local) return { title: `Mute${away || ' — not registered'}`, enabled: false };
+      return { title: item.muted ? `Unmute ${item.agent}` : `Mute ${item.agent}`, enabled: true };
+    }
+    if (action === 'keyboard') {
+      if (friend) return { title: `Type a message to ${item.agent}`, enabled: item.registered };
+      return { title: `Type to this ${item.runtime} session only`, enabled: true };
+    }
+    if (action === 'find') return { title: 'Find this terminal — bring it to the front', enabled: true };
+    if (action === 'log') return { title: "Open this background process's log", enabled: !!(item.detached && item.detached.log) };
     if (action === 'mic') {
       if (item.kind === 'friend') return { title: `Dictate a message to ${item.agent}`, enabled: item.registered };
       return { title: `Dictate to this ${item.runtime} session only`, enabled: true };
@@ -167,5 +218,5 @@
     return Math.max(min, bottom);
   }
 
-  return { DEFAULT_COLOR, KIND_ICONS, ACTIONS, ACTION_ICONS, TILE, GAP, buildItems, describeAction, chipColors, luminance, layout, clamp, panelHeight };
+  return { DEFAULT_COLOR, KIND_ICONS, ACTIONS, ACTIONS_BY_KIND, ACTION_ICONS, actionsFor, actionIcon, TILE, GAP, buildItems, agentItem, describeAction, chipColors, luminance, layout, clamp, panelHeight };
 });

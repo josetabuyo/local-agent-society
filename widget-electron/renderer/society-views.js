@@ -4,7 +4,7 @@
  * DOM views over LasSociety items (society-model.js). Each view only draws
  * and reports back — the meaning of an action belongs to the caller:
  *
- *   handlers.onAction(item, actionId, buttonEl)   mic / exit / unlink
+ *   handlers.onAction(item, actionId, buttonEl, event)   any of M.actionsFor(item), or unlink
  *   handlers.onMove(key, {x, y})                  panel only: a tile was dropped
  *
  * Two views today: a row (List tab) and a draggable mini-sticky board
@@ -31,22 +31,74 @@
     return c;
   }
 
-  /** One button per action (mic, exit), disabled when it can't run for this item. */
+  /** One button per action of this item (its whole button bar), disabled when it can't run. */
   function actionButtons(item, handlers, className) {
-    return M.ACTIONS.map((action) => {
+    return M.actionsFor(item).map((action) => {
       const d = M.describeAction(item, action);
-      const b = el('button', className, M.ACTION_ICONS[action]);
+      const b = el('button', className, M.actionIcon(item, action));
       b.type = 'button';
       b.title = d.title;
       b.disabled = !d.enabled;
       b.dataset.action = action;
       b.addEventListener('click', (e) => {
         e.stopPropagation();
-        handlers.onAction(item, action, b);
+        handlers.onAction(item, action, b, e);
+      });
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!b.disabled) handlers.onAction(item, action, b, e);
       });
       b.addEventListener('dblclick', (e) => e.stopPropagation());
       return b;
     });
+  }
+
+  // ── the tile popup: a floating button bar above the tile ─────────────────
+  // Not inside the tile's square: it hangs over the tile (below it when
+  // there's no room above), positioned against the window so neither the
+  // panel nor the drawer can clip it. One open at a time.
+
+  let popup = null;
+
+  function closeTilePopup() {
+    if (!popup) return;
+    popup.tile.classList.remove('menu-open');
+    popup.bar.remove();
+    document.removeEventListener('pointerdown', popup.outside, true);
+    popup = null;
+  }
+
+  function placePopup(bar, tileEl) {
+    const r = tileEl.getBoundingClientRect();
+    const w = bar.offsetWidth;
+    const h = bar.offsetHeight;
+    const margin = 4;
+    const left = Math.max(margin, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - margin));
+    const above = r.top - h - margin;
+    const top = above >= margin ? above : Math.min(r.bottom + margin, window.innerHeight - h - margin);
+    bar.style.left = `${Math.round(left)}px`;
+    bar.style.top = `${Math.round(top)}px`;
+    bar.classList.toggle('below', above < margin);
+  }
+
+  function openTilePopup(tileEl, item, handlers) {
+    closeTilePopup();
+    const bar = el('div', 'tile-popup');
+    bar.dataset.key = item.key;
+    const { background, color } = M.chipColors(item.color, 0.95);
+    bar.style.background = background;
+    bar.style.color = color;
+    bar.append(...actionButtons(item, handlers, 'tile-action'));
+    document.body.appendChild(bar);
+    placePopup(bar, tileEl);
+    tileEl.classList.add('menu-open');
+    const outside = (e) => {
+      if (bar.contains(e.target) || tileEl.contains(e.target)) return;
+      closeTilePopup();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    popup = { bar, tile: tileEl, outside };
   }
 
   /** List tab: one row per item — chip, detail, actions (+ unlink for a friend). */
@@ -68,50 +120,77 @@
     return row;
   }
 
-  /** Panel tab: a mini sticky — the same face as a widget, in a square. */
+  /**
+   * The mini widget — THE reusable face of anything in the society, at the
+   * smallest size a widget can have: a panel tile (friends, sessions) and a
+   * widget shrunk to icon size both draw this. An agent (friend, or a widget
+   * itself) is only its name; a session has its icon top-left with its
+   * runtime next to it, and its title or command below.
+   * @param {object} item  a LasSociety item (buildItems / agentItem)
+   * @param {{alpha?: number, className?: string}} [opts]
+   */
+  function miniWidget(item, { alpha = 0.78, className = '' } = {}) {
+    const w = el('div', `mini-widget kind-${item.kind}${className ? ` ${className}` : ''}`);
+    const { background, color } = M.chipColors(item.color, alpha);
+    w.style.background = background;
+    w.style.color = color;
+    if (item.kind === 'terminal' || item.kind === 'command') {
+      const head = el('div', 'mw-head');
+      head.append(el('span', 'mw-icon', M.KIND_ICONS[item.kind] || ''), el('span', 'mw-runtime', item.label));
+      w.append(head, el('div', 'mw-detail', item.detail));
+    } else {
+      w.appendChild(el('div', 'mw-name', item.label));
+    }
+    return w;
+  }
+
+  /** Panel tab: a mini widget placed on the board — draggable, with its button bar on double-click or hold. */
   function tile(item, pos, handlers) {
-    const t = el('div', `society-tile kind-${item.kind}${item.isDefault ? ' is-default' : ''}${item.widgetClosed ? ' widget-closed' : ''}`);
+    const t = miniWidget(item, { className: `society-tile${item.isDefault ? ' is-default' : ''}${item.widgetClosed ? ' widget-closed' : ''}` });
     t.dataset.key = item.key;
-    const { background, color } = M.chipColors(item.color, 0.78);
-    t.style.background = background;
-    t.style.color = color;
     t.style.left = `${pos.x}px`;
     t.style.top = `${pos.y}px`;
     t.style.width = t.style.height = `${M.TILE}px`;
-    t.title = `${item.label} — ${item.detail}\nDouble-click for actions, drag to move`;
-    t.append(el('div', 'tile-icon', M.KIND_ICONS[item.kind] || ''), el('div', 'tile-label', item.label), el('div', 'tile-detail', item.detail));
-    const menu = el('div', 'tile-menu');
-    menu.append(...actionButtons(item, handlers, 'tile-action'));
-    t.appendChild(menu);
+    t.title = `${item.label}${item.detail ? ` — ${item.detail}` : ''}\nDouble-click or hold for actions, drag to move`;
     t.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      const open = !t.classList.contains('menu-open');
-      t.parentElement.querySelectorAll('.society-tile.menu-open').forEach((o) => o.classList.remove('menu-open'));
-      t.classList.toggle('menu-open', open);
+      if (popup && popup.tile === t) closeTilePopup();
+      else openTilePopup(t, item, handlers);
     });
-    makeDraggable(t, handlers);
+    makeDraggable(t, item, handlers);
     return t;
   }
 
   const DRAG_THRESHOLD_PX = 3;
+  // Same hold as the face's ⧉ and 👥 buttons (widget.js OPEN_LONG_PRESS_MS).
+  const LONG_PRESS_MS = 600;
 
-  function makeDraggable(t, handlers) {
+  /** Drag to move; hold still for LONG_PRESS_MS to open the tile's button bar. */
+  function makeDraggable(t, item, handlers) {
     t.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || e.target.closest('.tile-menu')) return;
+      if (e.button !== 0) return;
       const area = t.parentElement;
       const start = { x: e.clientX, y: e.clientY, left: t.offsetLeft, top: t.offsetTop };
       let dragging = false;
+      let hold = setTimeout(() => {
+        hold = null;
+        if (!dragging && !(popup && popup.tile === t)) openTilePopup(t, item, handlers);
+      }, LONG_PRESS_MS);
+      const cancelHold = () => { if (hold) clearTimeout(hold); hold = null; };
       const move = (ev) => {
         const dx = ev.clientX - start.x;
         const dy = ev.clientY - start.y;
         if (!dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+        cancelHold();
         dragging = true;
         t.classList.add('dragging');
+        if (popup && popup.tile === t) closeTilePopup();
         const p = M.clamp({ x: start.left + dx, y: start.top + dy }, area.clientWidth, area.clientHeight);
         t.style.left = `${p.x}px`;
         t.style.top = `${p.y}px`;
       };
       const up = () => {
+        cancelHold();
         t.removeEventListener('pointermove', move);
         t.removeEventListener('pointerup', up);
         t.removeEventListener('pointercancel', up);
@@ -130,6 +209,9 @@
 
   /** Panel tab: every item as a draggable mini sticky, at its saved (or a free) spot. */
   function renderPanel(container, items, saved, handlers) {
+    // Redrawn (a mute toggled, a session came or went): keep the popup on the same item.
+    const reopenKey = popup && popup.bar.dataset.key;
+    closeTilePopup();
     container.innerHTML = '';
     const area = el('div', 'society-panel');
     container.appendChild(area);
@@ -139,12 +221,12 @@
     const positions = M.layout(items, saved, width, room);
     area.style.height = `${M.panelHeight(positions, room)}px`;
     for (const item of items) area.appendChild(tile(item, positions[item.key], handlers));
-    area.addEventListener('click', (e) => {
-      if (e.target === area) area.querySelectorAll('.society-tile.menu-open').forEach((o) => o.classList.remove('menu-open'));
-    });
+    const again = reopenKey && items.find((i) => i.key === reopenKey);
+    const againEl = again && [...area.children].find((c) => c.dataset.key === reopenKey);
+    if (againEl) openTilePopup(againEl, again, handlers);
     if (!items.length) area.appendChild(el('div', 'society-empty', 'Nothing here yet — open a session, or link a friend in the List tab.'));
     return area;
   }
 
-  root.LasSocietyViews = { chip, listRow, renderPanel };
+  root.LasSocietyViews = { chip, miniWidget, listRow, renderPanel, closeTilePopup };
 })(self);

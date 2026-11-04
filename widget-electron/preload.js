@@ -45,6 +45,12 @@ contextBridge.exposeInMainWorld('las', {
 
   getPrefs: (name) => ipcRenderer.invoke('prefs:get', name),
   setPrefs: (name, patch) => ipcRenderer.invoke('prefs:set', name, patch),
+  /** Another window changed THIS agent's prefs (a friend's 🔊 in a society panel). @param {(prefs: object) => void} cb */
+  onPrefsChanged: (cb) => ipcRenderer.on('prefs:changed', (_e, prefs) => cb(prefs)),
+  /** `name`'s settings in a popup over `anchor` ({x, y, width, height}, screen px) — a society tile's ⚙. */
+  showAgentSettings: (name, anchor) => ipcRenderer.invoke('agent:show-settings', name, anchor),
+  /** Another widget asked this one to open its settings. @param {() => void} cb */
+  onOpenSettings: (cb) => ipcRenderer.on('settings:open', () => cb()),
 
   /** Tile reconciler settings shared by every widget of this app instance
    * (main.js "tile reconciler"): heartbeat and shrink delay, in ms. get()
@@ -65,6 +71,18 @@ contextBridge.exposeInMainWorld('las', {
 
   /** Grow/shrink this window by (dw, dh) pixels — see .resize-handle in widget.css. */
   resizeBy: (dw, dh) => ipcRenderer.send('window:resize-by', dw, dh),
+  /** Toggle this widget between sticky and icon size (double-click on its top strip). */
+  toggleIconMode: () => ipcRenderer.send('window:toggle-icon'),
+  /** Move this window by (dx, dy) — the icon face drags itself. */
+  moveBy: (dx, dy) => ipcRenderer.send('window:move-by', dx, dy),
+  /** Main switched this widget to icon size (true) or back to a sticky (false). @param {(on: boolean) => void} cb */
+  onIconMode: (cb) => ipcRenderer.on('window:icon-mode', (_e, on) => cb(on)),
+  /** The icon's popup (button bar + drawers in a window of its own): toggle it, or open it on `drawer`. From the popup: close it. */
+  togglePopup: (drawer) => ipcRenderer.send('popup:toggle', drawer || null),
+  /** The popup measured its button bar: its closed height. */
+  popupReady: (barHeight) => ipcRenderer.send('popup:ready', barHeight),
+  /** Open `drawer` in this popup (the icon asked for it). @param {(drawer: string) => void} cb */
+  onPopupDrawer: (cb) => ipcRenderer.on('popup:drawer', (_e, drawer) => cb(drawer)),
 
   /** Grow the window to fit an overlay panel (settings),
    * or shrink it back to its remembered compact size. Idempotent.

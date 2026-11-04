@@ -380,6 +380,11 @@ function hslToHex(h, s, l) {
 
 const WIDGET_WIDTH = 300;
 const WIDGET_HEIGHT = 160;
+// Icon size: the smallest a widget can be — the same square as a mini widget
+// on a society panel (renderer/society-model.js TILE). Double-click on the
+// widget's top strip toggles sticky ↔ icon (window:toggle-icon); a manual
+// resize never does.
+const ICON_SIZE = 64;
 
 function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // Random color ONLY the first time this agent ever gets a widget — once a
@@ -419,13 +424,16 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
     };
   }
 
+  if (prefs.iconMode) bounds = { ...bounds, width: ICON_SIZE, height: ICON_SIZE };
+
   const win = new BrowserWindow({
     width: bounds.width,
     height: bounds.height,
     x: bounds.x,
     y: bounds.y,
     frame: false,
-    resizable: true,
+    // A mini widget has one size: no resize, native or by the grip.
+    resizable: !prefs.iconMode,
     alwaysOnTop: prefs.alwaysOnTop !== false,
     skipTaskbar: true,
     transparent: true,
@@ -466,7 +474,7 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // window.las.getPrefs() IPC round-trip (see widget.js's initialParams
   // block, right below where agentName is read).
   win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'index.html'), {
-    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity) },
+    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), icon: prefs.iconMode ? '1' : '0' },
   });
 
   // Space (macOS virtual desktop) memory: a window is only ever placed on
@@ -523,8 +531,11 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
   });
 
   win.agentName = name;
+  win.isIcon = !!prefs.iconMode; // kept by setIconMode; read by iconSafe
+  win.iconSize = ICON_SIZE;
 
   win.on('closed', () => {
+    closePopup(name);
     windows.delete(name);
     setMicRecording(name, false); // a window closed mid-dictation must not hold everyone's voice
     occlusionExpandedWindows.delete(win);
@@ -547,6 +558,8 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
   };
   win.on('move', persistBounds);
   win.on('resize', persistBounds);
+  // The icon's popup follows the icon around.
+  win.on('move', () => { const p = popups.get(name); if (p && !p.isDestroyed()) followAnchor(p); });
 
   // Persist which Space this widget is on right now. There's no Electron/
   // AppKit event for "the user dragged this window to another Space" — so
@@ -651,13 +664,33 @@ function setPrefs(name, patch) {
 }
 
 ipcMain.handle('prefs:get', (_event, name) => getPrefs(name));
-ipcMain.handle('prefs:set', (_event, name, patch) => {
+ipcMain.handle('prefs:set', (event, name, patch) => {
   const next = setPrefs(name, patch);
   const win = windows.get(name);
   if (win && !win.isDestroyed() && typeof patch.alwaysOnTop === 'boolean') {
     win.setAlwaysOnTop(patch.alwaysOnTop);
   }
+  // Set from ANOTHER widget (a friend's 🔊 in its society panel): that agent's window applies it live.
+  if (win && !win.isDestroyed() && win.webContents !== event.sender) {
+    win.webContents.send('prefs:changed', next);
+  }
+  const popup = popups.get(name);
+  if (popup && !popup.isDestroyed() && popup.webContents !== event.sender) popup.webContents.send('prefs:changed', next);
   return next;
+});
+
+// A society tile's ⚙: that agent's popup, with its settings open, right
+// over the mini widget it was asked from (`anchor`, screen px) — its own
+// widget is not touched, not even needed.
+ipcMain.handle('agent:show-settings', (_event, name, anchor) => {
+  if (!name || typeof name !== 'string') return { ok: false, error: 'no agent name' };
+  const a = anchor && ['x', 'y', 'width', 'height'].every((k) => Number.isFinite(anchor[k]))
+    ? { x: Math.round(anchor.x), y: Math.round(anchor.y), width: Math.round(anchor.width), height: Math.round(anchor.height), cover: !!anchor.cover }
+    : null;
+  if (!a) return { ok: false, error: 'no anchor' };
+  togglePopup(name, 'settings', a);
+  log.info('friends', `settings popup of ${name} opened from a society panel`);
+  return { ok: true };
 });
 
 // Manual resize: frameless windows have no native resize border, and a
@@ -667,6 +700,8 @@ ipcMain.handle('prefs:set', (_event, name, patch) => {
 ipcMain.on('window:resize-by', (event, dw, dh) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isDestroyed()) return;
+  // An icon has one size: double-click on its top half brings the sticky back (window:toggle-icon).
+  if (win.agentName && getPrefs(win.agentName).iconMode) return;
   const b = win.getBounds();
   const minW = 160;
   const minH = 100;
@@ -676,6 +711,185 @@ ipcMain.on('window:resize-by', (event, dw, dh) => {
     width: Math.max(minW, Math.round(b.width + dw)),
     height: Math.max(minH, Math.round(b.height + dh)),
   });
+});
+
+// Double-click on a widget's top strip (or an icon's top half): toggle
+// between the sticky and icon size. A resize never changes the size class.
+ipcMain.on('window:toggle-icon', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed() || win.isPopup || !win.agentName) return;
+  setIconMode(win.agentName, !getPrefs(win.agentName).iconMode);
+});
+
+/**
+ * Shrink `name`'s widget to icon size, or bring its sticky back at the size
+ * it had (prefs.stickySize; the default size the first time). Top-left stays put.
+ */
+function setIconMode(name, on) {
+  const win = windows.get(name);
+  if (win && !win.isDestroyed()) collapseDrawer(win);
+  const b = win && !win.isDestroyed() ? win.getBounds() : null;
+  const sticky = getPrefs(name).stickySize;
+  if (on && b && !getPrefs(name).iconMode) setPrefs(name, { stickySize: { width: b.width, height: b.height } });
+  setPrefs(name, { iconMode: !!on });
+  closePopup(name);
+  if (!b) return;
+  const size = on ? { width: ICON_SIZE, height: ICON_SIZE }
+    : { width: Math.max(160, (sticky && sticky.width) || WIDGET_WIDTH), height: Math.max(100, (sticky && sticky.height) || WIDGET_HEIGHT) };
+  win.isIcon = !!on;
+  win.setResizable(!on);
+  win.setBounds({ x: b.x, y: b.y, ...size });
+  win.webContents.send('window:icon-mode', !!on);
+  log.info('icon', `${name}: ${on ? 'icon size' : 'sticky size'}`);
+}
+
+/** Move this window by (dx, dy) — the icon face drags itself (it can't be a drag region: it needs its clicks). */
+ipcMain.on('window:move-by', (event, dx, dy) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  const b = win.getBounds();
+  win.setBounds({ ...b, x: Math.round(b.x + dx), y: Math.round(b.y + dy) });
+});
+
+// ── the icon's popup: its button bar and drawers, in a window of its own ──
+//
+// A widget at icon size has no room for its face buttons or its drawers.
+// Double-click or hold on the icon opens a separate frameless window over
+// it (below when there's no room above) with the whole button bar; settings,
+// the Open menu, the keyboard and the 👥 society drawer open in that window,
+// never in the icon. It is the same renderer page in role=popup: no log, no
+// vortexia (the icon keeps the agent's connection and voice), its prefs
+// changes reach the icon through prefs:changed. One popup per agent; it
+// closes when it loses focus (never mid-dictation) or with the icon.
+
+/** @type {Map<string, BrowserWindow>} */
+const popups = new Map();
+const POPUP_WIDTH = WIDGET_WIDTH;
+const POPUP_GAP_PX = 6;
+const POPUP_REOPEN_GUARD_MS = 350;
+const popupClosedAt = new Map();
+
+function closePopup(name) {
+  const p = popups.get(name);
+  popups.delete(name);
+  if (p && !p.isDestroyed()) p.destroy();
+}
+
+// Golden rule: a button the user is looking at never moves. Where a popup
+// sits is decided ONCE, when it opens: below its anchor when there's room
+// for a drawer under it (it then grows down, its top edge fixed), otherwise
+// above (it grows up, its bottom edge fixed, the bar at its bottom). Opening
+// or closing a drawer only moves the far edge; it is capped by the screen
+// edge and the drawer scrolls — the popup is never re-placed.
+const POPUP_ROOM_PX = 360;
+const POPUP_PAD_PX = 8; // .role-popup's vertical padding: a covering popup lines its buttons up with what it covers
+
+/**
+ * @param {{x:number,y:number,width:number,height:number}} ib the anchor (an icon, a tile's button bar)
+ * @param {boolean} cover the popup's bar replaces the anchor in place (a tile's bar) instead of sitting next to it
+ */
+function popupPlacement(ib, cover, grow = null) {
+  const area = screen.getDisplayMatching(ib).workArea;
+  const x = Math.max(area.x, Math.min(Math.round(ib.x + ib.width / 2 - POPUP_WIDTH / 2), area.x + area.width - POPUP_WIDTH));
+  const top = cover ? ib.y - POPUP_PAD_PX : ib.y + ib.height + POPUP_GAP_PX;
+  const bottom = cover ? ib.y + ib.height + POPUP_PAD_PX : ib.y - POPUP_GAP_PX;
+  const roomBelow = area.y + area.height - top;
+  const roomAbove = bottom - area.y;
+  const g = grow || (roomBelow >= POPUP_ROOM_PX || roomBelow >= roomAbove ? 'down' : 'up');
+  return { x, grow: g, top, bottom, area };
+}
+
+function placePopup(p, height = p.getBounds().height) {
+  if (!p.place) return;
+  const { x, grow, top, bottom, area } = p.place;
+  const h = Math.round(grow === 'down' ? Math.min(height, area.y + area.height - top) : Math.min(height, bottom - area.y));
+  p.setBounds({ x, y: grow === 'down' ? top : bottom - h, width: POPUP_WIDTH, height: h });
+}
+
+/** The anchor moved (the icon was dragged): same growth direction, new edges. */
+function followAnchor(p) {
+  const icon = windows.get(p.agentName);
+  if (p.anchor || !icon || icon.isDestroyed() || !p.place) return;
+  p.place = popupPlacement(icon.getBounds(), false, p.place.grow);
+  placePopup(p);
+}
+
+/**
+ * Toggle `name`'s popup; `drawer` opens that drawer in it (and keeps it
+ * open). `anchor` ({x, y, width, height}, screen px) opens it there instead
+ * of over the agent's icon — it needs no widget of that agent at all.
+ */
+function togglePopup(name, drawer = null, anchor = null) {
+  const existing = popups.get(name);
+  if (existing && !existing.isDestroyed()) {
+    if (anchor) {
+      // Asked again from somewhere else: start over there (a fresh placement, a fresh page).
+      closePopup(name);
+      return togglePopup(name, drawer, anchor);
+    }
+    if (drawer) {
+      existing.webContents.send('popup:drawer', drawer);
+      existing.focus();
+    } else {
+      closePopup(name);
+    }
+    return;
+  }
+  if (!drawer && Date.now() - (popupClosedAt.get(name) || 0) < POPUP_REOPEN_GUARD_MS) return; // the click that blurred it
+  const icon = windows.get(name);
+  if (!anchor && (!icon || icon.isDestroyed())) return;
+  const prefs = getPrefs(name);
+  const place = popupPlacement(anchor || icon.getBounds(), !!(anchor && anchor.cover));
+  const p = new BrowserWindow({
+    width: POPUP_WIDTH,
+    height: 60,
+    show: false,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    transparent: true,
+    backgroundColor: '#00000000',
+    webPreferences: { preload: WIDGET_SOURCES.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
+  });
+  p.agentName = name;
+  p.isPopup = true;
+  p.anchor = anchor;
+  p.place = place;
+  p.popupBarHeight = 60;
+  popups.set(name, p);
+  p.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'index.html'), {
+    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), role: 'popup', drawer: drawer || '', grow: place.grow },
+  });
+  p.webContents.on('console-message', (_event, _level, message) => console.log(`[popup:${name}]`, message));
+  placePopup(p);
+  log.info('popup', `${name}: open${drawer ? ` on ${drawer}` : ''}${anchor ? ' (anchored)' : ''}`);
+  // Shown when its page has measured the bar (popup:ready); never left invisible if that is late.
+  setTimeout(() => { if (!p.isDestroyed() && !p.isVisible()) { log.warn('popup', `${name}: no ready report — shown anyway`); p.show(); } }, 1500);
+  p.on('blur', () => {
+    setTimeout(() => {
+      if (p.isDestroyed() || p.isFocused() || recordingWindows.has(name)) return;
+      popupClosedAt.set(name, Date.now());
+      if (popups.get(name) === p) closePopup(name);
+    }, 120);
+  });
+  p.on('closed', () => { if (popups.get(name) === p) popups.delete(name); });
+}
+
+ipcMain.on('popup:toggle', (event, drawer) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win || win.isDestroyed()) return;
+  if (win.isPopup) return closePopup(win.agentName);
+  togglePopup(win.agentName, drawer || null);
+});
+
+/** The popup measured its bar: that is its closed height. Shown once placed. */
+ipcMain.on('popup:ready', (event, barHeight) => {
+  const p = BrowserWindow.fromWebContents(event.sender);
+  if (!p || p.isDestroyed() || !p.isPopup) return;
+  p.popupBarHeight = Math.max(30, Math.round(barHeight) || 60);
+  placePopup(p, p.popupBarHeight);
+  if (!p.isVisible()) p.show();
 });
 
 // Drawers (settings, the Open menu, the children menu) are inline panels
@@ -694,6 +908,9 @@ const expandedWindows = new WeakSet();
 ipcMain.on('window:set-expanded', (event, expanded, height) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win || win.isDestroyed()) return;
+  // The icon's popup grows with its drawer and is re-placed whole above (or below) the icon.
+  // The icon's popup: only its far edge moves (placePopup) — its bar stays where it opened.
+  if (win.isPopup) return placePopup(win, expanded ? (height || EXPANDED_HEIGHT) : win.popupBarHeight);
   if (expanded) {
     // Grow DOWN only: same x/y/width, taller. The compact bounds are
     // remembered once, on the first expand; a later call while already
@@ -703,18 +920,29 @@ ipcMain.on('window:set-expanded', (event, expanded, height) => {
       collapsedBounds.set(win, win.getBounds());
       expandedWindows.add(win);
     }
+    // Never moved to make room: capped at the screen's bottom edge, the drawer scrolls.
     const b = win.getBounds();
-    win.setBounds({ x: b.x, y: b.y, width: b.width, height: height || EXPANDED_HEIGHT });
+    const area = screen.getDisplayMatching(b).workArea;
+    win.setBounds({ x: b.x, y: b.y, width: b.width, height: Math.min(height || EXPANDED_HEIGHT, area.y + area.height - b.y) });
   } else {
-    collapseDrawer(win);
+    collapseDrawer(win, height);
   }
 });
 
-function collapseDrawer(win) {
+/**
+ * Close the drawer: only the height comes back (`compactHeight`, what the
+ * face measures as itself without the drawer; else the height it had). The
+ * widget stays where it is NOW — moved or widened while the drawer was open
+ * is kept, never snapped back to where it was when the drawer opened.
+ */
+function collapseDrawer(win, compactHeight = null) {
   if (!expandedWindows.has(win)) return;
   expandedWindows.delete(win);
   const prev = collapsedBounds.get(win);
-  if (prev) win.setBounds(prev);
+  if (!prev) return;
+  const b = win.getBounds();
+  const h = Number.isFinite(compactHeight) && compactHeight > 0 ? Math.round(compactHeight) : prev.height;
+  win.setBounds(iconSafe(win, { x: b.x, y: b.y, width: b.width, height: h }));
 }
 
 // ── reload the face without restarting the app ─────────────────────────────
@@ -935,6 +1163,11 @@ function desiredTileState(win, st) {
   return { want: st.reportedHidden, why: st.reportedHidden ? 'hidden (no Space info)' : 'visible (no Space info)', space, mode: 'visibility' };
 }
 
+/** Bounds to restore, kept at icon size when the widget is an icon (a remembered sticky size must not undo it). */
+function iconSafe(win, bounds) {
+  return win.isIcon ? { ...bounds, width: win.iconSize, height: win.iconSize } : bounds;
+}
+
 function expandToTile(win, st) {
   collapsedBounds.set(win, win.getBounds());
   occlusionExpandedWindows.add(win);
@@ -953,7 +1186,7 @@ function collapseFromTile(win, st) {
   win.setIgnoreMouseEvents(false);
   win.webContents.setBackgroundThrottling(true);
   const prev = collapsedBounds.get(win);
-  if (prev) win.setBounds(prev);
+  if (prev) win.setBounds(iconSafe(win, prev));
   win.webContents.send('window:occlusion-state', false);
   st.target = null;
   st.retries = 0;
@@ -1092,7 +1325,7 @@ function kickTiles(delay = 250) {
 // at all). It no longer decides anything: main does, above.
 ipcMain.on('window:report-visibility', (event, hidden, allowed) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win || win.isDestroyed()) return;
+  if (!win || win.isDestroyed() || win.isPopup) return;
   const st = tileStateOf(win);
   st.reportedHidden = Boolean(hidden);
   st.allowed = allowed !== false;
@@ -1247,6 +1480,8 @@ function nameForWindow(win) {
   for (const [name, w] of windows) {
     if (w === win) return name;
   }
+  // An icon's popup speaks for its agent (its mic, its keyboard).
+  if (win && win.isPopup && popups.get(win.agentName) === win) return win.agentName;
   return null;
 }
 
@@ -1686,7 +1921,11 @@ ipcMain.handle('agent:info', async (_event, name) => {
 // "Door" button: mark this agent inactive on the backend, then close this
 // very widget window — mirrors `las agent deactivate`. Does not touch the
 // agent's Claude Code session (see backend/main.py's set_inactive comment).
-ipcMain.handle('agent:deactivate', async (event, name) => deactivateAgentWidget(name, BrowserWindow.fromWebContents(event.sender)));
+ipcMain.handle('agent:deactivate', async (event, name) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  // 🚪 in an icon's popup closes the widget itself (its 'closed' takes the popup along).
+  return deactivateAgentWidget(name, win && win.isPopup ? windows.get(name) : win);
+});
 
 /** Mark `name` inactive on the backend and destroy its widget window (`win`, or the one open for `name`). */
 async function deactivateAgentWidget(name, win = windows.get(name)) {

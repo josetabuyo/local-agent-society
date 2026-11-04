@@ -808,23 +808,79 @@ html, body {
   opacity: 0.7;
 }
 
-/* A mini sticky: the widget face in a square — icon, name, one line of detail. */
-.society-tile {
-  position: absolute;
+/* The mini widget (society-views.js miniWidget): the reusable face of an
+ * agent or a session at the smallest size a widget has — panel tiles and a
+ * widget shrunk to icon size. Agent = its name only; session = icon +
+ * runtime top-left, title/command below. */
+.mini-widget {
   box-sizing: border-box;
-  padding: 4px;
+  padding: 4px 5px;
   border-radius: 8px;
   border: 1.5px solid rgba(20, 20, 20, 0.4);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   display: flex;
   flex-direction: column;
+  user-select: none;
+  overflow: hidden;
+}
+
+.mini-widget.kind-agent,
+.mini-widget.kind-friend {
   align-items: center;
   justify-content: center;
-  gap: 1px;
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
+}
+
+.mw-name {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.mw-head {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mw-icon {
+  font-size: 11px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mw-runtime {
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mw-detail {
+  margin-top: 2px;
+  font-size: 8px;
+  line-height: 1.2;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* On the panel board: placed and dragged. */
+.society-tile {
+  position: absolute;
+  cursor: grab;
+  touch-action: none;
 }
 
 .society-tile.dragging {
@@ -845,44 +901,18 @@ html, body {
   border-radius: 2px;
 }
 
-.tile-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.tile-label,
-.tile-detail {
-  width: 100%;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tile-label {
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.tile-detail {
-  font-size: 8px;
-  opacity: 0.75;
-}
-
-/* Double-click: the tile's own menu (mic, exit), over its face. */
-.tile-menu {
-  position: absolute;
-  inset: 0;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border-radius: inherit;
-  background: rgba(0, 0, 0, 0.72);
-}
-
-.society-tile.menu-open .tile-menu {
+/* Double-click: the tile's button bar, floating above the tile (below when
+ * there's no room) — outside its square, never clipped by the panel. */
+.tile-popup {
+  position: fixed;
+  z-index: 50;
   display: flex;
+  gap: 3px;
+  padding: 3px 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 20, 20, 0.45);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  -webkit-app-region: no-drag;
 }
 
 .tile-action {
@@ -892,9 +922,19 @@ html, body {
   font-size: 13px;
   line-height: 1;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(20, 20, 20, 0.35);
+  background: rgba(255, 255, 255, 0.28);
+  color: inherit;
   cursor: pointer;
+}
+
+.tile-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.society-tile.menu-open {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 1px;
 }
 
 .tile-action:disabled {
@@ -928,4 +968,82 @@ html, body {
   font: inherit;
   font-size: 12px;
   outline: none;
+}
+
+/* ── icon size (widget.js "icon size") ─────────────────────────────────────
+ * The widget at its smallest: nothing but the mini widget (society-views.js
+ * miniWidget) filling the window, and a small corner grip to grow it back. */
+.icon-face {
+  display: none;
+}
+
+.widget.icon-mode {
+  padding: 0;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.widget.icon-mode > :not(.icon-face) {
+  display: none !important;
+}
+
+.widget.icon-mode .icon-face {
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.icon-face .mini-widget {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── the icon's popup (role=popup): button bar on top, drawers below ─────── */
+.widget.role-popup .title-strip,
+.widget.role-popup .topbar,
+.widget.role-popup .log,
+.widget.role-popup .drawer-splitter,
+.widget.role-popup .resize-handle {
+  display: none !important;
+}
+
+.widget.role-popup {
+  padding: 8px 10px;
+  height: auto;
+  min-height: 100vh;
+}
+
+.widget.role-popup .buttonbar {
+  margin-top: 0;
+  pointer-events: auto;
+}
+
+/* The top strip (widget.js "size toggle"): an invisible band over the top of
+ * the sticky — drag moves the widget, double-click toggles icon size. Not a
+ * drag region (that would swallow the double-click); the 🚪 stays above it. */
+.title-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 40px;
+  height: 30px;
+  z-index: 5;
+  -webkit-app-region: no-drag;
+  cursor: grab;
+}
+
+.widget.occlusion-expanded .title-strip {
+  display: none;
+}
+
+/* Opened above its anchor: the popup grows up — bar at the bottom, nearest the
+ * anchor, drawers stacking above it (main.js popupPlacement). */
+.widget.role-popup.grow-up {
+  flex-direction: column-reverse;
+}
+
+/* A drawer capped by the screen (widget.js capDrawer) scrolls instead of running off it. */
+.settings.drawer-sized {
+  overflow-y: auto;
 }

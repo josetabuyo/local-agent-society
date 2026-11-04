@@ -240,8 +240,10 @@ test('the ⌨ keyboard button sits next to the mic and sends exactly where a dic
   assert.match(html, /id="keyboard"[^>]*>[^<]*<\/button>\s*<button id="mic"/, '⌨ must sit right before the mic');
   assert.match(html, /id="keyboardDrawer"[\s\S]*id="keyboardInput"/);
   const js = stripComments(readSrc('renderer', 'widget.js'));
-  // Same path as the mic: the agent's own inbox, its sessions.target picks the terminal.
-  assert.match(js, /sendDictation\(null, text\)/);
+  // Same path as the mic: the face ⌨ aims at nothing (null = the agent's own
+  // inbox, its sessions.target picks the terminal); a society tile's ⌨ aims it.
+  assert.match(js, /sendDictation\(keyboardDestination, text\)/);
+  assert.match(js, /keyboardEl\.addEventListener\('click'[\s\S]{0,160}setKeyboardDestination\(null\)/);
   // Typing anywhere on the focused widget opens it — outside form fields, never on shortcuts.
   assert.match(js, /document\.addEventListener\('keydown'/);
   assert.match(js, /e\.metaKey \|\| e\.ctrlKey/);
@@ -587,7 +589,7 @@ test('a drawer grows the window by its own measured height and shrinks it back o
   const fit = extractFunctionBody(src, 'function fitWindowToDrawer() {');
   assert.match(fit, /window\.las\.setExpanded\(true,\s*compactHeight \+ el\.offsetHeight \+ drawerSplitterEl\.offsetHeight \+ DRAWER_GAP_PX\)/);
   const close = extractFunctionBody(src, 'function closeDrawer(name) {');
-  assert.match(close, /window\.las\.setExpanded\(false\)/);
+  assert.match(close, /window\.las\.setExpanded\(false, face\)/, 'closing hands back the face height as it is now');
   assert.match(extractFunctionBody(src, 'async function moveOpenAction(from, to)'), /fitWindowToDrawer\(\)/, 'reordering re-renders the Open menu');
   assert.match(extractFunctionBody(src, 'async function showChildrenMenu()'), /fitWindowToDrawer\(\)/, 'the sessions list loads after the drawer opened');
   assert.doesNotMatch(stripComments(src), /SETTINGS_HEIGHT/, 'no fixed settings height any more — measured like every other drawer');
@@ -1217,8 +1219,8 @@ test('renameWidget is a no-op when no window is open under the old name', () => 
 
 test('agent:deactivate calls the backend inactive endpoint and destroys the calling window', () => {
   const src = readSrc('main.js');
-  assert.match(src, /ipcMain\.handle\('agent:deactivate', async \(event, name\) => deactivateAgentWidget\(name, BrowserWindow\.fromWebContents\(event\.sender\)\)\)/,
-    'the door closes the window the request came from');
+  assert.match(src, /ipcMain\.handle\('agent:deactivate', async \(event, name\) => \{[\s\S]{0,300}deactivateAgentWidget\(name, win && win\.isPopup \? windows\.get\(name\) : win\)/,
+    'the door closes the window the request came from — from an icon\'s popup, the widget itself');
   const body = extractFunctionBody(src, 'async function deactivateAgentWidget(name, win = windows.get(name)) {');
   assert.match(body, /\/agents\/\$\{encodeURIComponent\(name\)\}\/inactive/, 'must POST to the inactive endpoint');
   assert.match(body, /method:\s*'POST'/);
@@ -1861,13 +1863,33 @@ test('every final dictation goes through the vocabulary fix (backend /dictation/
 
 // ── drawer splitter: the line between the log and the open drawer moves ─────
 
-test('drawer splitter: a remembered split reopens as left, shrunk proportionally only when the screen is short', () => {
+test('drawer: opening never resizes what is on screen — only the drawer, capped by the screen room', () => {
   const src = fs.readFileSync(path.join(ROOT, 'renderer', 'widget.js'), 'utf8');
   const fn = extractFunction(src, 'function fitSplit(');
   const fit = new Function('DRAWER_MIN_PX', `${fn}; return fitSplit;`)(48);
-  assert.deepEqual(fit({ log: 200, drawer: 380 }, 120, 16, 2000), { log: 200, drawer: 380 }, 'room enough: exactly as left');
-  assert.deepEqual(fit({ log: 300, drawer: 300 }, 100, 0, 400), { log: 150, drawer: 150 }, 'short screen: both shrink, same proportion');
-  assert.deepEqual(fit({ log: 0, drawer: 10 }, 100, 16, 2000), { log: 0, drawer: 48 }, 'the drawer never goes below its minimum; the log may vanish');
+  assert.deepEqual(fit(380, 2000), { drawer: 380 }, 'room enough: as wanted');
+  assert.deepEqual(fit(380, 200), { drawer: 200 }, 'short screen: the drawer is capped (it scrolls), the window never moves');
+  assert.deepEqual(fit(10, 2000), { drawer: 48 }, 'never below its minimum');
+  const apply = extractFunctionBody(src, 'function applyDrawerSplit(name) {');
+  assert.match(apply, /compactHeight = naturalCompactHeight;/, 'the log keeps its size: the buttons just pressed stay put');
+  assert.doesNotMatch(apply, /split\.log/);
+  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  assert.match(main, /height: Math\.min\(height \|\| EXPANDED_HEIGHT, area\.y \+ area\.height - b\.y\)/, 'grows down to the screen edge, never moved up');
+  const collapse = extractFunctionBody(main, 'function collapseDrawer(win, compactHeight = null) {');
+  assert.match(collapse, /\{ x: b\.x, y: b\.y, width: b\.width, height: h \}/, 'closing keeps where the widget is now');
+});
+
+test('popup: placed once — below its anchor (grows down) or above (grows up, bar at the bottom); never re-placed', () => {
+  const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+  const place = extractFunctionBody(main, 'function placePopup(p, height = p.getBounds().height) {');
+  assert.match(place, /y: grow === 'down' \? top : bottom - h/, 'only the far edge moves');
+  assert.doesNotMatch(place, /getBounds\(\)/, 'never recomputes from the anchor');
+  assert.match(main, /grow: place\.grow/, 'the page knows which way it grows');
+  const widget = fs.readFileSync(path.join(ROOT, 'renderer', 'widget.js'), 'utf8');
+  assert.match(widget, /widgetEl\.classList\.toggle\('grow-up', popupGrowsUp\)/);
+  assert.match(fs.readFileSync(path.join(ROOT, 'renderer', 'widget.css'), 'utf8'), /\.widget\.role-popup\.grow-up \{\s*flex-direction: column-reverse;/);
+  assert.match(widget, /cover: true \};\n      window\.LasSocietyViews\.closeTilePopup\(\);/, 'a tile ⚙: the friend\'s popup takes the place of the tile bar');
+  assert.match(widget, /setTimeout\(fitNameToBox, 50\)/, 'back from icon size the name is measured again');
 });
 
 test('drawer splitter: drag trades height inside the window, persists per drawer, double-click forgets', () => {
