@@ -107,3 +107,10 @@ test('wiring: the per-item mic sends where its recording started, not to this ag
     assert.ok(main.includes(`ipcMain.handle('${ch}'`), `${ch} handled in main`);
   }
 });
+
+test('a friend on another machine (Name@env) can be dictated to but its widget cannot be closed from here', () => {
+  const [item] = M.buildItems({ agentName: 'RelayRobotics', friends: [{ name: 'coach@uy-mac', registered: true, remote: 'uy-mac', sessions: null, mutual: null }] });
+  assert.equal(item.detail, 'on uy-mac · vortex-relay');
+  assert.equal(M.describeAction(item, 'mic').enabled, true);
+  assert.equal(M.describeAction(item, 'exit').enabled, false);
+});

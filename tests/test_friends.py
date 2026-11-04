@@ -147,3 +147,44 @@ def test_friends_command_adds_removes_and_lists(monkeypatch):
     assert result.exit_code == 0, result.output
     assert calls == [("PUT", "/agents/Monkey/friends/Vortexia"), ("DELETE", "/agents/Monkey/friends/Teli")]
     assert "Vortexia" in result.output and "mutual" in result.output
+
+
+# ── cross-machine friends (Name@env, over vortex-relay) ─────────────────────
+
+def test_a_friend_on_another_machine_is_linked_and_listed_as_remote(app, monkeypatch):
+    _main, client, tmp_path = app
+    monkeypatch.setenv("VORTEXIA_ENV_NAME", "ba-mac")
+    monkeypatch.setenv("VORTEXIA_RELAY_ENV_NAMES", "ba-mac,uy-mac")
+    view = client.put("/agents/Monkey/friends/coach@uy-mac").json()
+    assert view["friends"] == [{"name": "coach@uy-mac", "registered": True, "remote": "uy-mac", "inactive": False, "sessions": None, "mutual": None}]
+    assert _file(tmp_path, "Monkey")["friends"] == ["coach@uy-mac"]
+    assert client.delete("/agents/Monkey/friends/coach@uy-mac").json()["friends"] == []
+
+
+def test_a_remote_friend_on_this_machine_is_the_local_agent(app, monkeypatch):
+    _main, client, tmp_path = app
+    monkeypatch.setenv("VORTEXIA_ENV_NAME", "ba-mac")
+    client.put("/agents/Monkey/friends/Teli@ba-mac")
+    assert _file(tmp_path, "Monkey")["friends"] == ["Teli"]
+    assert client.put("/agents/Monkey/friends/Ghost@ba-mac").status_code == 404
+
+
+def test_remote_friend_refusals(app, monkeypatch):
+    _main, client, _tmp = app
+    monkeypatch.delenv("VORTEXIA_ENV_NAME", raising=False)
+    assert client.put("/agents/Monkey/friends/coach@uy-mac").status_code == 400, "no vortex-relay here"
+    monkeypatch.setenv("VORTEXIA_ENV_NAME", "ba-mac")
+    monkeypatch.setenv("VORTEXIA_RELAY_ENV_NAMES", "ba-mac,uy-mac")
+    assert client.put("/agents/Monkey/friends/coach@nowhere").status_code == 404, "unknown environment"
+    assert client.put("/agents/Monkey/friends/@uy-mac").status_code == 422
+    assert client.put("/agents/Monkey/friends/coach@").status_code == 422
+
+
+def test_send_friends_reaches_remote_friends_by_their_relay_address(monkeypatch):
+    from cli.commands import agents as agents_mod
+    sent = []
+    monkeypatch.setattr(agents_mod.api, "get", lambda path: {"friends": [{"name": "Vortexia", "registered": True}, {"name": "coach@uy-mac", "registered": True, "remote": "uy-mac"}]})
+    monkeypatch.setattr(agents_mod.api, "post", lambda path, data=None, timeout=None: (sent.append(data), {"injected": True})[1])
+    result = CliRunner().invoke(agents_mod.send, ["hola", "--to", "RelayRobotics", "--friends", "--from", "RelayRobotics"])
+    assert result.exit_code == 0, result.output
+    assert [d["to"] for d in sent] == ["Vortexia", "coach@uy-mac"]

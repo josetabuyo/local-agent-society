@@ -54,7 +54,10 @@
       kind: 'friend',
       agent: f.name,
       label: f.name,
-      detail: f.registered === false ? 'not registered' : `${f.sessions || 0} session${f.sessions === 1 ? '' : 's'}${f.mutual ? ' · mutual' : ''}`,
+      // A friend on another machine (Name@env, over vortex-relay): its sessions and widget live there.
+      detail: f.remote ? `on ${f.remote} · vortex-relay`
+        : f.registered === false ? 'not registered' : `${f.sessions || 0} session${f.sessions === 1 ? '' : 's'}${f.mutual ? ' · mutual' : ''}`,
+      remote: f.remote || null,
       color,
       mutual: !!f.mutual,
       registered: f.registered !== false,
@@ -82,6 +85,7 @@
     }
     if (action === 'exit') {
       if (item.kind === 'friend') {
+        if (item.remote) return { title: `${item.agent}'s widget lives on ${item.remote} — it can't be closed from here`, enabled: false };
         return item.widgetClosed
           ? { title: `${item.agent}'s widget is already closed`, enabled: false }
           : { title: `Close ${item.agent}'s widget (it stays here, in the panel)`, enabled: item.registered };

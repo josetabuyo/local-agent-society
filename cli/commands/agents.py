@@ -402,6 +402,7 @@ def friends(name, add, remove):
       las agent friends                    # the friends of the agent in the cwd
       las agent friends --add Vortexia     # link one (it is mutual when Vortexia links back)
       las agent friends --remove Vortexia  # unlink it (only this side)
+      las agent friends --add coach@uy-mac # another Mac: Name@env, over vortex-relay
       las agent send --to Monkey --friends "¿en qué andan?"   # message all of them
 
     Stored as `friends` in the agent's .las-agent.json; the widget's children
@@ -420,6 +421,9 @@ def friends(name, add, remove):
         click.echo(f"{name}: no friends yet — add one with `las agent friends --add NAME`")
         return
     for f in rows:
+        if f.get("remote"):
+            click.echo(f"{f['name']:<24} on {f['remote']} — via vortex-relay")
+            continue
         flags = ("  mutual" if f.get("mutual") else "") + ("" if f.get("registered") else "  [not registered]") + ("  [widget closed]" if f.get("inactive") else "")
         click.echo(f"{f['name']:<24} {f.get('sessions', 0)} session(s){flags}")
 

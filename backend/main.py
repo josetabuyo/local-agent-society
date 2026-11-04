@@ -861,6 +861,14 @@ def _friends_view(name: str) -> dict:
     rows = []
     with _sessions_lock:
         for friend in friends_of(_agent_config(name, registry)):
+            env = _remote_env(friend)
+            if env:
+                # Another machine (Name@env): reached over vortex-relay like any
+                # `send --to Name@env`. Its sessions, widget and friends live
+                # over there — unknown here, so None, never a guess.
+                rows.append({"name": friend, "registered": True, "remote": env,
+                             "inactive": False, "sessions": None, "mutual": None})
+                continue
             known = friend in registry
             rows.append({
                 "name": friend,
@@ -878,14 +886,37 @@ def list_friends(name: str):
     return _friends_view(name)
 
 
+def _remote_env(friend: str) -> str | None:
+    """The environment of a cross-machine friend (`Name@env`), or None for a local one."""
+    return friend.partition("@")[2] or None
+
+
+def _check_remote_friend(friend: str) -> str:
+    """Validate a `Name@env` friend; returns it, or the bare name when env is this machine."""
+    agent, _, env = friend.partition("@")
+    if not agent or not env or "@" in env or "/" in friend:
+        raise HTTPException(status_code=422, detail=f"{friend!r}: a friend on another machine is Name@env (e.g. coach@uy-mac)")
+    own_env = os.environ.get("VORTEXIA_ENV_NAME")
+    if not own_env:
+        raise HTTPException(status_code=400, detail="a friend on another machine needs vortex-relay configured here (VORTEXIA_ENV_NAME)")
+    if env == own_env:
+        return agent
+    known_envs = [e.strip() for e in os.environ.get("VORTEXIA_RELAY_ENV_NAMES", "").split(",") if e.strip()]
+    if known_envs and env not in known_envs:
+        raise HTTPException(status_code=404, detail=f"no environment named {env!r} in vortex-relay (VORTEXIA_RELAY_ENV_NAMES: {', '.join(known_envs)})")
+    return friend
+
+
 def _link_friend(name: str, friend: str, linked: bool) -> dict:
     registry = load_json(REGISTRY_FILE, {})
+    if linked and "@" in friend:
+        friend = _check_remote_friend(friend)
     file = _agent_config_file(name, registry)
     if file is None:
         raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
     if friend == name:
         raise HTTPException(status_code=422, detail="an agent can't be its own friend")
-    if linked and friend not in registry:
+    if linked and "@" not in friend and friend not in registry:
         raise HTTPException(status_code=404, detail=f"no agent named {friend!r} is registered")
     with _sessions_lock:
         try:
