@@ -40,18 +40,20 @@ def test_long_subjects_wrap_inside_the_terminal():
     assert len(lines) > 1 and all(len(l) <= 60 for l in lines)
 
 
-def test_color_follows_claude_code_and_force_vars_but_no_color_wins(monkeypatch):
+def test_no_color_off_a_tty_or_under_claude_code_unless_forced(monkeypatch):
     import importlib, sys as _sys
-    def color_with(**env):
+    def color_with(tty=False, **env):
         for k in ("FORCE_COLOR", "CLICOLOR_FORCE", "CLAUDECODE", "NO_COLOR", "TERM"):
             monkeypatch.delenv(k, raising=False)
         for k, v in env.items():
             monkeypatch.setenv(k, v)
-        monkeypatch.setattr(_sys.stdout, "isatty", lambda: False)
+        monkeypatch.setattr(_sys.stdout, "isatty", lambda: tty)
         return importlib.reload(updater)._COLOR
     assert color_with() is False
-    assert color_with(CLAUDECODE="1") is True
+    assert color_with(tty=True) is True
+    assert color_with(CLAUDECODE="1") is False, "Claude Code's ! output is plain text (raw codes seen on uy-mac)"
+    assert color_with(tty=True, CLAUDECODE="1") is False
     assert color_with(FORCE_COLOR="1") is True
-    assert color_with(CLAUDECODE="1", NO_COLOR="1") is False
+    assert color_with(FORCE_COLOR="1", NO_COLOR="1") is False
     assert color_with(FORCE_COLOR="0") is False
     importlib.reload(updater)

@@ -34,9 +34,10 @@ HEALTH_URL = "http://localhost:8700/health"
 
 # ── colors ─────────────────────────────────────────────────────────────────
 
-# A live terminal gets the spinner; color also goes to a captured output that
-# renders ANSI — Claude Code's `! las update` (CLAUDECODE), or FORCE_COLOR /
-# CLICOLOR_FORCE. NO_COLOR and TERM=dumb always win.
+# Color and the spinner only on a live terminal. Claude Code's `! las update`
+# shows output as plain text (raw escape codes were seen there, 2026-11-04,
+# System@uy-mac), so CLAUDECODE means no color even on a tty. FORCE_COLOR /
+# CLICOLOR_FORCE opt back in on purpose; NO_COLOR and TERM=dumb always win.
 _LIVE = sys.stdout.isatty()
 
 
@@ -44,7 +45,7 @@ def _forced(var: str) -> bool:
     return os.getenv(var, "0") not in ("", "0")
 
 
-_COLOR = (_LIVE or _forced("FORCE_COLOR") or _forced("CLICOLOR_FORCE") or _forced("CLAUDECODE")) \
+_COLOR = ((_LIVE and not _forced("CLAUDECODE")) or _forced("FORCE_COLOR") or _forced("CLICOLOR_FORCE")) \
     and not os.getenv("NO_COLOR") and os.getenv("TERM") != "dumb"
 
 
