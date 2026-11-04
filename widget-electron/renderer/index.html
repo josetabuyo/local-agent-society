@@ -20,6 +20,7 @@
       <div class="bar-right">
         <button id="open" class="facebtn" title="Open: terminal window / folder at this agent's path (click = default, hold or right-click = choose and reorder)">&#10697;</button>
         <button id="speaker" class="facebtn" title="Mute/unmute">&#128266;</button>
+        <button id="keyboard" class="facebtn" title="Type: same as the mic, but written (or just start typing anywhere on the widget) — Enter sends, Shift+Enter new line, Esc closes">&#9000;</button>
         <button id="mic" class="facebtn" title="Dictate (click to start/stop, double-click to test mic)">&#127908;</button>
         <button id="children" class="facebtn" title="Children: which connected session (Claude, Codex, shell) hears the mic — click or hold to choose">&#128101;</button>
       </div>
@@ -111,6 +112,11 @@
     <!-- Children menu: which connected session (this agent's children) the
          mic talks to — the agent's own sessions.target in .las-agent.json. -->
     <div id="childrenMenu" class="open-menu hidden"></div>
+    <!-- Keyboard drawer: the mic's written twin. Whatever is typed here goes
+         exactly where a dictation goes (widget.js "keyboard"). -->
+    <div id="keyboardDrawer" class="open-menu keyboard-drawer hidden">
+      <textarea id="keyboardInput" rows="2" placeholder="Write… Enter sends · Shift+Enter new line · Esc closes" spellcheck="true"></textarea>
+    </div>
 
     <div id="resizeHandle" class="resize-handle" title="Drag to resize"></div>
   </div>

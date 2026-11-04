@@ -235,6 +235,19 @@ test('index.html renders all 5 face buttons (gear + 4, "open" in the retired pal
   }
 });
 
+test('the ⌨ keyboard button sits next to the mic and sends exactly where a dictation goes', () => {
+  const html = readSrc('renderer', 'index.html');
+  assert.match(html, /id="keyboard"[^>]*>[^<]*<\/button>\s*<button id="mic"/, '⌨ must sit right before the mic');
+  assert.match(html, /id="keyboardDrawer"[\s\S]*id="keyboardInput"/);
+  const js = stripComments(readSrc('renderer', 'widget.js'));
+  // Same path as the mic: the agent's own inbox, its sessions.target picks the terminal.
+  assert.match(js, /sendDictation\(null, text\)/);
+  // Typing anywhere on the focused widget opens it — outside form fields, never on shortcuts.
+  assert.match(js, /document\.addEventListener\('keydown'/);
+  assert.match(js, /e\.metaKey \|\| e\.ctrlKey/);
+  assert.match(js, /isFormField\(e\.target\)/);
+});
+
 test('the 🧹 clear button is gone from every layer (it never reached a terminal reliably)', () => {
   assert.doesNotMatch(readSrc('renderer', 'index.html'), /id="clear"/);
   assert.doesNotMatch(stripComments(readSrc('renderer', 'widget.js')), /getElementById\('clear'\)|writeToTty/);

@@ -905,3 +905,27 @@ html, body {
 .tile-action.armed {
   background: rgba(200, 40, 40, 0.9);
 }
+
+/* Keyboard drawer (widget.js "keyboard"): the mic's written twin. */
+.keyboard-drawer {
+  display: flex;
+}
+
+.keyboard-drawer.hidden {
+  display: none;
+}
+
+#keyboardInput {
+  flex: 1;
+  min-height: 34px;
+  resize: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(20, 20, 20, 0.35);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #141414;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}

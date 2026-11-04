@@ -1727,6 +1727,132 @@ micEl.addEventListener('dblclick', () => {
   runMicSelfTest();
 });
 
+// -- keyboard: the mic's written twin ---------------------------------------
+//
+// The ⌨ button opens a text box in a drawer; what is written there goes
+// EXACTLY where a dictation goes — sendDictation(null, …) → the agent's own
+// inbox, and its `sessions.target` (the children button) picks the session,
+// by default the last-used terminal. It also opens by itself: with the widget
+// focused, any printable key typed outside a form field opens the drawer and
+// lands in the box — so typing into the widget while believing the terminal
+// had focus is never lost, it simply reaches that terminal on Enter.
+// Enter sends, Shift+Enter is a new line, Esc closes (the draft is kept).
+
+const keyboardEl = document.getElementById('keyboard');
+const keyboardDrawerEl = document.getElementById('keyboardDrawer');
+const keyboardInputEl = document.getElementById('keyboardInput');
+const KEYBOARD_MAX_INPUT_PX = 140;
+let keyboardOpen = false;
+let keyboardSending = false;
+
+registerDrawer('keyboard', keyboardDrawerEl, () => {
+  keyboardOpen = false;
+  keyboardEl.classList.remove('active');
+});
+
+function fitKeyboardInput() {
+  keyboardInputEl.style.height = 'auto';
+  keyboardInputEl.style.height = `${Math.min(keyboardInputEl.scrollHeight + 2, KEYBOARD_MAX_INPUT_PX)}px`;
+  fitWindowToDrawer();
+}
+
+function openKeyboard() {
+  if (!keyboardOpen) {
+    keyboardOpen = true;
+    keyboardEl.classList.add('active');
+    openDrawer('keyboard');
+    fitKeyboardInput();
+  }
+  keyboardInputEl.focus();
+}
+
+function closeKeyboard() {
+  if (!keyboardOpen) return;
+  keyboardOpen = false;
+  keyboardEl.classList.remove('active');
+  closeDrawer('keyboard');
+}
+
+/** Insert text at the caret (replacing any selection), as a keystroke would. */
+function insertIntoKeyboard(text) {
+  const el = keyboardInputEl;
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  el.value = el.value.slice(0, start) + text + el.value.slice(end);
+  el.selectionStart = el.selectionEnd = start + text.length;
+  fitKeyboardInput();
+}
+
+async function sendKeyboardText() {
+  const text = keyboardInputEl.value.trim();
+  if (!text || keyboardSending) return;
+  keyboardSending = true;
+  keyboardEl.classList.add('busy');
+  try {
+    const sendResult = await sendDictation(null, text);
+    if (sendResult && sendResult.ok) {
+      window.las.log('info', 'keyboard', `sent ${text.length} chars`);
+      if (sendResult.fallback_from) {
+        window.las.log('warn', 'keyboard', `target ${sendResult.fallback_from} is not connected — the text went to the last-used session`);
+      }
+      keyboardInputEl.value = '';
+      closeKeyboard();
+    } else {
+      // Keep the draft: nothing typed is ever thrown away by a failed send.
+      window.las.log('error', 'keyboard', `failed to publish typed text to own inbox: ${sendResult && sendResult.error}`);
+      keyboardInputEl.title = `Not delivered: ${(sendResult && sendResult.error) || 'unknown error'} — Enter retries`;
+    }
+  } finally {
+    keyboardSending = false;
+    keyboardEl.classList.remove('busy');
+  }
+}
+
+keyboardEl.addEventListener('click', () => {
+  if (keyboardOpen) closeKeyboard();
+  else openKeyboard();
+});
+
+keyboardInputEl.addEventListener('input', () => {
+  keyboardInputEl.title = '';
+  fitKeyboardInput();
+});
+
+keyboardInputEl.addEventListener('keydown', (e) => {
+  if (e.isComposing) return;
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendKeyboardText();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeKeyboard();
+  }
+});
+
+/** A key that should start (or continue) typing into the keyboard box. */
+function isTypingKey(e) {
+  if (e.isComposing || e.metaKey || e.ctrlKey) return false; // shortcuts stay shortcuts
+  if (e.key === 'Dead') return true; // accent first (á, ü): open, let the composition land in the box
+  return e.key.length === 1; // printable, Option-made ones included (@ on a Spanish layout)
+}
+
+function isFormField(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target === keyboardInputEl || isFormField(e.target) || !isTypingKey(e)) return;
+  if (e.key === 'Dead') {
+    openKeyboard(); // no preventDefault: the dead key's composition follows focus
+    return;
+  }
+  e.preventDefault();
+  openKeyboard();
+  insertIntoKeyboard(e.key);
+});
+
 // -- children: which connected session (Claude, Codex, shell) hears the mic -
 //
 // An agent's connected runtimes are its children (docs/adr/0005, ADR 0004
