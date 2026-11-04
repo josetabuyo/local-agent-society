@@ -771,7 +771,7 @@ def codex_opens_picker(args: list) -> bool:
 def run_connected(argv: list) -> None:
     """`las <command…>` (cli/main.py): connect `command` to LAS as a session of the
     agent in this folder, with NO terminal: every message to it runs the command
-    once, the text as one more argument (`pulpo luganense 'what the mic heard'`),
+    once, the text as one more argument (`echo Recibido: 'what the mic heard'`),
     and what it prints is the answer — spoken for the mic (docs/adr/0006).
     It shows in 👥 named after its first word; this terminal is free again."""
     from cli.agent_config import read_agent_config

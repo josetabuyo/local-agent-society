@@ -7,22 +7,22 @@ Status: accepted (2026-11-03) — `cli/connected.py`, `bridge/src/sinks/exec.js`
 LAS has no AI of its own (the 🧭 general mic, the scope router and `las local`
 are gone). What it adds is a way to connect ANY command to an agent as one more
 session next to `claude`, `codex` and `shell` (docs/adr/0004) — with no
-terminal. Pulpo's bots are the first case (`pulpo las`, `pulpo luganense`).
+terminal. Any CLI qualifies — a bot, a script, plain `echo`; LAS is coupled to none of them.
 LAS takes no responsibility for whatever thinks inside the command.
 
 ## Decision — one case, the simplest
 
 ```
-las pulpo las
+las echo Recibido:
 ```
 
 typed in the agent's folder (the widget's ⧉ opens a terminal there). When the
 first word is not a `las` subcommand but a program on PATH, LAS registers a
 session of that agent and returns — the terminal is free again:
 
-- **runtime** = the command's first word (`pulpo`), **title** = the command line;
+- **runtime** = the command's first word (`echo`), **title** = the command line;
 - **every message** to the session runs the command ONCE, a new process, with
-  the text as ONE more argument: `pulpo las '<what the mic heard>'`. Stdin is
+  the text as ONE more argument: `echo Recibido: '<what the mic heard>'`. Stdin is
   empty; the env carries `LAS_AGENT`, `LAS_AGENT_DIR`, `LAS_FROM`,
   `LAS_SOURCE` (`human` = the mic), `LAS_KIND`, `LAS_TEXT`, `LAS_MSG_ID`,
   `LAS_LOCALE`. Only `message`/`command` kinds run it;

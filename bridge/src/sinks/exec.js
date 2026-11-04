@@ -28,7 +28,7 @@ export class ExecSink {
     // (spoken for the mic, never echoed into itself); otherwise: reply to the sender.
     this.answer = answer;
     // 'stdin' (the default): the text is the command's input. 'arg' (`las <command…>`):
-    // it is appended as ONE more argument — `pulpo luganense 'what the mic heard'`.
+    // it is appended as ONE more argument — `echo Recibido: 'what the mic heard'`.
     this.textAs = textAs;
   }
 

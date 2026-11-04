@@ -1,7 +1,7 @@
 """`las <command…>` — a command connected to an agent, with no terminal (docs/adr/0006).
 
 Starts `las-bridge exec` in the background: every message to the session runs
-the command once with the text as one more argument (`pulpo las '<text>'`),
+the command once with the text as one more argument (`echo Recibido: '<text>'`),
 and what it prints is the answer. LAS starts it, closes it (✕ in 👥) and keeps
 its log (📄); what thinks inside is not LAS's.
 """
@@ -42,7 +42,7 @@ def new_log_path(name: str, now: datetime | None = None) -> Path:
 
 
 def login_shell() -> str:
-    """The user's login shell: `shell -lc CMD` must find what their terminal finds (~/.local/bin/pulpo…)."""
+    """The user's login shell: `shell -lc CMD` must find what their terminal finds (~/.local/bin/…)."""
     if os.environ.get("SHELL"):
         return os.environ["SHELL"]
     try:

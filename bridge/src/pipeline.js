@@ -3,7 +3,7 @@
  * the message before the sink does. An interceptor returns `'continue'`
  * (pass it on) or `'handled'` (stop here: the message never reaches the
  * sink). This is the seam where a future first-decision layer plugs in —
- * a local model (Pulpo) deciding whether a voice dictation should go to the
+ * a local model deciding whether a voice dictation should go to the
  * session at all, be answered directly, or be rewritten — without the
  * source or any sink knowing it exists (open/closed: add an interceptor,
  * change nothing else).

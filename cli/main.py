@@ -18,7 +18,7 @@ class LasGroup(click.Group):
     """`las <any command…>`: when the first word is not a `las` subcommand but a
     program on PATH, connect it to this folder's agent with no terminal — each
     message runs it once with the text as one more argument (docs/adr/0006):
-    `las pulpo luganense`. `las attach <command…>` keeps it in this terminal."""
+    `las echo Recibido:`. `las attach <command…>` keeps it in this terminal."""
 
     def get_command(self, ctx, name):
         found = super().get_command(ctx, name)
