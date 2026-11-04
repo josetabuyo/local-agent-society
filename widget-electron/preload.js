@@ -106,6 +106,9 @@ contextBridge.exposeInMainWorld('las', {
   /** Generalized "publish `text` to `toName`'s vortexia inbox" primitive. */
   vortexiaSend: (toName, text) => ipcRenderer.invoke('vortexia:send', toName, text),
 
+  /** Human words for `toName`, optionally to ONE of its sessions ({session: sid|runtime}) — the society drawer's mic. */
+  sendHuman: (toName, text, opts) => ipcRenderer.invoke('vortexia:send', toName, text, opts || null),
+
   /** Mic dictation -> this agent (the faithful equivalent of the retired
    * live-TTY injectToSession). No target here: WHICH of the agent's
    * sessions hears it is the agent's own `sessions.target`
@@ -137,6 +140,15 @@ contextBridge.exposeInMainWorld('las', {
   /** Close one session's terminal (its tty is hung up). Resolves to the
    * backend's sessions view, or null. */
   closeSession: (name, sid) => ipcRenderer.invoke('agent:session-close', name, sid),
+
+  /** This agent's las-friends with their state: {agent, friends: [{name, registered, inactive, sessions, mutual}]} or null. */
+  getFriends: (name) => ipcRenderer.invoke('agent:friends', name),
+  /** Link (`linked` true) or unlink `friend`; resolves to the new friends view, or null. */
+  linkFriend: (name, friend, linked) => ipcRenderer.invoke('agent:friend-link', name, friend, linked),
+  /** Every registered agent's name, sorted. */
+  listAgentNames: () => ipcRenderer.invoke('agent:names'),
+  /** Close another agent's widget, as its door button would. */
+  closeAgentWidget: (name) => ipcRenderer.invoke('agent:close-widget', name),
 
   /** Open a detached session's log file in the OS's default viewer. */
   openSessionLog: (logPath) => ipcRenderer.invoke('agent:session-log', logPath),

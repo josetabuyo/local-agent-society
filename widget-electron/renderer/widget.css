@@ -658,3 +658,198 @@ html, body {
 }
 
 
+
+/* ── society drawer (children menu): List / Panel tabs ──────────────────────
+ * Sessions (terminals, commands) and las-friends from one model
+ * (society-model.js), drawn by society-views.js. Chips and mini stickies are
+ * tinted with each agent's own widget color; text contrast comes from its
+ * luminance (chipColors), never a fixed plate. */
+.society-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+  margin-bottom: 4px;
+}
+
+.society-tab {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(20, 20, 20, 0.3);
+  background: rgba(0, 0, 0, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.society-tab.active {
+  background: rgba(0, 0, 0, 0.22);
+  font-weight: 700;
+}
+
+.society-heading .open-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  cursor: default;
+}
+
+.society-row .society-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.society-chip {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(20, 20, 20, 0.35);
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.society-detail {
+  font-size: 10px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.society-link {
+  flex: 1;
+  font: inherit;
+  font-size: 11px;
+  margin: 3px 6px;
+  background: rgba(0, 0, 0, 0.06);
+  color: inherit;
+  border: 1px solid rgba(20, 20, 20, 0.3);
+  border-radius: 6px;
+}
+
+.society-panel {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.society-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* A mini sticky: the widget face in a square — icon, name, one line of detail. */
+.society-tile {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(20, 20, 20, 0.4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.society-tile.dragging {
+  cursor: grabbing;
+  z-index: 2;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+}
+
+.society-tile.is-default {
+  border-width: 2.5px;
+}
+
+.society-tile.widget-closed {
+  border-style: dashed;
+}
+
+.society-tile.kind-command {
+  border-radius: 2px;
+}
+
+.tile-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tile-label,
+.tile-detail {
+  width: 100%;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tile-label {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.tile-detail {
+  font-size: 8px;
+  opacity: 0.75;
+}
+
+/* Double-click: the tile's own menu (mic, exit), over its face. */
+.tile-menu {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: inherit;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.society-tile.menu-open .tile-menu {
+  display: flex;
+}
+
+.tile-action {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.tile-action:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.tile-action.armed {
+  background: rgba(200, 40, 40, 0.9);
+}

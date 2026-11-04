@@ -63,13 +63,13 @@ las claude [claude args]   # Claude Code with the LAS channel — THIS session, 
 las claudeRelay [args]     # the same, on the second Claude login (~/.claude-relay) — runtime claudeRelay
 las codex [codex args]     # Codex's own TUI (`codex --yolo`) in a PTY; every mailbox message is typed into it
 las shell [--yes] [--all]  # a terminal with no AI: messages print, kind=command ones run after y/N
-las <command…>             # any program on PATH, connected with NO terminal: each message runs `<command…> '<text>'` once (`las pulpo las`)
+las <command…>             # any program on PATH, connected with NO terminal: each message runs `<command…> '<text>'` once (`las echo Recibido:`)
 las attach <command…>      # the same, but in this terminal (each run's output shows here)
 ```
 
-`las <command…>` connects ANY program: when the first word is not a `las` subcommand but a program on PATH, it becomes a session of the agent in this folder (runtime = its first word, e.g. `pulpo`; title = the command line) with NO terminal, and this terminal is free again. Every message to it runs the command once with the text as ONE more argument — `las pulpo luganense` + a dictation runs `pulpo luganense '<what the mic heard>'` — and what it prints is the answer: spoken in the agent's voice for the mic, sent back to another agent, never echoed into itself. It never takes the default session: pick it in 👥 to point the mic at it; ✕ closes it; 📄 opens its log. `las attach <command…>` is the same in the foreground. Contract: docs/adr/0006-detached-sessions.md. There is no 🧭 general mic anymore: talking to a particular terminal is a task for whatever agent is listening (Pulpo's included). LAS carries no AI of its own — whatever thinks in there (Pulpo's agents) is that product's.
+`las <command…>` connects ANY program: when the first word is not a `las` subcommand but a program on PATH, it becomes a session of the agent in this folder (runtime = its first word, e.g. `echo`; title = the command line) with NO terminal, and this terminal is free again. Every message to it runs the command once with the text as ONE more argument — `las echo Recibido:` + a dictation runs `echo Recibido: '<what the mic heard>'` — and what it prints is the answer: spoken in the agent's voice for the mic, sent back to another agent, never echoed into itself. It never takes the default session: pick it in 👥 to point the mic at it; ✕ closes it; 📄 opens its log. `las attach <command…>` is the same in the foreground. Contract: docs/adr/0006-detached-sessions.md. There is no 🧭 general mic anymore: talking to a particular terminal is a task for whatever agent is listening. LAS carries no AI of its own and is coupled to no product: whatever thinks inside a connected command is that command's business.
 
-Nothing else to type — no `las widget`, no `las agent register`, no alias. `las claudeRelay` is `las claude --account relay`: Claude Code keeps one login per `CLAUDE_CONFIG_DIR`, so a second account (a company email) lives in `~/.claude-relay` (created on first use, CLAUDE.md/settings/skills/hooks symlinked from `~/.claude`; first run: `/login`). Any `--account NAME` works the same way → `~/.claude-NAME`, runtime `claudeName`. Both Claudes are separate sessions of the same agent — own sid, own mailbox, own status file — so one agent folder can hold `claude`, `claudeRelay`, `codex`, `shell` and connected commands at once. A conversational agent on a LOCAL model is Pulpo's product, not LAS's: `las pulpo las` (Pulpo's `las` bot). Be the expert here: when the human asks how to "connect" a terminal, an agent, Codex, a shell, the answer is one of those commands; never a pile of setup steps.
+Nothing else to type — no `las widget`, no `las agent register`, no alias. `las claudeRelay` is `las claude --account relay`: Claude Code keeps one login per `CLAUDE_CONFIG_DIR`, so a second account (a company email) lives in `~/.claude-relay` (created on first use, CLAUDE.md/settings/skills/hooks symlinked from `~/.claude`; first run: `/login`). Any `--account NAME` works the same way → `~/.claude-NAME`, runtime `claudeName`. Both Claudes are separate sessions of the same agent — own sid, own mailbox, own status file — so one agent folder can hold `claude`, `claudeRelay`, `codex`, `shell` and connected commands at once. A conversational agent on a LOCAL model is not LAS's product either: whatever CLI provides one connects with `las <that-cli …>`. Be the expert here: when the human asks how to "connect" a terminal, an agent, Codex, a shell, the answer is one of those commands; never a pile of setup steps.
 
 When this skill loads, run exactly one check:
 
@@ -347,6 +347,26 @@ A session opened inside a subordinate's folder is that subordinate (the
 nearest config upward wins); a session in a non-repo folder under the parent
 (notes, docs) is the parent. Give subordinates the parent's voice so the
 name in the widget/inbox is what tells them apart, not the voice.
+
+### las-friends — agents linked by choice, not by folder
+
+Besides the folder-derived hierarchy, an agent can link any other agent as a
+**las-friend**: `"friends": ["Vortexia", ...]` in its own `.las-agent.json`,
+in the order added. Directed like a follow — mutual when both list each
+other. A coach-style agent (Monkey) uses them to ask everyone what they're
+on, or to pass a message along to whoever fits.
+
+```bash
+las agent friends                         # mine (mutual / sessions / widget closed)
+las agent friends --add Vortexia          # link (--remove to unlink, only my side)
+las agent send --to Monkey --friends "..."   # one delivery per registered friend
+```
+
+The widget's 👥 drawer shows them under the sessions, as chips in each
+agent's color (List tab), and as draggable mini stickies with terminals and
+commands (Panel tab): double-click a tile → 🎤 dictate to it (that friend, or
+that one session) · 🚪 close it (a friend's widget, or that terminal/command).
+Endpoints: `GET/PUT/DELETE /agents/{name}/friends[/{friend}]`.
 
 ### Known issues
 

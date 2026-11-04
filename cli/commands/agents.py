@@ -268,11 +268,13 @@ def inject(name, message, from_agent):
 @click.option("--children", "to_children", is_flag=True,
               help="Deliver to every subordinate of --to (agents whose folder sits under its folder) instead of to --to itself")
 @click.option("--deep", is_flag=True, help="With --children: the whole subtree, not only direct subordinates")
+@click.option("--friends", "to_friends", is_flag=True,
+              help="Deliver to every las-friend of --to (the `friends` list in its .las-agent.json) instead of to --to itself")
 @click.option("--session", "session", default=None, help="Only one of the recipient's connected sessions: a session id, or a runtime (claude, claudeRelay, codex, shell). Default: the last one used.")
 @click.option("--all-sessions", is_flag=True, help="Every connected session of the recipient, one delivery each (like --children, but across its runtimes).")
 @click.option("--cc", is_flag=True, help="Also hand the recipient's last-used session a for-the-record copy (kind cc) when the message goes to another session — e.g. a command for its shell that its Claude should know about.")
 @click.option("--command", "as_command", is_flag=True, help="Mark the message as a command (kind command): a shell session runs it after y/N. A shell session is handed everything as a command anyway; use this to make an intelligent session run it too.")
-def send(message, to, scope, from_agent, to_children, deep, session, all_sessions, cc, as_command):
+def send(message, to, scope, from_agent, to_children, deep, to_friends, session, all_sessions, cc, as_command):
     """Generic send: point-to-point (--to) or scope broadcast (--scope), local or cross-machine.
 
     Replaces `inject`'s exact-name-only, single-machine model with one
@@ -284,6 +286,7 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
       las agent send --to "System@uy-mac" "..."    # explicit, disambiguates a name collision
       las agent send --scope "facturacion, pagos" "..."   # broadcast; 0, 1, or several may reply
       las agent send --to RelayRobotics --children "..."  # every subordinate of RelayRobotics (see `las agent children`)
+      las agent send --to Monkey --friends "..."           # every las-friend of Monkey (see `las agent friends`)
       las agent send --to Robo --session shell "ls -la"    # one connected session of Robo (see `las agent sessions`)
       las agent send --to Robo --all-sessions "heads up"   # every connected session of Robo
       las agent send --to Robo --session shell --cc "make test"   # the shell runs it (after y/N), Robo's Claude gets a cc
@@ -298,11 +301,14 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
         raise click.UsageError("exactly one of --to or --scope is required")
     if (to_children or deep) and not to:
         raise click.UsageError("--children/--deep need --to <ParentAgent>")
-    if (session or all_sessions) and (not to or to_children or scope):
+    if to_friends and (not to or to_children):
+        raise click.UsageError("--friends needs a plain --to <Agent> (not with --children)")
+    group = to_children or to_friends
+    if (session or all_sessions) and (not to or group or scope):
         raise click.UsageError("--session/--all-sessions need a plain --to <Agent>")
     if session and all_sessions:
         raise click.UsageError("--session and --all-sessions are exclusive")
-    if cc and (not to or to_children or scope or all_sessions):
+    if cc and (not to or group or scope or all_sessions):
         raise click.UsageError("--cc needs a plain --to <Agent> (it copies the last-used session; with --all-sessions it already gets the message)")
 
     payload = {"message": message, "source": "agent" if from_agent else "external"}
@@ -311,22 +317,13 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
 
     if to_children:
         # Hierarchy is folder-derived (cli/hierarchy.py) — ask the backend,
-        # which owns the registry, then fan out one point-to-point send per
-        # subordinate so each one lands in its own vortexia inbox.
+        # which owns the registry.
         info = api.get(f"/agents/{quote(to, safe='')}/hierarchy?deep={'true' if deep else 'false'}")
-        targets = [c["name"] for c in info.get("children", [])]
-        if not targets:
-            click.echo(f"{to}: no subordinates" + (" (try --deep)" if not deep else ""))
-            return
-        failures = 0
-        for target in targets:
-            result = api.post("/agents/send", {**payload, "to": target})
-            ok = result.get("injected", False)
-            failures += 0 if ok else 1
-            click.echo(f"{target}: {'sent via vortexia' if ok else 'not delivered'}")
-        click.echo(f"{to}: {len(targets) - failures}/{len(targets)} subordinates reached")
-        if failures:
-            raise SystemExit(1)
+        _fan_out(to, [c["name"] for c in info.get("children", [])], payload, "subordinates", "" if deep else " (try --deep)")
+        return
+    if to_friends:
+        info = api.get(f"/agents/{quote(to, safe='')}/friends")
+        _fan_out(to, [f["name"] for f in info.get("friends", []) if f.get("registered")], payload, "friends", " (add one with `las agent friends --add NAME`)")
         return
 
     if to and "@" in to and (session or all_sessions):
@@ -373,10 +370,58 @@ def send(message, to, scope, from_agent, to_children, deep, session, all_session
             click.echo("    " + _session_line(s))
 
 
+def _fan_out(to: str, targets: list, payload: dict, what: str, empty_hint: str = "") -> None:
+    """One point-to-point send per target, so each lands in its own vortexia inbox; exit 1 if any was not delivered."""
+    if not targets:
+        click.echo(f"{to}: no {what}{empty_hint}")
+        return
+    failures = 0
+    for target in targets:
+        ok = api.post("/agents/send", {**payload, "to": target}).get("injected", False)
+        failures += 0 if ok else 1
+        click.echo(f"{target}: {'sent via vortexia' if ok else 'not delivered'}")
+    click.echo(f"{to}: {len(targets) - failures}/{len(targets)} {what} reached")
+    if failures:
+        raise SystemExit(1)
+
+
 def _session_line(s: dict) -> str:
     title = f'"{s["title"]}"' if s.get("title") else "(no title yet)"
     flags = ("  *default" if s.get("default") else "") + ("" if s.get("intelligent", True) else "  [commands only]")
     return f"{s['sid']:<28} {s.get('runtime', '?'):<11} {title}{flags}"
+
+
+@agent.command("friends")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+@click.option("--add", "add", multiple=True, shell_complete=complete_agent_names, help="Link this agent (repeatable).")
+@click.option("--remove", "remove", multiple=True, shell_complete=complete_agent_names, help="Unlink this agent (repeatable).")
+def friends(name, add, remove):
+    """An agent's las-friends — the agents it is linked to — show, add or remove.
+
+    \b
+      las agent friends                    # the friends of the agent in the cwd
+      las agent friends --add Vortexia     # link one (it is mutual when Vortexia links back)
+      las agent friends --remove Vortexia  # unlink it (only this side)
+      las agent send --to Monkey --friends "¿en qué andan?"   # message all of them
+
+    Stored as `friends` in the agent's .las-agent.json; the widget's children
+    drawer shows them (list and panel tabs) next to its sessions.
+    """
+    name = resolve_agent_name(name)
+    base = f"/agents/{quote(name, safe='')}/friends"
+    view = None
+    for friend in add:
+        view = api.put(f"{base}/{quote(friend, safe='')}")
+    for friend in remove:
+        view = api.delete(f"{base}/{quote(friend, safe='')}")
+    view = view or api.get(base)
+    rows = view.get("friends", [])
+    if not rows:
+        click.echo(f"{name}: no friends yet — add one with `las agent friends --add NAME`")
+        return
+    for f in rows:
+        flags = ("  mutual" if f.get("mutual") else "") + ("" if f.get("registered") else "  [not registered]") + ("  [widget closed]" if f.get("inactive") else "")
+        click.echo(f"{f['name']:<24} {f.get('sessions', 0)} session(s){flags}")
 
 
 @agent.command("children")

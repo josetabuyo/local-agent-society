@@ -1250,21 +1250,21 @@ function nameForWindow(win) {
   return null;
 }
 
-ipcMain.handle('vortexia:send', async (event, toName, text) => {
+ipcMain.handle('vortexia:send', async (event, toName, text, opts) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const fromName = win ? nameForWindow(win) : null;
   if (!fromName) {
     log.error('mic', 'vortexia:send failed: could not resolve sending agent for this window');
     return { ok: false, error: 'could not resolve sending agent for this window' };
   }
-  return sendHumanMessage(fromName, toName, text);
+  return sendHumanMessage(fromName, toName, text, opts);
 });
 
 /** A human's words for `toName`, on behalf of `fromName`'s widget — a mic
  * dictation, or a typed reply from a speech bubble. Same path either way:
  * the backend picks the session (`sessions.target`), the agent's own inbox
  * is the fallback when the backend is unreachable. */
-async function sendHumanMessage(fromName, toName, text) {
+async function sendHumanMessage(fromName, toName, text, opts) {
   const win = windows.get(fromName);
   // First choice: the backend's /agents/send — the one place that knows the
   // recipient's connected sessions and its own `sessions.target` choice
@@ -1279,6 +1279,8 @@ async function sendHumanMessage(fromName, toName, text) {
   let reachedBackend = false;
   try {
     const body = { message: text, to: toName, source: 'human', from_agent: fromName };
+    // One session of the recipient (a tile/row of the society drawer), instead of its own `sessions.target`.
+    if (opts && typeof opts.session === 'string' && opts.session) body.session = opts.session;
     const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
     reachedBackend = true;
     const json = await res.json().catch(() => ({}));
@@ -1523,6 +1525,40 @@ const sessionPath = (name, sid) => `/agents/${encodeURIComponent(name)}/sessions
 // The children menu's refresh button: ask every intelligent session of the
 // agent to title itself (backend request_session_titles). Answers arrive
 // later, as `las agent title` calls; the renderer re-reads the list.
+// ── las-friends: the agents this one is linked to (`friends` in .las-agent.json) ──
+// Read and written through the backend, like `sessions` above — the same
+// endpoints `las agent friends` uses.
+ipcMain.handle('agent:friends', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/friends`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('agent:friend-link', async (_event, name, friend, linked) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/friends/${encodeURIComponent(friend)}`, { method: linked ? 'PUT' : 'DELETE' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('friends', `${linked ? 'link' : 'unlink'} ${friend} for ${name} failed: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('friends', `${name}: ${linked ? 'linked' : 'unlinked'} ${friend}`);
+    return json;
+  } catch (err) {
+    log.error('friends', `${linked ? 'link' : 'unlink'} ${friend} for ${name} failed: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
+/** Names of every registered agent (the "link a friend" picker). */
+ipcMain.handle('agent:names', async () => Object.keys(await fetchAgents()).sort((a, b) => a.localeCompare(b)));
+
+/** Close `name`'s widget the way its own door button does — from another widget (a friend's tile). */
+ipcMain.handle('agent:close-widget', async (_event, name) => deactivateAgentWidget(name));
+
 ipcMain.handle('agent:request-session-titles', async (_event, name) => {
   const json = await postBackend(`/agents/${encodeURIComponent(name)}/sessions/titles/request`, `title request for ${name}`);
   if (json) log.info('children', `${name}: asked ${json.asked.length} session(s) for a title, skipped ${json.skipped.length}`);
@@ -1650,17 +1686,19 @@ ipcMain.handle('agent:info', async (_event, name) => {
 // "Door" button: mark this agent inactive on the backend, then close this
 // very widget window — mirrors `las agent deactivate`. Does not touch the
 // agent's Claude Code session (see backend/main.py's set_inactive comment).
-ipcMain.handle('agent:deactivate', async (event, name) => {
+ipcMain.handle('agent:deactivate', async (event, name) => deactivateAgentWidget(name, BrowserWindow.fromWebContents(event.sender)));
+
+/** Mark `name` inactive on the backend and destroy its widget window (`win`, or the one open for `name`). */
+async function deactivateAgentWidget(name, win = windows.get(name)) {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/inactive`, { method: 'POST' });
     const json = await res.json();
-    const win = BrowserWindow.fromWebContents(event.sender);
     if (win && !win.isDestroyed()) win.destroy();
     return json;
   } catch (err) {
     return { ok: false, error: String(err) };
   }
-});
+}
 
 // "Wake up via vortexia" settings checkbox — backed by the same
 // inactive/wake-enabled flags `las agent focus` reads, not electron-store,

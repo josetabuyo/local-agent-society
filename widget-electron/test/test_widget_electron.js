@@ -277,7 +277,8 @@ test('speaker button toggles the existing mute pref (no new pref key)', () => {
 test('mic dictation publishes via vortexia (sendToSelf), not a direct live write into the linked terminal', () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function stopRecordingAndTranscribe()');
-  assert.match(body, /window\.las\.sendToSelf\(agentName,\s*result\.text\)/,
+  assert.match(body, /sendDictation\(destination,\s*result\.text\)/);
+  assert.match(extractFunctionBody(src, 'function sendDictation(destination, text)'), /if \(!destination\) return window\.las\.sendToSelf\(agentName,\s*text\)/,
     'mic result must be sent via sendToSelf — direct terminal injection (writeToTty) is iTerm2/AppleScript-specific and not portable, explicitly rejected for dictation in favor of vortexia');
   assert.doesNotMatch(body, /window\.las\.writeToTty/,
     'mic must NOT use writeToTty — that stays reserved for the Clear button\'s "/clear", a different use case (act on a live session now vs. queue for next session start)');
@@ -416,10 +417,10 @@ test('preload/main.js no longer expose the old speak-selftest-ok IPC channel (re
 
 test('main.js vortexia:send handler resolves the sending agent from the window map (reuses the existing per-window VortexiaClient)', () => {
   const src = readSrc('main.js');
-  const handler = extractFunctionBody(src, "ipcMain.handle('vortexia:send', async (event, toName, text) => {");
+  const handler = extractFunctionBody(src, "ipcMain.handle('vortexia:send', async (event, toName, text, opts) => {");
   assert.match(handler, /nameForWindow\(win\)/);
-  assert.match(handler, /return sendHumanMessage\(fromName, toName, text\)/, 'the handler only resolves the sender; the send itself is shared with the speech bubbles');
-  const body = extractFunctionBody(src, 'async function sendHumanMessage(fromName, toName, text) {');
+  assert.match(handler, /return sendHumanMessage\(fromName, toName, text, opts\)/, 'the handler only resolves the sender; the send itself is shared with the speech bubbles');
+  const body = extractFunctionBody(src, 'async function sendHumanMessage(fromName, toName, text, opts) {');
   assert.match(body, /vortexiaClients\.get\(fromName\)/);
 });
 
@@ -1203,10 +1204,12 @@ test('renameWidget is a no-op when no window is open under the old name', () => 
 
 test('agent:deactivate calls the backend inactive endpoint and destroys the calling window', () => {
   const src = readSrc('main.js');
-  const body = extractFunctionBody(src, "ipcMain.handle('agent:deactivate', async (event, name) => {");
+  assert.match(src, /ipcMain\.handle\('agent:deactivate', async \(event, name\) => deactivateAgentWidget\(name, BrowserWindow\.fromWebContents\(event\.sender\)\)\)/,
+    'the door closes the window the request came from');
+  const body = extractFunctionBody(src, 'async function deactivateAgentWidget(name, win = windows.get(name)) {');
   assert.match(body, /\/agents\/\$\{encodeURIComponent\(name\)\}\/inactive/, 'must POST to the inactive endpoint');
   assert.match(body, /method:\s*'POST'/);
-  assert.match(body, /win\.destroy\(\)/, 'must destroy the window the request came from');
+  assert.match(body, /win\.destroy\(\)/, 'must destroy the widget window');
 });
 
 test('preload.js exposes deactivateAgent and the wake-enabled getter/setter', () => {
@@ -1572,16 +1575,17 @@ test('the mic target is not a window pref: DEFAULT_PREFS has no micTarget and th
 
 test('a dictation and the self-test are sent with NO target — the backend applies the agent\'s sessions.target', () => {
   const src = readSrc('renderer', 'widget.js');
-  assert.match(src, /window\.las\.sendToSelf\(agentName,\s*result\.text\)/);
+  assert.match(extractFunctionBody(src, 'function sendDictation(destination, text)'), /window\.las\.sendToSelf\(agentName,\s*text\)/, 'the face mic (no destination) names no session');
   assert.match(src, /window\.las\.sendToSelf\(agentName,\s*MIC_SELFTEST_PING\)/);
   assert.match(readSrc('preload.js'), /sendToSelf:\s*\(name,\s*text\)\s*=>\s*ipcRenderer\.invoke\('vortexia:send',\s*name,\s*text\)/);
 });
 
 test('vortexia:send goes through the backend /agents/send (source human, no session choice of its own) and falls back to a direct agent-inbox publish only when the backend is unreachable', () => {
-  const body = extractFunctionBody(readSrc('main.js'), 'async function sendHumanMessage(fromName, toName, text) {');
+  const body = extractFunctionBody(readSrc('main.js'), 'async function sendHumanMessage(fromName, toName, text, opts) {');
   assert.match(body, /\/agents\/send/);
   assert.match(body, /source: 'human'/);
-  assert.doesNotMatch(body, /all_sessions|session: target/, 'the window never picks a session — that is the agent\'s sessions.target, read by the backend');
+  assert.doesNotMatch(body, /all_sessions|session: target/, 'the window never picks a session on its own — that is the agent\'s sessions.target, read by the backend');
+  assert.match(body, /if \(opts && typeof opts\.session === 'string' && opts\.session\) body\.session = opts\.session;/, 'only an explicit pick (a society tile/row mic) names one session');
   const backendCall = body.indexOf('/agents/send');
   const direct = body.indexOf('client.sendConfirmed(toName, text');
   assert.ok(backendCall !== -1 && direct !== -1 && backendCall < direct, 'backend first, direct publish as the fallback');
@@ -1606,7 +1610,8 @@ test('the children button lists the sessions on click, hold or right-click; a ro
   assert.match(src, /childrenEl\.addEventListener\('contextmenu'/);
   const click = extractFunctionBody(src, "childrenEl.addEventListener('click', () => {");
   assert.match(click, /showChildrenMenu\(\)/);
-  const render = extractFunctionBody(src, 'function renderChildrenMenu()');
+  assert.match(extractFunctionBody(src, 'function renderChildrenMenu()'), /renderSessionRows\(body\)/);
+  const render = extractFunctionBody(src, 'function renderSessionRows(body)');
   assert.match(render, /setSessionsConfig\(\{\s*target:\s*row\.value\s*\}\)/);
   assert.match(render, /targetRows\(\)/);
   const rows = extractFunctionBody(src, 'function targetRows()');
@@ -1733,13 +1738,14 @@ test('children rows carry each session\'s title; the menu\'s refresh asks the in
   const src = readSrc('renderer', 'widget.js');
   assert.match(extractFunctionBody(src, 'function sessionLabel(s)'), /s\.title/);
   assert.match(extractFunctionBody(src, 'function targetRows()'), /sessionLabel\(/, 'every session row is labeled by sessionLabel (runtime · title)');
-  const render = extractFunctionBody(src, 'function renderChildrenMenu()');
+  const render = extractFunctionBody(src, 'function renderSessionRows(body)');
   assert.match(render, /Refresh descriptions/);
   assert.match(render, /intelligent !== false/, 'no refresh when only a shell is connected: a shell cannot describe itself');
   const ask = extractFunctionBody(src, 'async function requestSessionTitles(btn)');
   assert.match(ask, /window\.las\.requestSessionTitles\(agentName\)/);
   assert.match(ask, /reloadChildrenMenu\(\)/, 'titles arrive asynchronously: re-read the list');
-  assert.match(extractFunctionBody(src, 'async function reloadChildrenMenu()'), /refreshSessions\(\)/);
+  assert.match(extractFunctionBody(src, 'async function reloadChildrenMenu()'), /refreshSociety\(\)/);
+  assert.match(extractFunctionBody(src, 'async function refreshSociety()'), /refreshSessions\(\)/);
   assert.match(readSrc('preload.js'), /requestSessionTitles: \(name\) => ipcRenderer\.invoke\('agent:request-session-titles', name\)/);
   const ipc = extractFunctionBody(readSrc('main.js'), "ipcMain.handle('agent:request-session-titles', async (_event, name) => {");
   assert.match(ipc, /\/sessions\/titles\/request`/);

@@ -1119,7 +1119,7 @@ function setMicState(next) {
   micEl.classList.toggle('active', next === 'listening');
   micEl.classList.toggle('busy', next === 'transcribing');
   if (next === 'listening') {
-    micEl.title = 'Recording… click to stop';
+    micEl.title = `Recording${micDestination ? ` for ${micDestination.label}` : ''}… click to stop`;
   } else if (next === 'transcribing') {
     micEl.title = 'Transcribing…';
   } else {
@@ -1330,6 +1330,10 @@ async function stopRecordingAndTranscribe() {
   const recorder = mediaRecorder;
   mediaRecorder = null;
   if (!recorder) return;
+  // Where THIS recording goes was decided when it started (the face mic =
+  // this agent; a society tile/row mic = a friend or one session).
+  const destination = micDestination;
+  micDestination = null;
 
   window.las.log('info', 'mic', 'stop clicked — flushing recorder');
   const liveSt = stopLiveTranscription();
@@ -1394,7 +1398,7 @@ async function stopRecordingAndTranscribe() {
       // last-used one, all, or one — the children button) is the agent's
       // own `sessions.target` in its .las-agent.json, applied by the
       // backend when it routes the send (docs/adr/0005).
-      const sendResult = await window.las.sendToSelf(agentName, result.text);
+      const sendResult = await sendDictation(destination, result.text);
       if (sendResult && sendResult.ok) reportMic('sent', { text: result.text });
       if (!sendResult || !sendResult.ok) {
         window.las.log('error', 'mic', `failed to publish dictation to own inbox: ${sendResult && sendResult.error}`);
@@ -1524,11 +1528,26 @@ function stopLiveTranscription() {
   return st;
 }
 
-async function startRecording() {
+/**
+ * Where the recording in flight goes: null = this agent (its own
+ * `sessions.target` decides which session), or {to, session?, label} set by
+ * the society drawer's mic on a friend or on one session.
+ */
+let micDestination = null;
+
+function sendDictation(destination, text) {
+  if (!destination) return window.las.sendToSelf(agentName, text);
+  window.las.log('info', 'mic', `dictation to ${destination.label}`);
+  return window.las.sendHuman(destination.to, text, destination.session ? { session: destination.session } : null);
+}
+
+async function startRecording(destination = null) {
+  micDestination = destination;
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
+    micDestination = null;
     window.las.log('error', 'mic', `getUserMedia failed: ${err && err.message ? err.message : err}`);
     console.warn('[widget] mic: getUserMedia failed:', err);
     return;
@@ -1736,22 +1755,162 @@ async function showChildrenMenu() {
   childrenMenuOpen = true;
   childrenMenuEl.innerHTML = '<div class="open-row"><span class="open-label">Loading sessions…</span></div>';
   openDrawer('children');
-  await refreshSessions();
+  await refreshSociety();
   if (!childrenMenuOpen) return; // closed (or replaced) while loading
   syncMicTargetSelect();
   renderChildrenMenu();
   fitWindowToDrawer();
 }
 
+// ── the society drawer: sessions + las-friends, as a List or a 2D Panel ────
+//
+// One model (society-model.js: terminals, commands, friends as items with
+// the same two actions), two views (society-views.js). The tab choice and
+// where each tile was dropped are this window's prefs (childrenView,
+// societyLayout); the friends themselves are the agent's own `friends` in
+// its .las-agent.json, through the backend — what `las agent friends` edits.
+
+let knownFriends = [];
+
+/** Sessions, friends and every color the items need. */
+async function refreshSociety() {
+  const [, view] = await Promise.all([refreshSessions(), window.las.getFriends(agentName).catch(() => null)]);
+  knownFriends = view && Array.isArray(view.friends) ? view.friends : knownFriends;
+  await Promise.all(knownFriends.map((f) => getAgentColor(f.name)));
+}
+
+function societyItems() {
+  return window.LasSociety.buildItems({
+    agentName,
+    sessions: knownSessions,
+    friends: knownFriends,
+    colorOf: (name) => (name === agentName ? prefs.color : agentColorCache.get(name)),
+  });
+}
+
+function currentSocietyTab() {
+  return prefs.childrenView === 'panel' ? 'panel' : 'list';
+}
+
+function societyTabs() {
+  const bar = document.createElement('div');
+  bar.className = 'society-tabs';
+  for (const [tab, label] of [['list', '☰ List'], ['panel', '▦ Panel']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'society-tab' + (currentSocietyTab() === tab ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', async () => {
+      if (currentSocietyTab() === tab) return;
+      await persist({ childrenView: tab });
+      renderChildrenMenu();
+      fitWindowToDrawer();
+    });
+    bar.appendChild(b);
+  }
+  return bar;
+}
+
 function renderChildrenMenu() {
+  childrenMenuEl.innerHTML = '';
+  childrenMenuEl.appendChild(societyTabs());
+  const body = document.createElement('div');
+  body.className = 'society-body';
+  childrenMenuEl.appendChild(body);
+  if (currentSocietyTab() === 'panel') {
+    window.LasSocietyViews.renderPanel(body, societyItems(), prefs.societyLayout || {}, societyHandlers);
+    return;
+  }
+  renderSessionRows(body);
+  renderFriendRows(body);
+}
+
+/** What a society item's action does — shared by the List and the Panel. */
+const societyHandlers = {
+  onAction(item, action, button) {
+    if (action === 'mic') return societyMic(item);
+    if (action === 'exit') {
+      if (item.kind === 'friend') return closeFriendWidget(item);
+      return armConfirm(button, async () => {
+        await window.las.closeSession(agentName, item.sid);
+        await reloadChildrenMenu();
+      });
+    }
+    if (action === 'unlink') {
+      return armConfirm(button, async () => {
+        await window.las.linkFriend(agentName, item.agent, false);
+        await reloadChildrenMenu();
+      });
+    }
+  },
+  async onMove(key, pos) {
+    await persist({ societyLayout: { ...(prefs.societyLayout || {}), [key]: pos } });
+  },
+};
+
+/** The item's mic: start a dictation for it, or stop (and send) the one in flight. */
+function societyMic(item) {
+  if (micState === 'listening') return stopRecordingAndTranscribe();
+  if (micState !== 'idle') return;
+  const destination = item.kind === 'friend'
+    ? { to: item.agent, label: item.agent }
+    : { to: agentName, session: item.sid, label: `${item.runtime} session` };
+  startRecording(destination);
+}
+
+async function closeFriendWidget(item) {
+  const res = await window.las.closeAgentWidget(item.agent);
+  if (!res || res.ok === false) window.las.log('warn', 'friends', `could not close ${item.agent}'s widget: ${res && res.error}`);
+  await reloadChildrenMenu();
+}
+
+function renderFriendRows(body) {
+  const head = document.createElement('div');
+  head.className = 'open-row society-heading';
+  head.innerHTML = '<span class="open-label">las-friends</span>';
+  body.appendChild(head);
+  for (const item of societyItems().filter((i) => i.kind === 'friend')) {
+    body.appendChild(window.LasSocietyViews.listRow(item, societyHandlers));
+  }
+  body.appendChild(linkFriendRow());
+}
+
+/** "+ Link a friend…": every registered agent that is not this one and not linked yet. */
+function linkFriendRow() {
+  const row = document.createElement('div');
+  row.className = 'open-row';
+  const select = document.createElement('select');
+  select.className = 'society-link';
+  select.innerHTML = '<option value="">+ Link a friend…</option>';
+  select.addEventListener('focus', async () => {
+    if (select.options.length > 1) return;
+    const linked = new Set(knownFriends.map((f) => f.name));
+    for (const name of await window.las.listAgentNames()) {
+      if (name === agentName || linked.has(name)) continue;
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    }
+  }, { once: true });
+  select.addEventListener('change', async () => {
+    if (!select.value) return;
+    const view = await window.las.linkFriend(agentName, select.value, true);
+    if (!view) window.las.log('warn', 'friends', `could not link ${select.value} — is the backend up?`);
+    await reloadChildrenMenu();
+  });
+  row.appendChild(select);
+  return row;
+}
+
+function renderSessionRows(body) {
   const current = sessionsPolicy.target || 'default';
   const rows = targetRows();
-  childrenMenuEl.innerHTML = '';
   if (!knownSessions.length) {
     const hint = document.createElement('div');
     hint.className = 'open-row';
     hint.innerHTML = '<span class="open-label" style="opacity:.7">No connected sessions — open one with las claude / las codex / las shell / las &lt;command&gt;</span>';
-    childrenMenuEl.appendChild(hint);
+    body.appendChild(hint);
   }
   for (const row of rows) {
     const el = document.createElement('div');
@@ -1768,7 +1927,7 @@ function renderChildrenMenu() {
     });
     el.appendChild(btn);
     if (row.sid) el.append(...sessionActionButtons(row.sid, row.detached));
-    childrenMenuEl.appendChild(el);
+    body.appendChild(el);
   }
   if (knownSessions.some((s) => s.intelligent !== false)) {
     const refreshRow = document.createElement('div');
@@ -1780,13 +1939,13 @@ function renderChildrenMenu() {
     refreshBtn.title = 'Ask every Claude/Codex session what it is working on (a shell cannot describe itself)';
     refreshBtn.addEventListener('click', () => requestSessionTitles(refreshBtn));
     refreshRow.appendChild(refreshBtn);
-    childrenMenuEl.appendChild(refreshRow);
+    body.appendChild(refreshRow);
   }
 }
 
 /** Re-read the sessions and redraw the menu, if it is still open. */
 async function reloadChildrenMenu() {
-  await refreshSessions();
+  await refreshSociety();
   if (!childrenMenuOpen) return;
   syncMicTargetSelect();
   renderChildrenMenu();
@@ -1818,20 +1977,29 @@ function sessionActionButtons(sid, detached) {
     if (res && res.focused) closeChildrenMenu();
     else find.title = res && res.ok ? 'Look for the terminal titled "◉ … here ◉" (it rang its bell)' : 'Could not reach this terminal';
   });
-  let armed = null;
-  const close = iconButton('✕', 'Close this terminal', async () => {
-    if (!armed) {
-      close.classList.add('armed');
-      close.title = 'Click again to close it';
-      armed = setTimeout(() => { armed = null; close.classList.remove('armed'); close.title = 'Close this terminal'; }, CLOSE_CONFIRM_MS);
-      return;
-    }
-    clearTimeout(armed);
-    armed = null;
+  const close = iconButton('✕', 'Close this terminal', () => armConfirm(close, async () => {
     await window.las.closeSession(agentName, sid);
     await reloadChildrenMenu();
-  });
+  }));
   return [find, close];
+}
+
+/**
+ * Two-click confirm for anything destructive (close a terminal, unlink a
+ * friend): the first click arms `button` for CLOSE_CONFIRM_MS, a second
+ * click within it runs `onConfirm`. No modal dialog, no accidental kill.
+ */
+function armConfirm(button, onConfirm) {
+  if (!button._armed) {
+    const idleTitle = button.title;
+    button.classList.add('armed');
+    button.title = 'Click again to confirm';
+    button._armed = setTimeout(() => { button._armed = null; button.classList.remove('armed'); button.title = idleTitle; }, CLOSE_CONFIRM_MS);
+    return;
+  }
+  clearTimeout(button._armed);
+  button._armed = null;
+  return onConfirm();
 }
 
 /**

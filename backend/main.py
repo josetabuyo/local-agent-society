@@ -26,7 +26,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
+from cli.agent_config import (FRIENDS_KEY, friends_of, with_friend, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
                               descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
                               write_agent_config)
 from cli.path_utils import agent_config_path
@@ -847,6 +847,65 @@ def patch_agent_config(name: str, patch: dict):
             raise HTTPException(status_code=409, detail=f"{exc} — fix it by hand, then retry")
         write_agent_config(file, merge_config_patch(current, patch))
     return _config_view(name)
+
+
+# ── las-friends: linked agents, declared in each agent's own file ───────────
+
+def _friends_view(name: str) -> dict:
+    """`name`'s friends, each with what a list/panel needs: registered?, widget open?, how many sessions, mutual?"""
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    with _inactive_lock:
+        inactive = load_json(INACTIVE_FILE, [])
+    rows = []
+    with _sessions_lock:
+        for friend in friends_of(_agent_config(name, registry)):
+            known = friend in registry
+            rows.append({
+                "name": friend,
+                "registered": known,
+                "inactive": friend in inactive,
+                "sessions": len(_load_sessions(friend)) if known else 0,
+                "mutual": known and name in friends_of(_agent_config(friend, registry)),
+            })
+    return {"agent": name, "friends": rows}
+
+
+@app.get("/agents/{name}/friends")
+def list_friends(name: str):
+    """The agents `name` is linked to (`friends` in its .las-agent.json), in the order they were added."""
+    return _friends_view(name)
+
+
+def _link_friend(name: str, friend: str, linked: bool) -> dict:
+    registry = load_json(REGISTRY_FILE, {})
+    file = _agent_config_file(name, registry)
+    if file is None:
+        raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
+    if friend == name:
+        raise HTTPException(status_code=422, detail="an agent can't be its own friend")
+    if linked and friend not in registry:
+        raise HTTPException(status_code=404, detail=f"no agent named {friend!r} is registered")
+    with _sessions_lock:
+        try:
+            current = read_agent_config(file, strict=True)
+        except BrokenAgentConfig as exc:
+            raise HTTPException(status_code=409, detail=f"{exc} — fix it by hand, then retry")
+        write_agent_config(file, merge_config_patch(current, {FRIENDS_KEY: with_friend(current, friend, linked=linked)}))
+    return _friends_view(name)
+
+
+@app.put("/agents/{name}/friends/{friend}")
+def add_friend(name: str, friend: str):
+    """Link `friend` to `name` (one direction; it is mutual when `friend` links back). Idempotent."""
+    return _link_friend(name, friend, True)
+
+
+@app.delete("/agents/{name}/friends/{friend}")
+def remove_friend(name: str, friend: str):
+    """Unlink `friend` from `name` — only `name`'s side. Idempotent."""
+    return _link_friend(name, friend, False)
 
 
 def _session_summaries(name: str, sessions: dict, policy: dict | None = None) -> list:

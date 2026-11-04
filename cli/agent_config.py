@@ -253,3 +253,39 @@ def read_agent_config(path: Path, *, strict: bool = False) -> dict:
 
 def write_agent_config(path: Path, data: dict) -> None:
     Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+# ── las-friends: the agents this one is linked to ──────────────────────────
+#
+#     "friends": ["Vortexia", "Teli"]
+#
+# A plain list of agent names, in the order they were added. Directed, like a
+# follow: A listing B says nothing about B listing A — when both do, the link
+# is mutual. The widget's children drawer shows them next to the sessions
+# (list tab and 2D panel tab) and an agent like a coach can message them all.
+
+FRIENDS_KEY = "friends"
+
+
+def friends_of(config: dict | None) -> list:
+    """The declared friends of `config`: unique non-empty names, in file order, never the agent itself.
+
+    Tolerant of a hand-edited file — anything that is not a string is ignored."""
+    config = _dict(config)
+    declared = config.get(FRIENDS_KEY)
+    if not isinstance(declared, list):
+        return []
+    own = config.get("name")
+    out = []
+    for item in declared:
+        if isinstance(item, str) and item.strip() and item.strip() != own and item.strip() not in out:
+            out.append(item.strip())
+    return out
+
+
+def with_friend(config: dict | None, friend: str, *, linked: bool = True) -> list:
+    """The friends list of `config` after adding (`linked`) or removing `friend` — order kept, new ones appended."""
+    current = friends_of(config)
+    if linked:
+        return current if friend in current else current + [friend]
+    return [f for f in current if f != friend]
