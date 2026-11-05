@@ -52,6 +52,7 @@ def app(tmp_path, monkeypatch):
         monkeypatch.setattr(main, attr, tmp_path / file)
     monkeypatch.setattr(main, "_vortexia_publish", lambda *a, **k: True)
     monkeypatch.setattr(main, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(main, "_read_relay_directory", lambda timeout=0.7: [])
     client = TestClient(main.app)
     for name in ("Monkey", "Vortexia", "Teli"):
         folder = tmp_path / name
@@ -93,7 +94,7 @@ def test_friend_rows_carry_widget_and_session_state(app):
     client.post("/agents/Vortexia/inactive")
     client.post("/agents/Vortexia/sessions", json={"sid": "claude-1", "runtime": "claude", "pid": 1, "cwd": "/x"})
     row = client.get("/agents/Monkey/friends").json()["friends"][0]
-    assert row == {"name": "Vortexia", "registered": True, "inactive": True, "sessions": 1, "mutual": False}
+    assert row == {"name": "Vortexia", "registered": True, "inactive": True, "sessions": 1, "mutual": False, "color": None}
 
 
 def test_link_refuses_self_unknown_agents_and_a_broken_file(app):
@@ -156,7 +157,7 @@ def test_a_friend_on_another_machine_is_linked_and_listed_as_remote(app, monkeyp
     monkeypatch.setenv("VORTEXIA_ENV_NAME", "ba-mac")
     monkeypatch.setenv("VORTEXIA_RELAY_ENV_NAMES", "ba-mac,uy-mac")
     view = client.put("/agents/Monkey/friends/coach@uy-mac").json()
-    assert view["friends"] == [{"name": "coach@uy-mac", "registered": True, "remote": "uy-mac", "inactive": False, "sessions": None, "mutual": None}]
+    assert view["friends"] == [{"name": "coach@uy-mac", "registered": True, "remote": "uy-mac", "inactive": False, "sessions": None, "mutual": None, "color": None}]
     assert _file(tmp_path, "Monkey")["friends"] == ["coach@uy-mac"]
     assert client.delete("/agents/Monkey/friends/coach@uy-mac").json()["friends"] == []
 
@@ -188,3 +189,39 @@ def test_send_friends_reaches_remote_friends_by_their_relay_address(monkeypatch)
     result = CliRunner().invoke(agents_mod.send, ["hola", "--to", "RelayRobotics", "--friends", "--from", "RelayRobotics"])
     assert result.exit_code == 0, result.output
     assert [d["to"] for d in sent] == ["Vortexia", "coach@uy-mac"]
+
+
+# ── a friend's color: its own tone everywhere, this Mac or another ──────────
+
+def test_a_local_friend_carries_the_color_in_its_own_file(app):
+    _main, client, tmp_path = app
+    assert client.patch("/agents/Vortexia/config", json={"color": "#3366cc"}).status_code == 200
+    assert _file(tmp_path, "Vortexia")["color"] == "#3366cc"
+    client.put("/agents/Monkey/friends/Vortexia")
+    client.put("/agents/Monkey/friends/Teli")
+    colors = {f["name"]: f["color"] for f in client.get("/agents/Monkey/friends").json()["friends"]}
+    assert colors == {"Vortexia": "#3366cc", "Teli": None}, "no color written yet -> None, never a made-up default"
+
+
+def test_a_config_color_must_be_hex(app):
+    _main, client, _tmp = app
+    for bad in ("blue", "#12345", "#gggggg", 7):
+        assert client.patch("/agents/Vortexia/config", json={"color": bad}).status_code == 422, bad
+
+
+def test_a_remote_friend_gets_its_color_from_the_relay_directory(app, monkeypatch):
+    main, client, _tmp = app
+    monkeypatch.setenv("VORTEXIA_ENV_NAME", "ba-mac")
+    monkeypatch.setenv("VORTEXIA_RELAY_ENV_NAMES", "ba-mac,uy-mac")
+    directory = [
+        {"envName": "uy-mac", "agentName": "coach", "scopeText": "x", "color": "#aa5500"},
+        {"envName": "ba-mac", "agentName": "billing", "scopeText": "x", "color": "#000000"},
+        {"envName": "uy-mac", "agentName": "billing", "scopeText": "x", "color": "not-a-color"},
+    ]
+    monkeypatch.setattr(main, "_read_relay_directory", lambda timeout=0.7: directory)
+    main._relay_directory_cache.update(at=0.0, entries=[])
+    for friend in ("coach@uy-mac", "billing@uy-mac", "sim@uy-mac"):
+        client.put(f"/agents/Monkey/friends/{friend}")
+    colors = {f["name"]: f["color"] for f in client.get("/agents/Monkey/friends").json()["friends"]}
+    assert colors == {"coach@uy-mac": "#aa5500", "billing@uy-mac": None, "sim@uy-mac": None}, \
+        "matched on name AND env; a malformed color is dropped; an agent the directory lacks has none"

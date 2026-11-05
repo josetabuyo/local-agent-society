@@ -836,6 +836,8 @@ def patch_agent_config(name: str, patch: dict):
         raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
     if "name" in patch:
         raise HTTPException(status_code=422, detail="rename with `las agent rename`, not a config patch")
+    if "color" in patch and not _is_hex_color(patch["color"]):
+        raise HTTPException(status_code=422, detail="color must be #rrggbb")
     sessions = patch.get("sessions")
     if sessions is not None and (not isinstance(sessions, dict) or ("target" in sessions and not (isinstance(sessions["target"], str) and sessions["target"]))):
         raise HTTPException(status_code=422, detail="sessions.target must be a non-empty string: default, all, a runtime or a session id")
@@ -865,19 +867,87 @@ def _friends_view(name: str) -> dict:
             if env:
                 # Another machine (Name@env): reached over vortex-relay like any
                 # `send --to Name@env`. Its sessions, widget and friends live
-                # over there — unknown here, so None, never a guess.
+                # over there — unknown here, so None, never a guess. Its color
+                # comes from vortex-relay's directory, which carries each
+                # agent's .las-agent.json `color` (None until it does).
                 rows.append({"name": friend, "registered": True, "remote": env,
-                             "inactive": False, "sessions": None, "mutual": None})
+                             "inactive": False, "sessions": None, "mutual": None,
+                             "color": _remote_color(friend.partition("@")[0], env)})
                 continue
             known = friend in registry
+            config = _agent_config(friend, registry) if known else {}
             rows.append({
                 "name": friend,
                 "registered": known,
                 "inactive": friend in inactive,
                 "sessions": len(_load_sessions(friend)) if known else 0,
-                "mutual": known and name in friends_of(_agent_config(friend, registry)),
+                "mutual": known and name in friends_of(config),
+                "color": config.get("color") if _is_hex_color(config.get("color")) else None,
             })
     return {"agent": name, "friends": rows}
+
+
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _is_hex_color(value) -> bool:
+    return isinstance(value, str) and bool(_HEX_COLOR.match(value))
+
+
+# vortex-relay's merged, all-environments directory, as vortexia publishes it
+# retained on the local broker — the only place this Mac learns anything
+# about an agent on another machine. Read with a throwaway client and kept
+# for a few seconds: the friends panel asks on every refresh.
+RELAY_DIRECTORY_TOPIC = "vortex-relay/directory"
+_RELAY_DIRECTORY_TTL = 15.0
+_relay_directory_cache: dict = {"at": 0.0, "entries": []}
+_relay_directory_lock = threading.Lock()
+
+
+def _read_relay_directory(timeout: float = 0.7) -> list:
+    """The retained `vortex-relay/directory` entries, or [] when none is published (or the broker is down)."""
+    got: list = []
+    try:
+        import paho.mqtt.client as mqtt
+        client = mqtt.Client(client_id=f"las-directory-{uuid.uuid4().hex[:8]}", clean_session=True, protocol=mqtt.MQTTv311)
+        client.on_connect = lambda c, *_a: c.subscribe(RELAY_DIRECTORY_TOPIC, qos=0)
+
+        def _on_message(_c, _u, msg):
+            try:
+                data = json.loads(msg.payload.decode("utf-8"))
+                got.append(data.get("entries") if isinstance(data, dict) else None)
+            except (ValueError, UnicodeDecodeError):
+                got.append(None)
+
+        client.on_message = _on_message
+        client.connect("localhost", _vortexia_mqtt_port(), keepalive=10)
+        client.loop_start()
+        deadline = time.time() + timeout
+        while not got and time.time() < deadline:
+            time.sleep(0.02)
+        client.loop_stop()
+        client.disconnect()
+    except Exception as exc:
+        logger.debug(f"[relay-directory] read failed: {exc}")
+        return []
+    entries = got[0] if got else None
+    return entries if isinstance(entries, list) else []
+
+
+def _relay_directory() -> list:
+    with _relay_directory_lock:
+        if time.time() - _relay_directory_cache["at"] > _RELAY_DIRECTORY_TTL:
+            _relay_directory_cache.update(at=time.time(), entries=_read_relay_directory())
+        return _relay_directory_cache["entries"]
+
+
+def _remote_color(agent: str, env: str) -> str | None:
+    """`agent@env`'s widget color as vortex-relay's directory carries it, or None."""
+    for entry in _relay_directory():
+        if isinstance(entry, dict) and entry.get("agentName") == agent and entry.get("envName") == env:
+            color = entry.get("color")
+            return color if _is_hex_color(color) else None
+    return None
 
 
 @app.get("/agents/{name}/friends")

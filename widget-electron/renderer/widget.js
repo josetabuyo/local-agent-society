@@ -2191,7 +2191,18 @@ const friendMuted = new Map();
 async function refreshSociety() {
   const [, view] = await Promise.all([refreshSessions(), window.las.getFriends(agentName).catch(() => null)]);
   knownFriends = view && Array.isArray(view.friends) ? view.friends : knownFriends;
-  await Promise.all(knownFriends.flatMap((f) => [getAgentColor(f.name), refreshFriendMute(f.name)]));
+  await Promise.all(knownFriends.flatMap((f) => [friendColor(f), refreshFriendMute(f.name)]));
+}
+
+// A friend's own tone: the color its .las-agent.json carries (written by its
+// widget, wherever it runs — a friend on another Mac arrives with it through
+// vortex-relay's directory), else what this Mac's widget store knows.
+function friendColor(f) {
+  if (/^#[0-9a-fA-F]{6}$/.test(f.color || '')) {
+    agentColorCache.set(f.name, f.color);
+    return f.color;
+  }
+  return getAgentColor(f.name);
 }
 
 async function refreshFriendMute(name) {

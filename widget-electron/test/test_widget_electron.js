@@ -1910,3 +1910,44 @@ test('drawer splitter: drag trades height inside the window, persists per drawer
   assert.match(css, /\.drawer-splitter \{[^}]*height: 8px/, 'CSS height matches DRAWER_SPLITTER_PX');
   assert.match(src, /const DRAWER_SPLITTER_PX = 8;/);
 });
+
+// ── a friend's color: its own tone, from its .las-agent.json ───────────────
+
+test('a friend tile is painted with the color its agent file carries, not the green default', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const fn = extractFunction(src, 'function friendColor(f)');
+  const make = () => {
+    const cache = new Map();
+    const asked = [];
+    const friendColor = new Function('agentColorCache', 'getAgentColor', `${fn}; return friendColor;`)(cache, (n) => (asked.push(n), '#90c060'));
+    return { friendColor, cache, asked };
+  };
+  const a = make();
+  assert.equal(a.friendColor({ name: 'coach@uy-mac', color: '#aa5500' }), '#aa5500');
+  assert.equal(a.cache.get('coach@uy-mac'), '#aa5500', 'societyItems reads colors from the cache');
+  assert.deepEqual(a.asked, [], 'a carried color never falls back to the local store');
+  const b = make();
+  b.friendColor({ name: 'Teli', color: null });
+  b.friendColor({ name: 'Bad', color: 'red' });
+  assert.deepEqual(b.asked, ['Teli', 'Bad'], 'no (or a malformed) color: this Mac\'s widget store, as before');
+  assert.match(extractFunctionBody(src, 'async function refreshSociety()'), /friendColor\(f\)/);
+});
+
+test('the widget keeps a copy of its color in the agent\'s .las-agent.json, so other Macs can see it', () => {
+  const main = readSrc('main.js');
+  assert.match(extractFunctionBody(main, 'function setPrefs(name, patch)'), /mirrorColorToConfig\(name, patch\.color\)/);
+  assert.match(main.slice(main.indexOf('function createWidgetWindow('), main.indexOf('function createWidgetWindow(') + 1500), /const prefs = getPrefs\(name\);\s*mirrorColorToConfig\(name, prefs\.color\)/, 'backfills agents whose color predates this');
+  const mirror = extractFunctionBody(main, 'async function mirrorColorToConfig(name, color)');
+  assert.match(mirror, /method: 'PATCH'/);
+  assert.match(mirror, /JSON\.stringify\(\{ color \}\)/);
+  assert.match(mirror, /config\.color === color\)\) return/, 'no write when the file already says so');
+});
+
+test('at launch the app writes every stored agent color to its file, open widget or not', () => {
+  const main = readSrc('main.js');
+  const all = extractFunctionBody(main, 'function mirrorAllColors()');
+  assert.match(all, /store\.get\('agents'\)/);
+  assert.match(all, /mirrorColorToConfig\(name, p\.color\)/);
+  const ready = main.slice(main.indexOf('app.whenReady().then(async () => {'));
+  assert.match(ready.slice(0, 3000), /mirrorAllColors\(\);\s*setTimeout\(mirrorAllColors, 30000\)/);
+});

@@ -397,6 +397,7 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
     setPrefs(name, { color: randomWidgetColor() });
   }
   const prefs = getPrefs(name);
+  mirrorColorToConfig(name, prefs.color);
   // Position/size: like Chrome remembering where a window sat before it was
   // closed, reuse the last bounds this agent's widget was left at (see
   // getSavedBounds/saveBounds below). Only first-ever open (or a saved spot
@@ -660,7 +661,37 @@ function getPrefs(name) {
 function setPrefs(name, patch) {
   const next = { ...getPrefs(name), ...patch };
   store.set(`agents.${name}`, next);
+  if (typeof patch.color === 'string') mirrorColorToConfig(name, patch.color);
   return next;
+}
+
+function mirrorAllColors() {
+  for (const [name, p] of Object.entries(store.get('agents') || {})) {
+    if (p && p.color) mirrorColorToConfig(name, p.color);
+  }
+}
+
+// The widget color is this Mac's pref, but other Macs only ever see the
+// agent's .las-agent.json (vortex-relay's roster reads it): keep a copy of
+// the color there, `color`, so a friend on another machine paints this agent
+// in its real tone. Best-effort — a missing backend just retries next change.
+async function mirrorColorToConfig(name, color) {
+  if (!/^#[0-9a-fA-F]{6}$/.test(color || '')) return;
+  try {
+    const url = `${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`;
+    const cur = await fetch(url);
+    if (!cur.ok) return;
+    const view = await cur.json();
+    if (!view.file || (view.config && view.config.color === color)) return;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ color }),
+    });
+    if (!res.ok) log.warn('color', `${name}: could not write color to .las-agent.json (HTTP ${res.status})`);
+  } catch {
+    // backend down: the next color change or widget open writes it
+  }
 }
 
 ipcMain.handle('prefs:get', (_event, name) => getPrefs(name));
@@ -2363,6 +2394,13 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === 'media');
   });
+
+  // Every agent this Mac ever gave a color, not only the widgets open now:
+  // after a `las update` the friends of these agents on other Macs see the
+  // real tone without anyone opening anything. Again later, for a backend
+  // that came up after this app.
+  mirrorAllColors();
+  setTimeout(mirrorAllColors, 30000);
 
   createTray({ registryUrl: REGISTRY_URL, onSelectAgent: openWidget, onReload: () => reloadWidgets(), onQuit: () => app.quit() });
   bubbles = createBubbles({ sources: WIDGET_SOURCES, log, onAction: onBubbleAction });
