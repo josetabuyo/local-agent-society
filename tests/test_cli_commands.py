@@ -177,3 +177,14 @@ def test_queue_ls_backend_down(monkeypatch):
 
     assert result.exit_code != 0
     assert "backend not running" in result.output
+
+
+def test_las_version_prints_the_release_and_commit():
+    """`las --version` (asked for from another machine) prints pyproject's version and the short commit."""
+    from click.testing import CliRunner
+    from cli.main import cli
+    from cli import updater
+    for flag in ("--version", "-V"):
+        result = CliRunner().invoke(cli, [flag])
+        assert result.exit_code == 0, result.output
+        assert result.output.strip() == f"las v{updater.version()} ({updater.head()[:7]})"

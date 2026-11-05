@@ -33,7 +33,19 @@ class LasGroup(click.Group):
         return connected
 
 
+def _print_version(ctx, _param, value):
+    # The version a remote machine runs, for diagnosing it from afar (same
+    # numbers `las update` prints): pyproject version + commit.
+    if not value or ctx.resilient_parsing:
+        return
+    from cli import updater
+    click.echo(f"las v{updater.version()} ({updater.head()[:7]})")
+    ctx.exit()
+
+
 @click.group(cls=LasGroup)
+@click.option("--version", "-V", is_flag=True, expose_value=False, is_eager=True, callback=_print_version,
+              help="Show the installed version and commit.")
 def cli():
     """Local Agent Society — CLI.
 
