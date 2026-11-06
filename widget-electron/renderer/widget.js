@@ -2432,6 +2432,29 @@ async function reloadChildrenMenu() {
   fitWindowToDrawer();
 }
 
+// An open panel keeps up with its friends: a color (or session count) that
+// arrives later — another Mac updating, a friend recoloring its widget —
+// shows without closing and reopening. Redraws only when something changed,
+// and never under a pressed pointer (a tile being dragged stays put).
+const SOCIETY_REFRESH_MS = 15000;
+let pointerIsDown = false;
+document.addEventListener('pointerdown', () => { pointerIsDown = true; }, true);
+document.addEventListener('pointerup', () => { pointerIsDown = false; }, true);
+
+function societySignature() {
+  return JSON.stringify(societyItems().map((i) => [i.key, i.label, i.detail, i.color, i.muted, i.widgetClosed]));
+}
+
+async function refreshOpenSociety() {
+  if (!childrenMenuOpen || pointerIsDown) return;
+  const before = societySignature();
+  await refreshSociety();
+  if (!childrenMenuOpen || pointerIsDown || societySignature() === before) return;
+  renderChildrenMenu();
+  fitWindowToDrawer();
+}
+setInterval(() => { refreshOpenSociety().catch(() => {}); }, SOCIETY_REFRESH_MS);
+
 const CLOSE_CONFIRM_MS = 3000;
 
 function iconButton(text, title, onClick) {
