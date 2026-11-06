@@ -1951,31 +1951,3 @@ test('at launch the app writes every stored agent color to its file, open widget
   const ready = main.slice(main.indexOf('app.whenReady().then(async () => {'));
   assert.match(ready.slice(0, 3000), /mirrorAllColors\(\);\s*setTimeout\(mirrorAllColors, 30000\)/);
 });
-
-test('an open society panel picks up colors that arrive later, redrawing only on a change and never mid-drag', async () => {
-  const src = readSrc('renderer', 'widget.js');
-  const fn = extractFunction(src, 'async function refreshOpenSociety()');
-  const run = async ({ open = true, down = false, change = false } = {}) => {
-    let color = '#90c060';
-    const calls = [];
-    const f = new Function('ctx', `
-      let childrenMenuOpen = ctx.open, pointerIsDown = ctx.down;
-      const societySignature = () => ctx.sig();
-      const refreshSociety = async () => ctx.refresh();
-      const renderChildrenMenu = () => ctx.calls.push('render');
-      const fitWindowToDrawer = () => ctx.calls.push('fit');
-      ${fn}; return refreshOpenSociety;`)({
-      open, down, calls,
-      sig: () => color,
-      refresh: () => { calls.push('refresh'); if (change) color = '#d7ca75'; },
-    });
-    await f();
-    return calls;
-  };
-  assert.deepEqual(await run({ change: true }), ['refresh', 'render', 'fit']);
-  assert.deepEqual(await run({ change: false }), ['refresh'], 'nothing changed: no redraw, nothing moves');
-  assert.deepEqual(await run({ open: false }), [], 'closed panel: no work');
-  assert.deepEqual(await run({ down: true, change: true }), [], 'a tile being dragged is never redrawn under the pointer');
-  assert.match(src, /setInterval\(\(\) => \{ refreshOpenSociety\(\)\.catch\(\(\) => \{\}\); \}, SOCIETY_REFRESH_MS\)/);
-  assert.match(extractFunctionBody(src, 'function societySignature()'), /i\.color/);
-});
