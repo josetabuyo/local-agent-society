@@ -967,12 +967,17 @@ ipcMain.on('window:set-expanded', (event, expanded, height) => {
  * is kept, never snapped back to where it was when the drawer opened.
  */
 function collapseDrawer(win, compactHeight = null) {
-  if (!expandedWindows.has(win)) return;
-  expandedWindows.delete(win);
-  const prev = collapsedBounds.get(win);
-  if (!prev) return;
+  const given = Number.isFinite(compactHeight) && compactHeight > 0 ? Math.round(compactHeight) : null;
+  const wasExpanded = expandedWindows.delete(win);
+  // The renderer's word is final: a close it sends with the face height
+  // always lands, even when main lost track of the expand — otherwise the
+  // window stays tall and the next open measures that as the face and grows
+  // again, every time.
+  const prev = wasExpanded ? collapsedBounds.get(win) : null;
+  const h = given || (prev && prev.height);
+  if (!h) return;
   const b = win.getBounds();
-  const h = Number.isFinite(compactHeight) && compactHeight > 0 ? Math.round(compactHeight) : prev.height;
+  if (b.height !== h) log.info('drawer', `${win.agentName}: collapse ${b.height}px → ${h}px${wasExpanded ? '' : ' (was not tracked as expanded)'}`);
   win.setBounds(iconSafe(win, { x: b.x, y: b.y, width: b.width, height: h }));
 }
 

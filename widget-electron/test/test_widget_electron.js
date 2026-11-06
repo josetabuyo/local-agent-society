@@ -1453,10 +1453,38 @@ test('occlusion-expanded name fill is solid black with no text-stroke, per expli
   assert.match(block, /-webkit-text-stroke:\s*0/);
 });
 
-test('the door button always stays visible (both compact and settings-open) while every other face button hides in settings-open', () => {
+test('an open drawer hides no face button: settings and the society panel leave every icon where it was', () => {
   const css = readSrc('renderer', 'widget.css');
-  assert.match(css, /\.widget\.settings-open \.buttonbar \.facebtn:not\(#gear\)\s*\{\s*display:\s*none;/);
-  assert.doesNotMatch(css, /\.widget\.settings-open[^{]*door[^{]*\{\s*display:\s*none/);
+  assert.doesNotMatch(css, /\.settings-open[^{]*\{\s*display:\s*none/);
+  assert.doesNotMatch(css, /\.widget\.settings-open \.buttonbar/);
+});
+
+test('the society panel works like settings: only its own button closes it, and the button shows it is open', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const outside = src.slice(src.indexOf("document.addEventListener('mousedown', (e) => {\n  if (!childrenMenuOpen) return;"));
+  const body = extractFunctionBody(outside, "document.addEventListener('mousedown', (e) => {");
+  assert.doesNotMatch(body, /closeChildrenMenu|closeDrawer/, 'a click elsewhere only closes a tile\'s floating bar, never the panel');
+  assert.match(extractFunctionBody(src, 'async function showChildrenMenu()'), /childrenEl\.classList\.add\('active'\)/);
+  assert.match(extractFunctionBody(src, 'function closeChildrenMenu()'), /childrenEl\.classList\.remove\('active'\)/);
+  assert.doesNotMatch(src, /widgetEl\.addEventListener\('mouseleave'[\s\S]{0,800}closeChildrenMenu/, 'leaving the widget never closes it');
+});
+
+test('closing a drawer always brings the window back to the face height, even when main lost track of the expand', () => {
+  const main = readSrc('main.js');
+  const fn = extractFunction(main, 'function collapseDrawer(win, compactHeight = null)');
+  const run = (tracked, compact, height = 900) => {
+    const set = [];
+    const expandedWindows = new Set(tracked ? ['w'] : []);
+    const win = { agentName: 'A', getBounds: () => ({ x: 1, y: 2, width: 300, height }), setBounds: (b) => set.push(b) };
+    const collapseDrawer = new Function('expandedWindows', 'collapsedBounds', 'iconSafe', 'log', `${fn}; return collapseDrawer;`)(
+      { delete: (w) => expandedWindows.delete(w === win ? 'w' : w) }, { get: () => ({ height: 250 }) }, (_w, b) => b, { info() {} });
+    collapseDrawer(win, compact);
+    return set;
+  };
+  assert.deepEqual(run(true, 260), [{ x: 1, y: 2, width: 300, height: 260 }]);
+  assert.deepEqual(run(false, 260), [{ x: 1, y: 2, width: 300, height: 260 }], 'untracked: the renderer\'s face height still lands (the old early return left it tall, and it grew on every reopen)');
+  assert.deepEqual(run(true, null), [{ x: 1, y: 2, width: 300, height: 250 }], 'no height given: the bounds from before the expand');
+  assert.deepEqual(run(false, null), [], 'nothing known: nothing touched');
 });
 
 test('restore-after-visible delay is a single named constant, easy to retune to whatever value is currently set', () => {

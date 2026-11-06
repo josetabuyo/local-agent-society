@@ -414,12 +414,8 @@ html, body {
   padding: 0;
 }
 
-/* Settings mode: only gear (pressed, via .active) and the door stay visible —
- * every other face button hides. The real name/log stay visible above (see
- * .settings-inline below), unlike the old full-screen settings overlay. */
-.widget.settings-open .buttonbar .facebtn:not(#gear) {
-  display: none;
-}
+/* A drawer open (settings or the society panel) hides nothing: every face
+ * button stays where it was, the drawer's own button shows .active. */
 
 .facebtn:hover {
   background: rgba(0, 0, 0, 0.22);

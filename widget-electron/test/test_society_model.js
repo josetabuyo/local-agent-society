@@ -228,7 +228,7 @@ test('wiring: the tile bar floats above the tile, and every action is handled', 
 test('wiring: pressing a button in the floating bar does not close the drawer under it; a hold opens the bar', () => {
   const widget = read('renderer', 'widget.js');
   // The drawer's outside-mousedown used to close drawer + popup before the click landed: no button did anything.
-  assert.match(widget, /childrenEl\.contains\(e\.target\) \|\| e\.target\.closest\('\.tile-popup'\)\) return;/);
+  assert.match(widget, /if \(e\.target\.closest\('\.tile-popup'\) \|\| e\.target\.closest\('\.society-tile'\)\) return;/);
   const views = read('renderer', 'society-views.js');
   assert.match(views, /LONG_PRESS_MS = 600/);
   assert.match(views, /hold = setTimeout\([\s\S]{0,120}openTilePopup\(t, item, handlers\)/);

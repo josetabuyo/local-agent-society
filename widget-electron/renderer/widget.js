@@ -481,6 +481,7 @@ function openDrawer(name) {
     chromeHeight = naturalCompactHeight - logEl.clientHeight;
   }
   activeDrawer = name;
+  window.las.log('info', 'drawer', `${agentName}: open ${name} — face ${compactHeight}px (window ${window.innerHeight}px)`);
   el.classList.remove('hidden');
   drawerSplitterEl.classList.remove('hidden');
   applyDrawerSplit(name);
@@ -513,6 +514,7 @@ function closeDrawer(name) {
   // Only the drawer goes: the face comes back at the height it has now (a splitter drag kept), wherever the widget is now.
   const face = compactHeight;
   compactHeight = null;
+  window.las.log('info', 'drawer', `${agentName}: close ${name} — back to ${face}px (window ${window.innerHeight}px)`);
   window.las.setExpanded(false, face);
 }
 
@@ -2156,16 +2158,22 @@ async function setSessionsConfig(patch) {
   syncMicTargetSelect();
 }
 
-registerDrawer('children', childrenMenuEl, () => { childrenMenuOpen = false; });
+registerDrawer('children', childrenMenuEl, () => {
+  childrenMenuOpen = false;
+  childrenEl.classList.remove('active');
+  window.LasSocietyViews.closeTilePopup();
+});
 
 function closeChildrenMenu() {
   childrenMenuOpen = false;
+  childrenEl.classList.remove('active');
   window.LasSocietyViews.closeTilePopup();
   closeDrawer('children');
 }
 
 async function showChildrenMenu() {
   childrenMenuOpen = true;
+  childrenEl.classList.add('active');
   childrenMenuEl.innerHTML = '<div class="open-row"><span class="open-label">Loading sessions…</span></div>';
   openDrawer('children');
   await refreshSociety();
@@ -2536,11 +2544,13 @@ childrenEl.addEventListener('contextmenu', (e) => {
   if (childrenMenuOpen) closeChildrenMenu();
   else showChildrenMenu();
 });
+// Like settings: the panel stays open until its own button closes it (or
+// another drawer replaces it) — clicking elsewhere in the widget, or leaving
+// it, never closes it. Only a tile's floating bar closes on a click elsewhere.
 document.addEventListener('mousedown', (e) => {
   if (!childrenMenuOpen) return;
-  // The tile popup floats outside the drawer (society-views.js) but belongs to it.
-  if (childrenMenuEl.contains(e.target) || childrenEl.contains(e.target) || e.target.closest('.tile-popup')) return;
-  closeChildrenMenu();
+  if (e.target.closest('.tile-popup') || e.target.closest('.society-tile')) return;
+  window.LasSocietyViews.closeTilePopup();
 });
 
 // -- open: a NEW terminal window, or the folder, at this agent's path -------
