@@ -896,49 +896,51 @@ def _is_hex_color(value) -> bool:
 
 # vortex-relay's merged, all-environments directory, as vortexia publishes it
 # retained on the local broker — the only place this Mac learns anything
-# about an agent on another machine. Read with a throwaway client and kept
-# for a few seconds: the friends panel asks on every refresh.
+# about an agent on another machine. One long-lived subscriber keeps the
+# latest copy in memory, so the friends panel never waits on the broker:
+# answering is a dictionary read.
 RELAY_DIRECTORY_TOPIC = "vortex-relay/directory"
-_RELAY_DIRECTORY_TTL = 15.0
-_relay_directory_cache: dict = {"at": 0.0, "entries": []}
+_relay_directory_cache: dict = {"entries": []}
+_relay_directory_watcher: dict = {"client": None}
 _relay_directory_lock = threading.Lock()
 
 
-def _read_relay_directory(timeout: float = 0.7) -> list:
-    """The retained `vortex-relay/directory` entries, or [] when none is published (or the broker is down)."""
-    got: list = []
+def _on_relay_directory(payload: bytes) -> None:
     try:
-        import paho.mqtt.client as mqtt
-        client = mqtt.Client(client_id=f"las-directory-{uuid.uuid4().hex[:8]}", clean_session=True, protocol=mqtt.MQTTv311)
-        client.on_connect = lambda c, *_a: c.subscribe(RELAY_DIRECTORY_TOPIC, qos=0)
+        data = json.loads(payload.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return
+    entries = data.get("entries") if isinstance(data, dict) else None
+    if isinstance(entries, list):
+        _relay_directory_cache["entries"] = entries
 
-        def _on_message(_c, _u, msg):
-            try:
-                data = json.loads(msg.payload.decode("utf-8"))
-                got.append(data.get("entries") if isinstance(data, dict) else None)
-            except (ValueError, UnicodeDecodeError):
-                got.append(None)
 
-        client.on_message = _on_message
-        client.connect("localhost", _vortexia_mqtt_port(), keepalive=10)
-        client.loop_start()
-        deadline = time.time() + timeout
-        while not got and time.time() < deadline:
-            time.sleep(0.02)
-        client.loop_stop()
-        client.disconnect()
-    except Exception as exc:
-        logger.debug(f"[relay-directory] read failed: {exc}")
-        return []
-    entries = got[0] if got else None
-    return entries if isinstance(entries, list) else []
+def _watch_relay_directory() -> None:
+    """Start (once) the background subscriber that keeps `_relay_directory_cache` current."""
+    with _relay_directory_lock:
+        if _relay_directory_watcher["client"] is not None:
+            return
+        try:
+            import paho.mqtt.client as mqtt
+            client = mqtt.Client(client_id=f"las-directory-{uuid.uuid4().hex[:8]}", clean_session=True, protocol=mqtt.MQTTv311)
+            # Subscribed again on every (re)connect: the retained copy comes with it.
+            client.on_connect = lambda c, *_a: c.subscribe(RELAY_DIRECTORY_TOPIC, qos=1)
+            client.on_message = lambda _c, _u, msg: _on_relay_directory(msg.payload)
+            client.reconnect_delay_set(min_delay=1, max_delay=30)
+            client.connect_async("localhost", _vortexia_mqtt_port(), keepalive=30)
+            client.loop_start()
+            _relay_directory_watcher["client"] = client
+        except Exception as exc:
+            logger.warning(f"[relay-directory] could not watch {RELAY_DIRECTORY_TOPIC}: {exc}")
 
 
 def _relay_directory() -> list:
-    with _relay_directory_lock:
-        if time.time() - _relay_directory_cache["at"] > _RELAY_DIRECTORY_TTL:
-            _relay_directory_cache.update(at=time.time(), entries=_read_relay_directory())
-        return _relay_directory_cache["entries"]
+    _watch_relay_directory()
+    return _relay_directory_cache["entries"]
+
+
+# Watching from startup: the first panel opened already has the directory.
+threading.Thread(target=_watch_relay_directory, daemon=True).start()
 
 
 def _remote_color(agent: str, env: str) -> str | None:

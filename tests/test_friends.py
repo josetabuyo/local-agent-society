@@ -52,7 +52,8 @@ def app(tmp_path, monkeypatch):
         monkeypatch.setattr(main, attr, tmp_path / file)
     monkeypatch.setattr(main, "_vortexia_publish", lambda *a, **k: True)
     monkeypatch.setattr(main, "_pid_alive", lambda pid: True)
-    monkeypatch.setattr(main, "_read_relay_directory", lambda timeout=0.7: [])
+    monkeypatch.setattr(main, "_watch_relay_directory", lambda: None)
+    monkeypatch.setitem(main._relay_directory_cache, "entries", [])
     client = TestClient(main.app)
     for name in ("Monkey", "Vortexia", "Teli"):
         folder = tmp_path / name
@@ -218,10 +219,20 @@ def test_a_remote_friend_gets_its_color_from_the_relay_directory(app, monkeypatc
         {"envName": "ba-mac", "agentName": "billing", "scopeText": "x", "color": "#000000"},
         {"envName": "uy-mac", "agentName": "billing", "scopeText": "x", "color": "not-a-color"},
     ]
-    monkeypatch.setattr(main, "_read_relay_directory", lambda timeout=0.7: directory)
-    main._relay_directory_cache.update(at=0.0, entries=[])
+    main._on_relay_directory(json.dumps({"envName": "ba-mac", "entries": directory}).encode())
     for friend in ("coach@uy-mac", "billing@uy-mac", "sim@uy-mac"):
         client.put(f"/agents/Monkey/friends/{friend}")
     colors = {f["name"]: f["color"] for f in client.get("/agents/Monkey/friends").json()["friends"]}
     assert colors == {"coach@uy-mac": "#aa5500", "billing@uy-mac": None, "sim@uy-mac": None}, \
         "matched on name AND env; a malformed color is dropped; an agent the directory lacks has none"
+
+
+def test_the_relay_directory_is_held_in_memory_so_the_panel_never_waits(app):
+    """The friends view never opens a broker connection: a background subscriber keeps the
+    retained directory current, and a malformed payload never wipes the last good copy."""
+    main, client, _tmp = app
+    main._on_relay_directory(json.dumps({"entries": [{"envName": "uy-mac", "agentName": "coach", "color": "#aa5500"}]}).encode())
+    for junk in (b"not json", json.dumps({"entries": "x"}).encode(), json.dumps([1]).encode(), b"\xff"):
+        main._on_relay_directory(junk)
+    assert main._remote_color("coach", "uy-mac") == "#aa5500"
+    assert main._remote_color("coach", "ba-mac") is None
