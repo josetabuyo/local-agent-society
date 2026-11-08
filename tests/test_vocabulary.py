@@ -89,3 +89,13 @@ def test_dictation_fix_endpoint_uses_the_live_agent_names(backend, monkeypatch, 
     c = TestClient(backend.app)
     assert c.post("/dictation/fix", json={"text": "decile a guabi"}).json() == {"text": "decile a Wavi", "changed": True}
     assert c.post("/dictation/fix", json={"text": "hola"}).json() == {"text": "hola", "changed": False}
+
+
+def test_silent_u_of_que_qui_is_not_a_w_glide():
+    # qu runs before the u→w glide: "queso" sounds keso, "monque" monke.
+    assert vocab.sound_key("queso") == "keso"
+    assert vocab.sound_key("quique") == "kike"
+    assert vocab.sound_key("monque") == "monke"
+    # the real glides still become w (→ b)
+    assert vocab.sound_key("guabi") == vocab.sound_key("Wavi")
+    assert vocab.sound_key("huevo") == "bebo"

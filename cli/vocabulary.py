@@ -31,7 +31,8 @@ from pathlib import Path
 # agent that receives the text read "Wavi". An agent can add spellings the
 # sound key misses with `heard_as` in its .las-agent.json.
 
-_DIGRAPHS = [(r"g[uü](?=[aeiou])", "w"), (r"h?u(?=[aeio])", "w"), (r"qu(?=[ei])", "k"), (r"c(?=[ei])", "s"),
+# qu before the u→w glide: the u of "que"/"qui" is silent, so "queso" is keso, not kbeso.
+_DIGRAPHS = [(r"g[uü](?=[aeiou])", "w"), (r"qu(?=[ei])", "k"), (r"h?u(?=[aeio])", "w"), (r"c(?=[ei])", "s"),
              (r"ch", "x"), (r"ll", "y"), (r"c|q", "k"), (r"z", "s"), (r"h", ""), (r"[vw]", "b"), (r"j", "g"), (r"ee", "i")]
 
 
