@@ -15,7 +15,7 @@ def queue_ls():
         click.echo("Queue is empty.")
         return
     for i, item in enumerate(data, 1):
-        click.echo(f"{i}. [{item.get('name','?')}] {item.get('voice','?')}: {item.get('text','')}")
+        click.echo(f"{i}. [{item.get('name','?')}] {item.get('text','')}")
 
 
 @queue.command("clear")

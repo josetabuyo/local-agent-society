@@ -16,9 +16,8 @@ Every agent in the society must respect these rules.
 
 ### 1. Voice — never use `say` directly
 ```bash
-curl -s -X POST http://localhost:8700/queue/speak \
-  -H "Content-Type: application/json" \
-  -d '{"text":"...","voice":"Samantha","name":"System"}'
+las speak "..." --name System
+# or: curl -s -X POST http://localhost:8700/queue/speak -H "Content-Type: application/json" -d '{"text":"...","name":"System"}'
 ```
 The queue prevents collisions. Only you speak — subagents are silent.
 
@@ -39,27 +38,16 @@ Never hardcode a port. The registry guarantees no conflicts.
 curl -s http://localhost:8700/ports | python3 -c "import sys,json; p=json.load(sys.stdin); print('FREE' if '5173' not in p else f'TAKEN by {p[\"5173\"][\"local_agent\"]}')"
 ```
 
-### 3. Voices — unique per agent, speak in the voice's language
-Each agent has its voice in `.las-agent.json`. Never use another agent's voice.
+### 3. Voices — unique per agent, speak in the agent's language
+Every agent speaks through Kokoro (synthesized by the backend, played by its widget). Its voice is a Kokoro id in `.las-agent.json` — `"tts_voice": "em_alex+am_onyx"` — and its language is `"locale"`. Never use another agent's voice.
 
-**Critical:** the TTS voice has a fixed language — `say -v Samantha` only sounds correct with English text; `say -v Paulina` only sounds correct with Spanish text. Always speak text in the language of the voice, never mix them.
+- `las voices list` — every voice by language (♀/♂), and which agent here speaks with each; `--lang es --gender male --free` narrows it. The catalogue is the same on every machine: an id is something you can hand to a friend ("use `ef_dora+af_sky`").
+- To change a voice: set `tts_voice`, then `las agent sync` (or `las widget NAME`) so the widget picks it up.
+- Spanish voices start `ef_`/`em_` (and their blends, `+` = equal-weight mix); English ones `af_`/`am_`/`bf_`/`bm_`.
 
-Voice → language reference:
-- Samantha, Daniel, Moira, Karen, Tessa, Rishi, Flo/Sandy/Shelley/Reed/Eddy (English variants) → English text only
-- Paulina, Mónica → Spanish text only
+**Critical:** speak text in the agent's language (`locale`), never mixed — a Spanish voice reading English is unusable.
 
-When speaking via the queue, match the text language to the voice:
-```bash
-# English voice → English text
-curl -s -X POST http://localhost:8700/queue/speak \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Hello, task complete.","voice":"Samantha","name":"AGENT"}'
-
-# Spanish voice → Spanish text
-curl -s -X POST http://localhost:8700/queue/speak \
-  -H "Content-Type: application/json" \
-  -d '{"text":"Hola, tarea completada.","voice":"Paulina","name":"AGENT"}'
-```
+The old `voice` key (a macOS `say` name: Paulina, Samantha, Jorge…) is gone: it only ever decided the language. `las agent normalize` (run by `las update`) moves it to `locale` and drops it.
 
 ### 4. Inter-agent messages — via vortexia
 Messaging goes over **vortexia** (a local MQTT broker, sibling project — see `vortexia/PROTOCOL.md`), not terminal injection. `las agent inject` / `POST /agents/{name}/inject` publish to the recipient's vortexia inbox (`las/agent/<name>/inbox`); they no longer type into anyone's terminal.
@@ -100,9 +88,9 @@ Skipping this check can break other agents' production apps on this machine. Nev
 
 ### 7. Language — respond in the agent's configured locale
 Read `.las-agent.json`:
-- `"locale": "en-US"` (or any `en-*`), or voice is one of the English voices → respond in **English**
-- `"locale": "es-MX"` / `"es-ES"` (or any `es-*`), or voice is Paulina/Mónica → respond in **Spanish**
-- No locale field: derive from voice name (see rule 3). Default: **English**
+- `"locale": "en-US"` (or any `en-*`) → respond in **English**
+- `"locale": "es-MX"` / `"es-ES"` (or any `es-*`) → respond in **Spanish**
+- No locale field (a file not yet normalized): a legacy `voice` of Paulina/Mónica/Jorge means Spanish. Default: **English**
 
 The user may write in any language. Respond in the locale of this agent. All code, comments, skills, and system files are always written in **English**.
 

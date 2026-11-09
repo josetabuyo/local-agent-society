@@ -1587,14 +1587,20 @@ test("widget.js's speak() honours a Kokoro voice pinned via tts_voice before fal
   assert.match(body, /is not in the Kokoro pool/);
 });
 
-test("main.js's agent:info reads tts_voice from the agent's config view and returns it as ttsVoice", () => {
+test("main.js's agent:info takes locale and tts_voice from the agent's own .las-agent.json", async () => {
   const src = readSrc('main.js');
-  const body = extractFunctionBody(src, 'async function fetchPinnedTtsVoice(name) {');
-  assert.match(body, /\/agents\/\$\{encodeURIComponent\(name\)\}\/config/);
-  assert.match(body, /view\.config\.tts_voice/);
-  const info = src.slice(src.indexOf("ipcMain.handle('agent:info'"));
-  assert.match(info, /const ttsVoice = await fetchPinnedTtsVoice\(name\);/);
-  assert.match(info, /locale: data\.lang \|\| 'en-US', ttsVoice \}/);
+  const legacy = src.slice(src.indexOf('const LEGACY_VOICE_LOCALES'), src.indexOf('});', src.indexOf('const LEGACY_VOICE_LOCALES')) + 3);
+  const body = extractFunctionBody(src, 'async function fetchVoiceConfig(name) {');
+  const make = (config, ok = true) => new Function('fetch', 'REGISTRY_URL',
+    `${legacy}\nreturn async function fetchVoiceConfig(name) ${body};`)(
+    async (url) => { assert.match(url, /\/agents\/Some%20One\/config$/); return { ok, json: async () => ({ config }) }; }, 'http://x');
+  assert.deepEqual(await make({ locale: 'es-MX', tts_voice: ' em_alex+am_onyx ' })('Some One'), { locale: 'es-MX', ttsVoice: 'em_alex+am_onyx' });
+  // a file not yet normalized: the legacy macOS name still gives the language
+  assert.deepEqual(await make({ voice: 'Jorge' })('Some One'), { locale: 'es-ES', ttsVoice: null });
+  assert.deepEqual(await make({})('Some One'), { locale: 'en-US', ttsVoice: null });
+  assert.deepEqual(await make({}, false)('Some One'), { locale: 'en-US', ttsVoice: null });
+  assert.match(src, /ipcMain\.handle\('agent:info', async \(_event, name\) => fetchVoiceConfig\(name\)\);/);
+  assert.doesNotMatch(src, /\/voices\/\$\{encodeURIComponent\(voice\)\}/, 'no macOS voice-name lookup left');
 });
 
 test("widget.js's speak() still respects the mute pref before doing any synthesis work", () => {

@@ -9,7 +9,7 @@ from urllib.parse import quote
 import click
 from cli import api
 from cli.commands import complete_agent_names, complete_voice_names
-from cli.commands._agent_common import infer_locale, resolve_agent_name
+from cli.commands._agent_common import resolve_agent_name
 from cli.agent_config import (TARGET_ALL, TARGET_DEFAULT, TITLE_SOFT_CAP, BrokenAgentConfig, normalized_agent_config,
                               read_agent_config, write_agent_config)
 from cli.path_utils import AGENT_CONFIG_FILENAME, agent_config_path
@@ -50,19 +50,46 @@ def agents_list(inactive_only, active_only, as_tree):
     if not data:
         click.echo("No matching agents.")
         return
-    click.echo(f"{'Name':<20} {'Voice':<25} {'Status':<10} {'Path'}")
-    click.echo("-" * 80)
+    from cli import voice_catalog
+    click.echo(f"{'Name':<20} {'Voice':<28} {'Status':<10} {'Path'}")
+    click.echo("-" * 90)
     for name, info in data.items():
         status = "inactive" if info.get("inactive") else "active"
-        click.echo(f"{name:<20} {info.get('voice','?'):<25} {status:<10} {info.get('path','?')}")
+        voice = voice_catalog.voice_of(name, _config_at(info.get("path")))[0] or "?"
+        click.echo(f"{name:<20} {voice:<28} {status:<10} {info.get('path','?')}")
+
+
+def _config_at(path) -> dict:
+    """The .las-agent.json in `path` ({} when there is none or it is unreadable)."""
+    file = agent_config_path(path) if path else None
+    try:
+        return read_agent_config(file) if file else {}
+    except Exception:
+        return {}
+
+
+def _society_defaults(registry: dict) -> tuple[str, str | None]:
+    """(locale, gender) most agents on this machine have — what a new agent starts with."""
+    from collections import Counter
+    from cli import voice_catalog
+    configs = [_config_at(info.get("path")) for info in registry.values()]
+    locales = Counter(voice_catalog.locale_of(c) for c in configs if c)
+    locale = locales.most_common(1)[0][0] if locales else "en-US"
+    lang = locale.split("-")[0]
+    genders = Counter(voice_catalog.gender(c["tts_voice"]) for c in configs
+                      if c and voice_catalog.locale_of(c).startswith(lang) and voice_catalog.find(c.get("tts_voice") or ""))
+    gender = genders.most_common(1)[0][0] if genders else None
+    return locale, (gender if gender in ("female", "male") else None)
 
 
 @agent.command("new")
 @click.argument("name")
-@click.option("--voice", default=None, shell_complete=complete_voice_names, help="TTS voice name. Auto-assigned if omitted.")
+@click.option("--voice", default=None, shell_complete=complete_voice_names,
+              help="Kokoro voice id (`las voices list`). Default: a free one, of the language and gender most agents here have.")
+@click.option("--locale", default=None, help="Language, e.g. es-MX or en-US. Default: the one most agents here have.")
 @click.option("--dir", "target_dir", default=None,
               help="Directory for the agent (default: current directory).")
-def new(name, voice, target_dir):
+def new(name, voice, locale, target_dir):
     """Create a new agent: writes .las-agent.json, registers with backend, launches widget."""
     cwd = Path(target_dir).resolve() if target_dir else Path.cwd()
 
@@ -78,15 +105,20 @@ def new(name, voice, target_dir):
         raise SystemExit(1)
     agent_file = cwd / AGENT_CONFIG_FILENAME
 
-    # Pick voice
+    # Language and voice: what is given, else what the society here has.
+    from cli import voice_catalog
+    default_locale, gender = _society_defaults(api.get("/agents") or {})
     if voice:
-        chosen_voice = voice
-    else:
-        data = api.get("/voices/random")
-        chosen_voice = data.get("voice") or data.get("name", "Samantha")
-
-    # Resolve locale from voice
-    locale = infer_locale(chosen_voice)
+        known = voice_catalog.find(voice)
+        if not known:
+            click.echo(f"Error: unknown voice '{voice}' — see `las voices list`.")
+            raise SystemExit(1)
+        locale = locale or known["lang"]
+    locale = locale or default_locale
+    if not voice:
+        query = f"/voices/random?locale={quote(locale)}" + (f"&gender={gender}" if gender else "")
+        voice = (api.get(query) or {}).get("voice") or voice_catalog.hashed_voice(name, locale)
+    chosen_voice = voice
 
     # Write .las-agent.json
     # The canonical shape (cli/agent_config.py normalized_agent_config):
@@ -94,7 +126,7 @@ def new(name, voice, target_dir):
     # lines, never a truncation; the descriptions start empty and scope_docs
     # lists whatever identity docs the folder already has (README, ...).
     agent_data = normalized_agent_config(
-        {"name": name, "voice": chosen_voice, "locale": locale, "created": str(datetime.date.today())}, cwd)
+        {"name": name, "locale": locale, "tts_voice": chosen_voice, "created": str(datetime.date.today())}, cwd)
     try:
         agent_file.write_text(json.dumps(agent_data, indent=2, ensure_ascii=False))
     except OSError as exc:
@@ -105,7 +137,6 @@ def new(name, voice, target_dir):
     # Register with backend
     api.post("/agents", {
         "name": name,
-        "voice": chosen_voice,
         "path": str(cwd),
     })
     click.echo(f"Registered '{name}' with backend.")
@@ -117,7 +148,7 @@ def new(name, voice, target_dir):
     # Announce
     lang = locale.split("-")[0]
     greeting = f"Hello, I am {name}, ready." if lang != "es" else f"Hola, soy {name}, listo."
-    api.post("/queue/speak", {"text": greeting, "voice": chosen_voice, "name": name})
+    api.post("/queue/speak", {"text": greeting, "name": name})
 
     click.echo(f"\nAgent '{name}' created — voice: {chosen_voice}, locale: {locale}")
 
@@ -145,11 +176,10 @@ def restore(name):
         name = info.get("name") or next(k for k, v in agents.items() if v is info)
 
     target = cwd / AGENT_CONFIG_FILENAME
-    voice = info.get("voice", "Samantha")
+    from cli import voice_catalog
     data = normalized_agent_config({
         "name": name,
-        "voice": voice,
-        "locale": info.get("locale") or infer_locale(voice),
+        "locale": info.get("locale") or voice_catalog.legacy_locale(info.get("voice")) or "en-US",
         "pronunciation": info.get("pronunciation") or name,
         "created": info.get("registered_at", "")[:10],
     }, cwd)
@@ -158,7 +188,7 @@ def restore(name):
     except OSError as exc:
         click.echo(f"Error: could not write {target}: {exc}")
         raise SystemExit(1)
-    click.echo(f"Restored {AGENT_CONFIG_FILENAME} for '{name}' (voice: {data['voice']}).")
+    click.echo(f"Restored {AGENT_CONFIG_FILENAME} for '{name}' (voice: {data['tts_voice']}).")
 
 
 @agent.command("sync")
@@ -171,7 +201,6 @@ def sync():
     d = json.loads(p.read_text())
     payload = {
         "name":          d["name"],
-        "voice":         d.get("voice", "Samantha"),
         "path":          str(Path.cwd()),
         "pronunciation": d.get("pronunciation"),
     }
@@ -205,13 +234,16 @@ def normalize(name, every, dry_run):
         except BrokenAgentConfig as exc:
             click.echo(f"  {n}: {exc} — fix it by hand")
             continue
-        fixed = normalized_agent_config(current, file.parent, locale_for=infer_locale)
+        fixed = normalized_agent_config(current, file.parent)
         if fixed == current and list(fixed) == list(current):
             click.echo(f"  {n}: ok")
             continue
         added = [k for k in fixed if k not in current]
+        dropped = [k for k in current if k not in fixed]
         changed += 1
-        click.echo(f"  {n}: {'would add' if dry_run else 'added'} {', '.join(added) or 'key order'}")
+        what = ([f"{'would add' if dry_run else 'added'} {', '.join(added)}"] if added else []) + \
+               ([f"{'would drop' if dry_run else 'dropped'} {', '.join(dropped)}"] if dropped else [])
+        click.echo(f"  {n}: {'; '.join(what) or 'key order'}")
         if not dry_run:
             write_agent_config(file, fixed)
     click.echo(f"{changed} file(s) {'to change' if dry_run else 'changed'} of {len(names)}.")
@@ -445,7 +477,7 @@ def children(name, deep):
         click.echo(f"{name}: no subordinates" + ("" if deep else " (try --deep)"))
         return
     for c in kids:
-        click.echo(f"{c['name']:<20} {c.get('voice') or '?':<25} {c.get('path', '?')}")
+        click.echo(f"{c['name']:<20} {c.get('voice') or '?':<28} {c.get('path', '?')}")
 
 
 @agent.command("parent")

@@ -1,6 +1,6 @@
 """
 Tests for cli/commands/_agent_common.py — the shared helpers extracted out of
-cli/commands/agents.py (resolve_agent_name, infer_locale), plus regression
+cli/commands/agents.py (resolve_agent_name), plus regression
 coverage for the OSError-wrapped .las-agent.json writes in `agent new`/`agent
 restore`.
 """
@@ -79,25 +79,15 @@ def test_resolve_agent_name_echoes_error_message(monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
-# infer_locale
+# legacy macOS voice names → locale (cli/voice_catalog.py)
 # ---------------------------------------------------------------------------
 
-def test_infer_locale_returns_backend_lang(monkeypatch):
-    monkeypatch.setattr(_agent_common.api, "get", lambda path: {"lang": "es-MX"})
-    assert _agent_common.infer_locale("Paulina") == "es-MX"
-
-
-def test_infer_locale_defaults_to_en_us_on_backend_failure(monkeypatch):
-    def fake_get(path):
-        raise RuntimeError("backend unreachable")
-
-    monkeypatch.setattr(_agent_common.api, "get", fake_get)
-    assert _agent_common.infer_locale("Samantha") == "en-US"
-
-
-def test_infer_locale_defaults_to_en_us_when_lang_missing(monkeypatch):
-    monkeypatch.setattr(_agent_common.api, "get", lambda path: {})
-    assert _agent_common.infer_locale("Samantha") == "en-US"
+def test_legacy_voice_name_only_gives_a_language():
+    from cli import voice_catalog
+    assert voice_catalog.locale_of({"voice": "Paulina"}) == "es-MX"
+    assert voice_catalog.locale_of({"voice": "Jorge", "locale": "es-AR"}) == "es-AR", "locale wins"
+    assert voice_catalog.locale_of({"voice": "NoSuchVoice"}) == "en-US"
+    assert voice_catalog.locale_of({}) == "en-US"
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +96,7 @@ def test_infer_locale_defaults_to_en_us_when_lang_missing(monkeypatch):
 
 def test_agent_new_reports_clear_error_on_write_failure(monkeypatch, tmp_path):
     """If writing .las-agent.json raises OSError, `agent new` must exit(1) with a clear message."""
-    monkeypatch.setattr(agents_mod.api, "get", lambda path: {"voice": "Samantha"})
+    monkeypatch.setattr(agents_mod.api, "get", lambda path: {})
 
     def boom(self, *a, **kw):
         raise OSError("disk full")
@@ -116,7 +106,7 @@ def test_agent_new_reports_clear_error_on_write_failure(monkeypatch, tmp_path):
     runner = CliRunner()
     result = runner.invoke(
         agents_mod.new,
-        ["testagent", "--voice", "Samantha", "--dir", str(tmp_path / "agentdir")],
+        ["testagent", "--voice", "em_alex", "--dir", str(tmp_path / "agentdir")],
     )
 
     assert result.exit_code != 0

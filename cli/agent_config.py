@@ -133,7 +133,7 @@ def accepts_only_commands(descriptor: dict) -> bool:
 # ── the whole file: one canonical shape for every agent ────────────────────
 #
 # `.las-agent.json` is everything LAS knows about one agent instance: who it
-# is (name, voice, locale, pronunciation), how it speaks (response_length_hint),
+# is (name, locale, tts_voice, pronunciation), how it speaks (response_length_hint),
 # what it is for — the scope ladder (docs/adr/0001) as direct strings
 # (short_description, long_description) plus `scope_docs`, the documents that
 # carry the longer rungs — and how its sessions are routed (`sessions`).
@@ -145,7 +145,12 @@ def accepts_only_commands(descriptor: dict) -> bool:
 # README.md — the scan order vortexia's ladder uses.
 
 DEFAULT_RESPONSE_LENGTH_HINT = 40
-CANONICAL_KEYS = ("name", "voice", "locale", "pronunciation", "created", "response_length_hint",
+# `tts_voice` is the Kokoro id the agent speaks with (cli/voice_catalog.py) —
+# written into every file so the voice has a name you can see, compare and
+# hand to a friend. The old `voice` key (a macOS `say` name) is migrated to
+# `locale` and dropped: it only ever decided the language.
+LEGACY_KEYS = ("voice",)
+CANONICAL_KEYS = ("name", "locale", "tts_voice", "pronunciation", "created", "response_length_hint",
                   "short_description", "long_description", "scope_docs")
 
 
@@ -163,21 +168,24 @@ def discover_scope_docs(agent_dir: str | Path) -> list:
     return docs
 
 
-def normalized_agent_config(config: dict, agent_dir: str | Path, *, locale_for=lambda voice: "en-US") -> dict:
+def normalized_agent_config(config: dict, agent_dir: str | Path) -> dict:
     """`config` completed to the canonical shape — never overwriting a value the file already states.
 
     Canonical keys come first in a fixed order, anything else the agent keeps
     (e.g. `ports`) after them, `sessions` last. Missing values get their
-    defaults: locale from the voice, pronunciation from the name, empty
-    descriptions, discovered `scope_docs`, the default `sessions` section
-    (a present one keeps its choices and gains any runtime it lacks).
+    defaults: locale from the legacy `voice` name (then dropped), tts_voice
+    the Kokoro voice the agent already speaks with (its name hash — pinning it
+    changes nothing audible), pronunciation from the name, empty descriptions,
+    discovered `scope_docs`, the default `sessions` section (a present one
+    keeps its choices and gains any runtime it lacks).
     """
+    from cli import voice_catalog
     name = config.get("name", "")
-    voice = config.get("voice", "Samantha")
+    locale = voice_catalog.locale_of(config)
     defaults = {
         "name": name,
-        "voice": voice,
-        "locale": None,
+        "locale": locale,
+        "tts_voice": None,
         "pronunciation": name,
         "created": "",
         "response_length_hint": DEFAULT_RESPONSE_LENGTH_HINT,
@@ -189,14 +197,14 @@ def normalized_agent_config(config: dict, agent_dir: str | Path, *, locale_for=l
     for key in CANONICAL_KEYS:
         if key in config:
             out[key] = config[key]
-        elif key == "locale":
-            out[key] = locale_for(voice)
+        elif key == "tts_voice":
+            out[key] = voice_catalog.hashed_voice(name, locale)
         elif key == "scope_docs":
             out[key] = discover_scope_docs(agent_dir)
         else:
             out[key] = defaults[key]
     for key, value in config.items():
-        if key not in out and key != "sessions":
+        if key not in out and key != "sessions" and key not in LEGACY_KEYS:
             out[key] = value
     base = default_sessions_config()
     current = _dict(config.get("sessions"))

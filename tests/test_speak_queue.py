@@ -105,7 +105,8 @@ def test_speak_envelope_carries_an_id_and_drainer_waits_for_done(app_module, cli
 
     env = _wait_published(app_module, 1)
     assert app_module._published[0][0] == app_module.SPEAK_TOPIC
-    assert env["kind"] == "speak" and env["to"] == "A" and env["voice"] == "Samantha"
+    assert env["kind"] == "speak" and env["to"] == "A"
+    assert "voice" not in env, "the widget speaks with the agent's own Kokoro voice"
     assert env["id"], "every speak envelope must carry an id the widget can ack"
 
     assert _ack(client, env["id"], "started").json() == {"ok": True, "known": True}
@@ -262,10 +263,10 @@ def test_muted_agent_is_dropped_without_publishing(app_module, client):
     assert app_module._published == []
 
 
-def test_unknown_voice_is_dropped_without_publishing(app_module):
-    app_module.save_json(app_module.QUEUE_FILE, [{"text": "hi", "voice": "TotallyMadeUpVoice", "name": "X"}])
-    assert app_module._drain_one() is True
-    assert app_module._published == []
+def test_speak_needs_no_voice_and_ignores_a_legacy_one(app_module, client):
+    assert client.post("/queue/speak", json={"text": "hi", "name": "X"}).status_code == 200
+    assert client.post("/queue/speak", json={"text": "hi", "voice": "Paulina", "name": "Y"}).status_code == 200
+    assert [m.get("voice") for m in app_module.load_json(app_module.QUEUE_FILE, [])] == [None, None]
 
 
 def test_empty_queue_reports_idle(app_module):

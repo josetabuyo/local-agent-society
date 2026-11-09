@@ -64,7 +64,7 @@ In any project directory, run:
 las agent new MyProject
 ```
 
-The command writes `.las-agent.json`, registers the agent with the backend, assigns a unique voice (with its language), and opens the widget.
+The command writes `.las-agent.json`, registers the agent with the backend, gives it a Kokoro voice nobody here uses yet (`tts_voice`, in the language and gender most agents on the machine have, unless `--voice`/`--locale` say otherwise), and opens the widget.
 
 ---
 
@@ -86,7 +86,7 @@ las shell-init [--install]    # zsh: tint the terminal background with the agent
 ### Agents
 ```
 las agents                              # list all registered agents
-las agent new NAME [--voice V] [--dir D]  # write .las-agent.json, register, launch widget
+las agent new NAME [--voice ID] [--locale L] [--dir D]  # write .las-agent.json, register, launch widget
 las agent sync                          # sync .las-agent.json → backend
 las agent target [T] [--cc/--no-cc]     # where messages/mic land among its sessions: default | all | <runtime> | <sid>
 las agent restore [NAME]                # recover .las-agent.json from backend
@@ -120,9 +120,9 @@ las link [--agent NAME] [--tty PATH]    # link the current (or given) terminal t
 
 ### Voices
 ```
-las voices list                         # all voices with language flag
-las voices info Samantha                # language info for one voice
-las voices random                       # pick a random unused voice
+las voices list [--lang es] [--gender male] [--free]   # Kokoro voices and who speaks with each
+las voices info em_alex+am_onyx         # one voice: language, gender, who uses it
+las voices random --locale es-MX        # a voice of that language nobody here uses
 ```
 
 ### Ports
@@ -136,7 +136,7 @@ las ports audit                         # cross-check registry against `lsof` �
 
 ### TTS Queue
 ```
-las speak "Hello"                       # enqueue TTS (uses agent voice + name from .las-agent.json)
+las speak "Hello"                       # enqueue TTS (the agent in .las-agent.json speaks it, in its own voice)
 las queue ls                            # show pending items
 las queue clear                         # clear all pending messages
 ```
@@ -154,11 +154,11 @@ las boarding --open                     # open in browser
 Agents share resources and follow a civility contract:
 
 1. **Voice queue** — always via `POST /queue/speak` or `las speak`, never `say` directly; the queue prevents collisions
-2. **Voice language** — each TTS voice has a fixed language; English voices speak English text, Spanish voices speak Spanish text — never mix them
+2. **Voice language** — each agent speaks in its `locale` with a Kokoro voice of that language (`tts_voice`) — never mix them
 3. **Ports** — always reserved via `las ports claim` or `POST /ports/claim` before starting any server
 4. **Voices** — unique per agent; declared in `.las-agent.json` with a `locale` field (e.g. `en-US`, `es-MX`)
 5. **Messages** — sent via `las agent send --to NAME "msg"` (or `inject`, or `POST /agents/{name}/inject`), delivered over **vortexia** into the recipient's broker-owned mailbox, and from there into the recipient's session by the **bridge** (`bridge/`, docs/adr/0004): live into a Claude Code session through the LAS channel (`las claude`), into a plain terminal (`las bridge shell`), into any other runtime (`las bridge exec --exec CMD`), or on demand (`las agent poll`).
-6. **Response language** — agents respond in the language of their TTS voice (`locale` field in `.las-agent.json`)
+6. **Response language** — agents respond in their `locale` (`.las-agent.json`)
 
 ---
 
@@ -188,15 +188,15 @@ Endpoints below are cross-checked against `app.openapi()['paths']` in `backend/m
 | `GET /agents/{name}/pending-link` | Return and clear the pending linked TTY (consumed once) |
 | `GET /widget/{name}` | HTML page rendering the floating widget for an agent |
 | `GET /debug/iterm_ttys` | List all TTYs currently known to iTerm2 via AppleScript |
-| `GET /voices` | All voices with `{name, lang, flag}` |
-| `GET /voices/{name}` | Language info for one voice |
-| `GET /voices/random` | Random unused voice name |
+| `GET /voices` | Every Kokoro voice `{name, lang, gender, pin_only, agents}` |
+| `GET /voices/{name}` | One Kokoro voice, same shape |
+| `GET /voices/random?locale=&gender=` | A voice of that language no agent here uses |
 | `GET /ports` | Port registry |
 | `POST /ports` | Register a port directly (no availability check) |
 | `DELETE /ports/{port}` | Release a port |
 | `GET /ports/free` | Get a free port number (`?start=&end=`, default 9000-9999) |
 | `POST /ports/claim` | Atomically claim + register a port |
-| `POST /queue/speak` | Enqueue TTS `{text, voice, name}` |
+| `POST /queue/speak` | Enqueue TTS `{text, name}` — spoken in `name`'s own voice |
 | `GET /queue` | Current queue |
 | `DELETE /queue` | Clear queue |
 | `POST /queue/ack` | Widget → backend: `{id, phase: started\|done\|skipped, reason?}` — the drainer holds the next clip until the current one is reported over |
@@ -375,7 +375,7 @@ Tests: `npm test` in `widget-electron/` (node's built-in runner).
 
 | Skill | What it does |
 |---|---|
-| `/local-agent-voice` | Change the agent's TTS voice (updates locale too) |
+| `/local-agent-voice` | Change the agent's Kokoro voice (`tts_voice`) |
 | `/local-agent-pronunciation` | Set a phonetic hint for TTS |
 | `/local-agent-widget` | Reopen the floating widget |
 

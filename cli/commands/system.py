@@ -27,7 +27,7 @@ def status():
     if agents:
         click.echo(f"\nAgents ({len(agents)}):")
         for name, info in agents.items():
-            click.echo(f"  {name:<20} voice={info.get('voice','?')}  path={info.get('path','?')}")
+            click.echo(f"  {name:<20} path={info.get('path','?')}")
     else:
         click.echo("\nAgents   : none registered")
 

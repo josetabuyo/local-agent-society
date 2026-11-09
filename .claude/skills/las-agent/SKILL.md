@@ -29,7 +29,7 @@ Every agent has its own scope — whatever business it's actually working on in 
 
 If a session starts in a directory with a `.las-agent.json`, it is a member of this society, not a standalone Claude Code session. That means, concretely:
 
-- You have one **name**, one **voice**, and a **locale** — never borrow another agent's.
+- You have one **name**, one **voice** (`tts_voice`), and a **locale** — never borrow another agent's.
 - You **speak** through the queue (`las speak`), never `say` directly, and you **hear** other agents through vortexia, not through the terminal.
 - You know your own **scope** and can state it at whatever level of detail is asked (see the Scope Ladder, §5) — no other agent, and no future router, should have to guess what you're for.
 - You know **how to reach any other agent**, whether it's on this Mac or another one, without reinventing a mechanism that already exists (see §4 — this has burned agents before: don't assume something is missing just because you haven't used it yet).
@@ -47,7 +47,7 @@ The rest of this document is the concrete "how."
 cat .las-agent.json 2>/dev/null
 ```
 
-- **If it exists:** read `name`, `voice`, and `locale`. Every TTS announcement this session makes must go through:
+- **If it exists:** read `name` and `locale` (its language; `tts_voice` is its Kokoro voice). Every TTS announcement this session makes must go through:
   ```bash
   las speak "<text>" --name <agent_name>
   ```
@@ -125,26 +125,20 @@ If a received message (a channel event, or a `poll` line) is exactly that text: 
 
 **Verified in code (2026-10-26): nothing in the chain truncates** — the bridge pushes the envelope's full text, the backend doesn't truncate (it only refuses a message over 1,000,000 characters, loudly, with a 422 — never a silent cut), and vortexia's clients publish the string as-is. A channel event carries the whole message. If a message genuinely looks incomplete or ambiguous (ends mid-sentence, no closing punctuation), that doubt is legitimate, but the right response is to ask the user if something's missing or to resend the last part — **never refuse or pause a task by arguing "the message got cut off" as if it were a system bug**. It isn't.
 
-### TTS language — must match the voice
+### TTS language — must match the agent's locale
 
-The TTS engine only sounds natural when the text is in the voice's own language. **Never mix languages.**
+Every agent speaks through Kokoro (synthesized by the backend, played by its widget). Two keys in `.las-agent.json` decide how it sounds:
 
-| Voices | Text language |
-|---|---|
-| Samantha, Daniel, Moira, Karen, Tessa, Rishi, Flo, Sandy, Shelley, Reed, Eddy, Zoe, Nicky, Evan (and `en-*` variants) | **English** |
-| Paulina, Mónica (and `es-*` variants) | **Spanish** |
+- **`locale`** — its language (`es-*` → Spanish, `en-*` → English; no locale → English). The text you speak must be in this language. **Never mix languages**: a Spanish voice reading English is unusable.
+- **`tts_voice`** — its Kokoro voice id, e.g. `em_alex+am_onyx` (`+` = an equal-weight blend). Spanish ids start `ef_`/`em_` (and blends of them with English voices), English ones `af_`/`am_`/`bf_`/`bm_`.
 
-**How to determine the session's language:**
+`las voices list` shows every voice by language (♀/♂) and which agent on this machine speaks with each (`--lang es --gender male --free` narrows it); `las voices info ID` one voice. The catalogue (`widget-electron/lib/kokoroVoices.json`) is the same on every machine, so an id is something the human can hand to a friend. To change a voice: set `tts_voice`, then `las agent sync` and `las widget NAME` (or `/local-agent-voice`). An unknown id warns and falls back to the voice the agent's name hashes into.
 
-1. If `.las-agent.json` has `"locale"`: use that locale (`en-*` → English, `es-*` → Spanish).
-2. If there's no locale, derive it from `voice` using the table above.
-3. Default if neither is available: **English**.
-
-**Which voice actually sounds.** Synthesis is Kokoro (backend), not macOS `say`: the `voice` name above only decides the *language*; the widget then hashes the agent's name into that language's Kokoro pool (`widget-electron/lib/kokoroVoices.js`), so the gender is whatever the hash lands on. To pin one explicitly — e.g. a masculine Spanish voice — set `"tts_voice": "em_alex"` (any id from that pool: `ef_dora`/`em_alex`/`em_santa` and their blends — `ef_dora+em_alex`, `ef_dora+ef_dora+em_santa`, …, an equal-weight average of the listed voices, the backend's `kokoro_voice_style` — for Spanish, `af_*`/`am_*`/`bf_*`/`bm_*` for English) in `.las-agent.json` and `las agent sync`; an unknown id warns and falls back to the hash.
+The old `voice` key (a macOS `say` name: Paulina, Samantha, Jorge…) is retired — it only ever decided the language, nothing speaks with `say`. `las agent normalize` (run by `las update`) moves it to `locale`, pins the voice the agent already had as `tts_voice`, and drops it. A file that still has it: Paulina/Mónica/Jorge mean Spanish.
 
 **Nothing speaks over the mic.** While any widget records a dictation, every LAS voice waits: the clip playing pauses and resumes after, queued ones hold (`POST /queue/hold`, the widget's mic gate). Your `las speak` is never lost, just delayed — don't retry it or work around the wait.
 
-**Golden rule:** whatever text you pass to `las speak` must always be in the language that matches the agent's voice. If the voice is Samantha, speak English. If it's Paulina, speak Spanish. Even if the user writes to you in another language, the TTS goes out in the voice's language.
+**Golden rule:** whatever text you pass to `las speak` must always be in the agent's `locale`. `es-*` → Spanish, `en-*` → English. Even if the user writes to you in another language, the TTS goes out in the agent's language.
 
 ### Closing report — brief summary at the end of every turn (mandatory)
 
@@ -156,18 +150,18 @@ There is no longer a global `Stop` hook (`~/.claude/hooks/announce-here.sh`) ann
 "<report verb>: <summary>. <AgentName>."
 ```
 
-- `<report verb>` is `"Reporting"` in English / `"Reportando"` in Spanish, matching the voice's language (see table above).
-- `<summary>` is what just happened, in the voice's language, kept within `response_length_hint` characters (one sentence at the default 40; more when the agent asks for a longer hint).
+- `<report verb>` is `"Reporting"` in English / `"Reportando"` in Spanish, matching the agent's `locale`.
+- `<summary>` is what just happened, in the agent's language, kept within `response_length_hint` characters (one sentence at the default 40; more when the agent asks for a longer hint).
   - Read `response_length_hint` from `.las-agent.json` (older files call it `report_max_chars`; `las update` renames it via `scripts/migrate-agent-json.py`). **If neither exists, default to 40.** It is a soft target, never a truncation: an agent that sets it high (e.g. 280) wants fuller spoken reports — give two or three sentences, not one clipped line.
   - **Hard fallback** (never leave the slot empty): if there's nothing substantial to summarize — a pure chat turn, a question with no action, etc. — use `"done"` (English) / `"listo"` (Spanish) as `<summary>`.
   - **Not on housekeeping turns.** A turn that exists only because a background notification arrived — a background task finished, a channel probe — with no human message and nothing done for the human gets no closing report and no TTS at all. The `"done"`/`"listo"` fallback is for turns the human started; speaking "Reporting: done" on a probe or a task notification is exactly the noise this rule exists to prevent.
 - `<AgentName>` is the `name` from `.las-agent.json`.
 
 ```bash
-# English, Samantha voice, response_length_hint: 40
+# English (locale en-US), response_length_hint: 40
 las speak "Reporting: widget chat bubbles done. LocalAgentSociety." --name LocalAgentSociety
 
-# Spanish, Paulina voice
+# Spanish (locale es-MX)
 las speak "Reportando: base de datos migrada. Robotics." --name Robotics
 ```
 
@@ -243,24 +237,24 @@ las agent inject <OtherAgent> "Port <PORT> is needed — can you release it?" --
 
 > **KEEP THIS UPDATED:** this table lives in the `local-agent-society` repo. Whenever an agent is added, removed, or changed, update it here too.
 
-| Agent | Voice (lang / Kokoro `tts_voice`) | Path | Stack | Ports |
-|--------|-----|------|-------|---------|
-| LocalAgentSociety | Paulina / `ef_dora` | `local-agent-society` | — | 8700 |
-| Garantido | Mónica / `em_alex` | `Garantido` | Next.js 16 + Turbopack | 8765, 8010, 9001 |
-| NeuroFlow | Jorge / `em_santa` | `NeuroFlow` | Vite frontend | 5181, 8510 |
-| Forti | Paulina / `ef_dora+em_alex` | `Forti` | — | — |
-| Pulpo | Mónica / `ef_dora+em_santa` | `pulpo` | Vite frontend + Python backend | 5173, 8000, 9004 |
-| HomeControl | Jorge / `em_alex+em_santa` | `home-control` | — | — |
-| Wavi | Paulina / `ef_dora+em_alex+em_santa` | `wavi` | Chrome headless (WhatsApp automation) | 9200–9233 |
-| Minis App Acces | Mónica / `ef_dora+ef_dora+em_alex` | `Ctrol_Acc_Mv2026` | — | — |
-| System | Jorge / `ef_dora+ef_dora+em_santa` | `System` | Infrastructure monitor | — |
-| Teli | Paulina / `ef_dora` | `teli` | Telegram automation | — |
-| Robotics | Mónica / `em_alex` | `Robotics` | — | — |
-| LocalModels | Jorge / `em_santa` | `local-models` | Ollama + gemma4:e4b, API :11434 | 9002 |
-| Luganense | Paulina / `ef_dora+em_alex` | `Luganense` | Next.js | 9003 |
-| Vortexia | Mónica / `ef_dora+em_santa` | `vortexia` | Local MQTT broker + vortex-relay | 9012, 9014 |
+| Agent | Path | Stack | Ports |
+|--------|------|-------|---------|
+| LocalAgentSociety | `local-agent-society` | — | 8700 |
+| Garantido | `Garantido` | Next.js 16 + Turbopack | 8765, 8010, 9001 |
+| NeuroFlow | `NeuroFlow` | Vite frontend | 5181, 8510 |
+| Forti | `Forti` | — | — |
+| Pulpo | `pulpo` | Vite frontend + Python backend | 5173, 8000, 9004 |
+| HomeControl | `home-control` | — | — |
+| Wavi | `wavi` | Chrome headless (WhatsApp automation) | 9200–9233 |
+| Minis App Acces | `Ctrol_Acc_Mv2026` | — | — |
+| System | `System` | Infrastructure monitor | — |
+| Teli | `teli` | Telegram automation | — |
+| Robotics | `Robotics` | — | — |
+| LocalModels | `local-models` | Ollama + gemma4:e4b, API :11434 | 9002 |
+| Luganense | `Luganense` | Next.js | 9003 |
+| Vortexia | `vortexia` | Local MQTT broker + vortex-relay | 9012, 9014 |
 
-The rest of the registry (`las agents`) follows the same rotation. **Per-machine language (user decision, 2026-10-28):** every agent on **this Mac (ba-mac) speaks Spanish** — `voice` Paulina/Mónica/Jorge, `locale` `es-*`, and a `tts_voice` rotated over the 9 Spanish Kokoro voices (repeats are fine once they run out). Every agent on **uy-mac speaks English** — English `voice`/`locale`, `tts_voice` spread over the 28 English Kokoro voices. A new agent follows its machine's language: pick the least-used `tts_voice` of that language.
+Voices are not listed here — `las voices list` is the live answer. **Per-machine voices (user decision, 2026-11-09):** every agent speaks Spanish on both Macs, and the two are told apart by ear: on **this Mac (ba-mac) every voice is male** (`em_alex`, `em_santa` and their blends with English men), on **uy-mac every voice is female** (`ef_dora` blended with English women), each agent a different one. A new agent follows its machine: `las agent new` already picks a free voice of the language and gender most agents there have.
 
 This table only lists this machine's agents. Other machines (e.g. `uy-mac`) run their own society with their own roster — reach them by name via §4, not by expecting them to appear in this table.
 
@@ -333,7 +327,7 @@ asset directories under the same parent are not agents.
 
 ```bash
 # From the parent agent's folder: one subordinate per git repo
-las agent new relay-ros --dir relay-ros --voice Paulina
+las agent new relay-ros --dir relay-ros
 
 las agent children [Parent] [--deep]   # who reports to Parent (direct, or whole subtree)
 las agent parent [Child]               # who Child reports to
@@ -345,8 +339,8 @@ las agent send --to Parent --children "<message>" --from Parent [--deep]
 
 A session opened inside a subordinate's folder is that subordinate (the
 nearest config upward wins); a session in a non-repo folder under the parent
-(notes, docs) is the parent. Give subordinates the parent's voice so the
-name in the widget/inbox is what tells them apart, not the voice.
+(notes, docs) is the parent. Each subordinate gets its own free voice
+(`las agent new` picks one), so it can be told apart by ear too.
 
 ### las-friends — agents linked by choice, not by folder
 
@@ -434,7 +428,7 @@ Every LAS agent has, besides its `name` (mandatory — it's the widget's sign), 
 | 3+ | 144, 233, 377, 610, 987, 1597, 2584, 4181… | `.vxia-scope.<N>.md` at the agent's root (one per rung) | vortexia |
 | — | whichever fits its actual length | `README.md`, if the agent has one | vortexia |
 
-**`.las-agent.json` is the whole identity of an agent instance** — name, voice, locale, the direct strings above, and `scope_docs`: the paths (relative to the agent's folder, most specific first) of the documents that carry its longer rungs — a README, `.vxia-scope.<N>.md` files, any doc this implementation chooses. Discovered once when missing (`.vxia-scope.<N>.md` ascending, then `README.md`); after that it is the agent's choice — edit the list, don't rely on rediscovery. `las agent normalize [--all]` fills whatever a file lacks without overwriting anything (docs/adr/0001 addendum). The old `.agent.json` is retired: never read, never write it.
+**`.las-agent.json` is the whole identity of an agent instance** — name, locale, tts_voice, the direct strings above, and `scope_docs`: the paths (relative to the agent's folder, most specific first) of the documents that carry its longer rungs — a README, `.vxia-scope.<N>.md` files, any doc this implementation chooses. Discovered once when missing (`.vxia-scope.<N>.md` ascending, then `README.md`); after that it is the agent's choice — edit the list, don't rely on rediscovery. `las agent normalize [--all]` fills whatever a file lacks without overwriting anything (docs/adr/0001 addendum). The old `.agent.json` is retired: never read, never write it.
 
 **Key rules** (rungs 3+ and the README, defined by vortexia — summary; see `vxia-scope-ladder.md` for detail):
 - `README.md` is **never renamed**. Its rung is computed: measure its real length in characters and place it at the smallest Fibonacci number that contains it — a short README lands on an early rung, a long one on a later one. There's no fixed "README rung."

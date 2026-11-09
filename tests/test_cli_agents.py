@@ -32,7 +32,7 @@ def test_agent_new_propagates_backend_failure(monkeypatch, tmp_path):
     runner = CliRunner()
     result = runner.invoke(
         agents_mod.new,
-        ["testagent", "--voice", "Samantha", "--dir", str(tmp_path / "agentdir")],
+        ["testagent", "--voice", "em_alex", "--dir", str(tmp_path / "agentdir")],
     )
 
     # The command must NOT silently succeed with a fallback locale.
@@ -273,10 +273,42 @@ def test_agent_new_is_what_writes_las_agent_json(monkeypatch, tmp_path):
     posts = []
     monkeypatch.setattr(agents_mod.api, "post", lambda path, data=None: posts.append(path) or {})
     monkeypatch.setattr(agents_mod.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(agents_mod.api, "get", lambda path: {})
 
-    result = CliRunner().invoke(agents_mod.new, ["Fresh", "--voice", "Paulina", "--dir", str(tmp_path / "fresh")])
+    result = CliRunner().invoke(agents_mod.new, ["Fresh", "--voice", "em_alex+am_onyx", "--dir", str(tmp_path / "fresh")])
 
     assert result.exit_code == 0, result.output
     config = json.loads((tmp_path / "fresh" / ".las-agent.json").read_text())
-    assert config["name"] == "Fresh" and config["voice"] == "Paulina"
+    assert config["name"] == "Fresh" and config["tts_voice"] == "em_alex+am_onyx"
+    assert config["locale"] == "es-ES" and "voice" not in config, "the voice's own language, no macOS name"
+
+    bad = CliRunner().invoke(agents_mod.new, ["Other", "--voice", "Paulina", "--dir", str(tmp_path / "other")])
+    assert bad.exit_code != 0 and "unknown voice 'Paulina'" in bad.output
     assert "/agents" in posts
+
+
+def test_agent_new_takes_the_language_and_gender_most_agents_here_have(monkeypatch, tmp_path):
+    """No --voice/--locale: a machine whose agents all speak Spanish with male
+    voices gets a new Spanish male voice nobody uses yet."""
+    for name, voice in [("A", "em_alex"), ("B", "em_santa+am_onyx")]:
+        d = tmp_path / name
+        d.mkdir()
+        (d / ".las-agent.json").write_text(json.dumps({"name": name, "locale": "es-MX", "tts_voice": voice}))
+    registry = {n: {"path": str(tmp_path / n)} for n in ("A", "B")}
+    asked = []
+
+    def fake_get(path):
+        if path == "/agents":
+            return registry
+        asked.append(path)
+        return {"voice": "em_alex+am_puck"}
+
+    monkeypatch.setattr(agents_mod.api, "get", fake_get)
+    monkeypatch.setattr(agents_mod.api, "post", lambda *a, **k: {})
+    monkeypatch.setattr(agents_mod.subprocess, "run", lambda *a, **k: None)
+
+    result = CliRunner().invoke(agents_mod.new, ["Fresh", "--dir", str(tmp_path / "fresh")])
+    assert result.exit_code == 0, result.output
+    assert asked == ["/voices/random?locale=es-MX&gender=male"]
+    config = json.loads((tmp_path / "fresh" / ".las-agent.json").read_text())
+    assert config["locale"] == "es-MX" and config["tts_voice"] == "em_alex+am_puck"

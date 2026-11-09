@@ -119,7 +119,7 @@ const isDetached = sinkName === 'exec' && Boolean(opts.log);
 const detached = isDetached ? { command: opts.exec, log: opts.log } : null;
 const commandSession = isDetached || opts['text-as'] === 'arg';
 const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, title: commandSession ? opts.exec : '', log });
-const speak = makeSpeaker({ agent: agent.name, voice: agent.config && agent.config.voice });
+const speak = makeSpeaker({ agent: agent.name });
 if (sinkName === 'exec') {
   // `las <command…>` / `las attach`: text as the last argument, answers spoken for the mic (answer.js).
   sink = new ExecSink({ command: opts.exec, cwd: process.cwd(), textAs: opts['text-as'] === 'arg' ? 'arg' : 'stdin',

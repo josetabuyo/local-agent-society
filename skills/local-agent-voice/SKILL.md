@@ -1,66 +1,37 @@
 ---
 name: local-agent-voice
 description: Change the TTS voice of the local agent in the current directory.
-allowed-tools: Bash(curl:*) Bash(python3:*) Bash(say:*)
+allowed-tools: Bash(las:*) Bash(python3:*)
 ---
 
 # /local-agent-voice — Change Agent Voice
 
+Every agent speaks through Kokoro. Its voice is a Kokoro id in `.las-agent.json`
+(`tts_voice`, e.g. `em_alex+am_onyx`); its language is `locale`.
+
 ## Parameters
-- `$1` — (optional) Voice name. If omitted, assigns a new random voice.
+- `$1` — (optional) Kokoro voice id. If omitted, picks a free one of the agent's language.
 
 ## Steps
 
-### 1. Read the current agent config
+### 1. Read the current agent
+```bash
+python3 -c "import json; d=json.load(open('.las-agent.json')); print(d.get('name'), d.get('locale'), d.get('tts_voice'))"
+```
+No file → this directory has no agent (`las agent new NAME` first).
+
+### 2. Choose the voice
+- `$1` given: check it exists with `las voices info $1` (an error means unknown — show `las voices list --lang <es|en>`).
+- Otherwise: `las voices random --locale LOCALE` (add `--gender female|male` if the user asked for one).
+- The voice must be in the agent's language: Spanish ids start `ef_`/`em_`, English `af_`/`am_`/`bf_`/`bm_`.
+
+### 3. Write it and reload
 ```bash
 python3 -c "
-import json, os
-p = '.las-agent.json'
-d = json.load(open(p))
-print(d.get('name'), d.get('voice','Samantha'))
-"
-```
-If neither file exists, tell the user this directory has no agent (run `las agent new NAME` first).
-
-### 2. Determine new voice
-- If `$1` provided: use it as VOICE
-- Otherwise: `curl -s http://localhost:8700/voices/random` and extract `voice`
-
-### 3. Determine voice language
-```bash
-curl -s http://localhost:8700/voices/VOICE
-```
-This returns `{"name":"...","lang":"en-US","flag":"..."}`. Save LANG (e.g. `en-US`) and FLAG.
-If not found (404), default LANG to `en-US`.
-
-### 4. Preview the voice — say "Hello" or "Hola" based on language
-```bash
-# If LANG starts with "es":
-say -v "VOICE" "Hola, soy AGENT"
-# Otherwise:
-say -v "VOICE" "Hello, I'm AGENT"
+import json; p='.las-agent.json'; d=json.load(open(p)); d['tts_voice']='VOICE'
+open(p,'w').write(json.dumps(d,indent=2,ensure_ascii=False)+'\n')"
+las agent sync && las widget
 ```
 
-### 5. Update the agent config — set voice and locale
-Write back to whichever filename was read in step 1.
-```bash
-python3 -c "
-import json, os
-p = '.las-agent.json'
-d = json.load(open(p))
-d['voice'] = 'VOICE'
-d['locale'] = 'LANG'
-open(p,'w').write(json.dumps(d,indent=2,ensure_ascii=False))
-print('Updated')
-"
-```
-
-### 6. Update backend registry
-```bash
-curl -s -X POST http://localhost:8700/agents \
-  -H "Content-Type: application/json" \
-  -d '{"name":"AGENT","voice":"VOICE","path":"CWD","backend_url":"http://localhost:8700","frontend_url":"http://localhost:8700/widget/AGENT"}'
-```
-
-### 7. Confirm to user
-Show: agent name, old voice → new voice, language (FLAG LANG).
+### 4. Hear it and confirm
+`las speak "<a short line in the agent's language>" --name AGENT`, then tell the user: old voice → new voice.

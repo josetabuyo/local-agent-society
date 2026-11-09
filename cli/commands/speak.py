@@ -17,12 +17,10 @@ def _agent_json():
 
 @click.command()
 @click.argument("text")
-@click.option("--voice", default=None, help="TTS voice (default: from agent config or Samantha)")
 @click.option("--name", default=None, help="Speaker label (default: from agent config or CLI)")
-def speak(text, voice, name):
-    """Enqueue a TTS message."""
+def speak(text, name):
+    """Enqueue a TTS message — spoken by NAME's widget, in its own Kokoro voice (`tts_voice`)."""
     agent = _agent_json()
-    voice = voice or agent.get("voice", "Samantha")
     name = name or agent.get("name", "CLI")
-    api.post("/queue/speak", {"text": text, "voice": voice, "name": name})
+    api.post("/queue/speak", {"text": text, "name": name})
     click.echo(f"Queued [{name}]: {text}")

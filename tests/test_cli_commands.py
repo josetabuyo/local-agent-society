@@ -46,7 +46,6 @@ def test_status_happy_path(monkeypatch):
     assert result.exit_code == 0
     assert "Backend  : ok" in result.output
     assert "agentA" in result.output
-    assert "Samantha" in result.output
     assert ":8700" in result.output
     assert "backend" in result.output
 
@@ -121,15 +120,26 @@ def test_ports_free_happy_path(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_voices_list_happy_path(monkeypatch):
-    data = {"voices": [{"flag": "🇺🇸", "name": "Samantha", "lang": "en-US"}]}
+    data = {"voices": [
+        {"name": "em_alex+am_onyx", "lang": "es-ES", "gender": "male", "pin_only": True,
+         "agents": [{"agent": "LocalAgentSociety", "how": "pinned", "inactive": False}]},
+        {"name": "ef_dora", "lang": "es-ES", "gender": "female", "pin_only": False, "agents": []},
+        {"name": "af_heart", "lang": "en-US", "gender": "female", "pin_only": False,
+         "agents": [{"agent": "Old", "how": "hashed", "inactive": True}]},
+    ]}
     monkeypatch.setattr(voices_mod.api, "get", lambda path: data)
 
     runner = CliRunner()
     result = runner.invoke(voices_mod.voices, ["list"])
-
     assert result.exit_code == 0
-    assert "Samantha" in result.output
-    assert "en-US" in result.output
+    assert "Spanish" in result.output and "English" in result.output
+    assert "♂ em_alex+am_onyx" in result.output and "LocalAgentSociety" in result.output
+    assert "Old (hash) · inactive" in result.output
+
+    free = CliRunner().invoke(voices_mod.voices, ["list", "--free"]).output
+    assert "ef_dora" in free and "em_alex+am_onyx" not in free and "af_heart" not in free
+    male = CliRunner().invoke(voices_mod.voices, ["list", "--lang", "es", "--gender", "male"]).output
+    assert "em_alex+am_onyx" in male and "ef_dora" not in male
 
 
 def test_voices_list_backend_down(monkeypatch):
@@ -147,7 +157,7 @@ def test_voices_list_backend_down(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_queue_ls_happy_path(monkeypatch):
-    data = [{"name": "AgentA", "voice": "Samantha", "text": "hello"}]
+    data = [{"name": "AgentA", "text": "hello"}]
     monkeypatch.setattr(queue_mod.api, "get", lambda path: data)
 
     runner = CliRunner()
@@ -155,7 +165,6 @@ def test_queue_ls_happy_path(monkeypatch):
 
     assert result.exit_code == 0
     assert "AgentA" in result.output
-    assert "Samantha" in result.output
     assert "hello" in result.output
 
 

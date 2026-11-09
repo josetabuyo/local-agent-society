@@ -82,7 +82,7 @@ def test_register_and_list_agent(client):
 
     agents = client.get("/agents").json()
     assert "Alice" in agents
-    assert agents["Alice"]["voice"] == "Samantha"
+    assert "voice" not in agents["Alice"], "the legacy macOS voice name is not stored anymore"
     assert agents["Alice"]["path"] == "/tmp/alice"
     assert agents["Alice"]["backend_url"] == "http://localhost:8700"
     assert agents["Alice"]["frontend_url"] == "http://localhost:8700/widget/Alice"
@@ -378,40 +378,55 @@ def test_mute_is_idempotent(client):
 
 # ── voices ───────────────────────────────────────────────────────────────────────
 
-def test_list_voices(client):
-    resp = client.get("/voices")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "voices" in body
+def test_list_voices_is_the_kokoro_catalogue(client):
+    body = client.get("/voices").json()
     names = {v["name"] for v in body["voices"]}
-    assert "Samantha" in names
-    assert "Paulina" in names
+    assert {"ef_dora", "em_alex", "af_heart", "em_alex+am_onyx"} <= names
+    assert "Samantha" not in names and "Paulina" not in names, "macOS say names are gone"
+    dora = next(v for v in body["voices"] if v["name"] == "ef_dora")
+    assert dora["lang"] == "es-ES" and dora["gender"] == "female" and dora["pin_only"] is False
+
+
+def test_list_voices_shows_who_speaks_with_each(client, tmp_path):
+    import json
+    for name, cfg in [("Pinned", {"locale": "es-MX", "tts_voice": "em_alex+am_onyx"}), ("Hashed", {"locale": "es-MX"})]:
+        d = tmp_path / name
+        d.mkdir()
+        (d / ".las-agent.json").write_text(json.dumps({"name": name, **cfg}))
+        client.post("/agents", json={"name": name, "path": str(d)})
+    from cli import voice_catalog
+    voices = {v["name"]: v for v in client.get("/voices").json()["voices"]}
+    assert voices["em_alex+am_onyx"]["agents"] == [{"agent": "Pinned", "how": "pinned", "inactive": False}]
+    hashed = voice_catalog.hashed_voice("Hashed", "es-MX")
+    assert {"agent": "Hashed", "how": "hashed", "inactive": False} in voices[hashed]["agents"]
 
 
 def test_random_voice(client):
-    resp = client.get("/voices/random")
+    resp = client.get("/voices/random", params={"locale": "es-MX", "gender": "male"})
     assert resp.status_code == 200
-    assert "voice" in resp.json()
+    from cli import voice_catalog
+    v = resp.json()["voice"]
+    assert voice_catalog.find(v)["lang"] == "es-ES" and voice_catalog.gender(v) == "male"
 
 
-def test_random_voice_avoids_taken_voices(client):
-    # Register agents against every voice except one, so /voices/random must
-    # return that single remaining one.
+def test_random_voice_avoids_taken_voices(client, tmp_path, monkeypatch):
+    import json
     import backend.main as main
-    all_names = [v["name"] for v in main.NICE_VOICES]
-    reserved, remaining = all_names[:-1], all_names[-1]
-    for i, v in enumerate(reserved):
-        client.post("/agents", json={"name": f"agent{i}", "voice": v, "path": "/tmp/x"})
-    resp = client.get("/voices/random")
-    assert resp.json()["voice"] == remaining
+    from cli import voice_catalog
+    monkeypatch.setattr(voice_catalog, "catalog", lambda: [
+        {"name": "em_alex", "lang": "es-ES"}, {"name": "em_santa", "lang": "es-ES"}])
+    d = tmp_path / "Taker"
+    d.mkdir()
+    (d / ".las-agent.json").write_text(json.dumps({"name": "Taker", "locale": "es-ES", "tts_voice": "em_alex"}))
+    client.post("/agents", json={"name": "Taker", "path": str(d)})
+    for _ in range(10):
+        assert client.get("/voices/random", params={"locale": "es-ES"}).json()["voice"] == "em_santa"
 
 
 def test_get_voice_by_name(client):
-    resp = client.get("/voices/Samantha")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["name"] == "Samantha"
-    assert body["lang"] == "en-US"
+    body = client.get("/voices/em_alex+am_onyx").json()
+    assert body["name"] == "em_alex+am_onyx" and body["lang"] == "es-ES"
+    assert body["gender"] == "male" and body["pin_only"] is True
 
 
 def test_get_voice_by_name_404(client):

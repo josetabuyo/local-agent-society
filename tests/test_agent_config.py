@@ -106,9 +106,12 @@ def test_normalize_fills_only_what_is_missing_in_a_fixed_order(tmp_path):
     (tmp_path / "README.md").write_text("x")
     current = {"voice": "Paulina", "name": "Robo", "ports": [9003], "short_description": "kept",
                "scope_docs": ["docs/who.md"], "sessions": {"target": "shell", "runtimes": {"shell": {"scope": "mine"}}}}
-    out = normalized_agent_config(current, tmp_path, locale_for=lambda v: "es-MX")
-    assert list(out)[:9] == ["name", "voice", "locale", "pronunciation", "created", "response_length_hint",
+    out = normalized_agent_config(current, tmp_path)
+    assert list(out)[:9] == ["name", "locale", "tts_voice", "pronunciation", "created", "response_length_hint",
                              "short_description", "long_description", "scope_docs"]
+    assert "voice" not in out, "the legacy macOS name is migrated to locale and dropped"
+    from cli import voice_catalog
+    assert out["tts_voice"] == voice_catalog.hashed_voice("Robo", "es-MX"), "pins the voice it already speaks with"
     assert list(out)[-2:] == ["ports", "sessions"]
     assert out["locale"] == "es-MX" and out["pronunciation"] == "Robo" and out["short_description"] == "kept"
     assert out["scope_docs"] == ["docs/who.md"], "an explicit choice of identity docs is never replaced"

@@ -30,6 +30,7 @@ from cli.agent_config import (FRIENDS_KEY, friends_of, with_friend, KIND_COMMAND
                               descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
                               write_agent_config)
 from cli.path_utils import agent_config_path
+from cli import voice_catalog
 from cli.terminal import hangup_tty, ring_bell, session_title_text, set_terminal_title, tty_of_pid
 
 app = FastAPI(title="Local Agent Society", version="1.0.0")
@@ -46,23 +47,7 @@ INACTIVE_FILE      = DATA_DIR / "inactive.json"
 SESSIONS_FILE      = DATA_DIR / "sessions.json"
 WAKE_ENABLED_FILE  = DATA_DIR / "wake_enabled.json"
 
-NICE_VOICES = [
-    {"name": "Samantha",               "lang": "en-US", "flag": "🇺🇸"},
-    {"name": "Daniel",                 "lang": "en-GB", "flag": "🇬🇧"},
-    {"name": "Moira",                  "lang": "en-IE", "flag": "🇮🇪"},
-    {"name": "Karen",                  "lang": "en-AU", "flag": "🇦🇺"},
-    {"name": "Tessa",                  "lang": "en-ZA", "flag": "🇿🇦"},
-    {"name": "Rishi",                  "lang": "en-IN", "flag": "🇮🇳"},
-    {"name": "Paulina",                "lang": "es-MX", "flag": "🇲🇽"},
-    {"name": "Mónica",                 "lang": "es-ES", "flag": "🇪🇸"},
-    {"name": "Flo (English (US))",     "lang": "en-US", "flag": "🇺🇸"},
-    {"name": "Sandy (English (US))",   "lang": "en-US", "flag": "🇺🇸"},
-    {"name": "Shelley (English (US))", "lang": "en-US", "flag": "🇺🇸"},
-    {"name": "Reed (English (US))",    "lang": "en-US", "flag": "🇺🇸"},
-    {"name": "Eddy (English (US))",    "lang": "en-US", "flag": "🇺🇸"},
-    {"name": "Jorge",                  "lang": "es-ES", "flag": "🇪🇸"},
-]
-NICE_VOICE_NAMES = [v["name"] for v in NICE_VOICES]
+# Voices: cli/voice_catalog.py — Kokoro ids, shared with the widget.
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -326,11 +311,7 @@ def _drain_one() -> bool:
         muted = load_json(MUTED_FILE, [])
     if name in muted:
         return True
-    voice = msg.get("voice", "Samantha")
     text  = msg.get("text", "")
-    if voice not in NICE_VOICE_NAMES:
-        logger.warning(f"[tts] skipping unknown voice {voice!r} for {name!r}")
-        return True
     if not text:
         return True
 
@@ -352,7 +333,6 @@ def _drain_one() -> bool:
             "source": "system",
             "kind": "speak",
             "text": text,
-            "voice": voice,
             "ts": int(time.time() * 1000),
         }
         if not _vortexia_publish(SPEAK_TOPIC, envelope):
@@ -426,7 +406,7 @@ if not os.environ.get("LAS_NO_UPDATE_CHECK"):
 
 class AgentRegistration(BaseModel):
     name:          str
-    voice:         str
+    voice:         Optional[str] = None   # legacy macOS name, ignored — the voice is `tts_voice` in .las-agent.json
     path:          str
     backend_url:   Optional[str] = "http://localhost:8700"
     frontend_url:  Optional[str] = None
@@ -451,7 +431,7 @@ class PortClaimRequest(BaseModel):
 
 class SpeakRequest(BaseModel):
     text:   str = Field(max_length=10000)
-    voice:  str
+    voice:  Optional[str] = None   # legacy, ignored: the widget speaks with the agent's own Kokoro voice
     name:   str
 
 
@@ -577,27 +557,49 @@ def update_check():
 
 
 
-@app.get("/voices/random")
-def random_voice():
+def _voice_users() -> dict[str, list[dict]]:
+    """Kokoro id → the local agents speaking with it ({agent, how: pinned|hashed, inactive})."""
     registry = load_json(REGISTRY_FILE, {})
-    taken = {v["voice"] for v in registry.values() if "voice" in v}
-    available = [v["name"] for v in NICE_VOICES if v["name"] not in taken]
-    if not available:
-        available = NICE_VOICE_NAMES  # pool exhausted — allow repeats
-    return {"voice": random.choice(available)}
+    inactive = set(load_json(INACTIVE_FILE, []))
+    users: dict[str, list[dict]] = {}
+    for name in sorted(registry, key=str.lower):
+        voice, how = voice_catalog.voice_of(name, _agent_config(name, registry))
+        if voice:
+            users.setdefault(voice, []).append({"agent": name, "how": how, "inactive": name in inactive})
+    return users
+
+
+def _voice_row(v: dict, users: dict) -> dict:
+    return {"name": v["name"], "lang": v["lang"], "gender": voice_catalog.gender(v["name"]),
+            "pin_only": bool(v.get("pinOnly")), "agents": users.get(v["name"], [])}
+
+
+@app.get("/voices/random")
+def random_voice(locale: str = "en-US", gender: Optional[str] = None):
+    """A Kokoro voice of `locale`'s language that no local agent speaks with yet (repeats once all are taken)."""
+    users = _voice_users()
+    lang = locale.split("-")[0].lower()
+    pool = [v["name"] for v in voice_catalog.catalog() if v["lang"].lower().startswith(lang)
+            and (not gender or voice_catalog.gender(v["name"]) == gender)]
+    if not pool:
+        raise HTTPException(status_code=404, detail=f"No {gender or ''} voice for {locale}".replace("  ", " "))
+    free = [v for v in pool if v not in users]
+    return {"voice": random.choice(free or pool)}
 
 
 @app.get("/voices")
 def list_voices():
-    return {"voices": NICE_VOICES}
+    """Every Kokoro voice, with the local agents speaking with each."""
+    users = _voice_users()
+    return {"voices": [_voice_row(v, users) for v in voice_catalog.catalog()]}
 
 
 @app.get("/voices/{name}")
 def get_voice(name: str):
-    voice = next((v for v in NICE_VOICES if v["name"] == name), None)
+    voice = voice_catalog.find(name)
     if not voice:
         raise HTTPException(status_code=404, detail="Voice not found")
-    return voice
+    return _voice_row(voice, _voice_users())
 
 
 # ── local text-to-speech (Kokoro-82M via kokoro-onnx) ───────────────────────
@@ -701,6 +703,7 @@ def register_agent(agent: AgentRegistration):
     with _registry_lock:
         registry = load_json(REGISTRY_FILE, {})
         data = agent.model_dump()
+        data.pop("voice", None)   # legacy macOS name — the voice lives in .las-agent.json (tts_voice)
         data["backend_url"] = "http://localhost:8700"
         data["frontend_url"] = f"http://localhost:8700/widget/{agent.name}"
         registry[agent.name] = {**data, "registered_at": datetime.now().isoformat()}
@@ -1223,7 +1226,7 @@ def agent_hierarchy(name: str, deep: bool = False):
         "path": registry[name].get("path"),
         "parent": parent_of(name, registry),
         "children": [
-            {"name": c, "path": registry[c].get("path"), "voice": registry[c].get("voice")}
+            {"name": c, "path": registry[c].get("path"), "voice": voice_catalog.voice_of(c, _agent_config(c, registry))[0]}
             for c in children
         ],
         "deep": deep,
@@ -1354,7 +1357,7 @@ def claim_port(req: PortClaimRequest):
 def enqueue_speak(req: SpeakRequest):
     with _queue_lock:
         queue = load_json(QUEUE_FILE, [])
-        queue.append({"text": req.text, "voice": req.voice, "name": req.name})
+        queue.append({"text": req.text, "name": req.name})
         save_json(QUEUE_FILE, queue)
         length = len(queue)
     return {"ok": True, "queue_length": length}

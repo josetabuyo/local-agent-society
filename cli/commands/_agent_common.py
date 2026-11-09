@@ -2,7 +2,7 @@
 
 Centralizes the two pieces of logic that were previously duplicated across
 multiple subcommands: resolving an agent name from the current working
-directory, and inferring a locale from a TTS voice name.
+directory.
 """
 import json
 from pathlib import Path
@@ -59,11 +59,3 @@ def resolve_agent_name(name, *, err: bool = False) -> str:
         return resolved
     click.echo("Error: no agent name given and no agent config in current directory.", err=err)
     raise SystemExit(1)
-
-
-def infer_locale(voice: str) -> str:
-    """Return a sensible locale code for a TTS voice name."""
-    try:
-        return api.get(f"/voices/{voice}").get("lang", "en-US")
-    except Exception:
-        return "en-US"

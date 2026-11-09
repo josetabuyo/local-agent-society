@@ -101,7 +101,8 @@ def test_hierarchy_endpoint(client):
     top = client.get("/agents/Top/hierarchy").json()
     assert top["parent"] is None
     assert [c["name"] for c in top["children"]] == ["A"]
-    assert top["children"][0]["voice"] == "Paulina"
+    from cli import voice_catalog
+    assert top["children"][0]["voice"] == voice_catalog.hashed_voice("A", "en-US"), "the Kokoro voice A speaks with"
     assert top["deep"] is False
 
     deep = client.get("/agents/Top/hierarchy", params={"deep": "true"}).json()

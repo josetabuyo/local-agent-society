@@ -196,31 +196,6 @@ def test_speak_rejects_oversized_text(client):
     assert resp.status_code == 422
 
 
-def test_drainer_skips_unknown_voice_without_calling_say(app_module, tmp_path):
-    """The TTS drainer must not pass an unrecognized voice name to `say`."""
-    app_module.save_json(app_module.QUEUE_FILE, [{"text": "hi", "voice": "TotallyMadeUpVoice", "name": "X"}])
-    app_module.save_json(app_module.MUTED_FILE, [])
-
-    # Run one iteration of the drainer body manually (avoid spinning the real thread/loop).
-    with app_module._queue_lock:
-        queue = app_module.load_json(app_module.QUEUE_FILE, [])
-        msg = queue.pop(0) if queue else None
-        if msg is not None:
-            app_module.save_json(app_module.QUEUE_FILE, queue)
-    assert msg is not None
-    with app_module._muted_lock:
-        muted = app_module.load_json(app_module.MUTED_FILE, [])
-    assert msg["name"] not in muted
-    assert msg["voice"] not in app_module.NICE_VOICE_NAMES
-
-    calls_before = len(app_module._subprocess_calls)
-    if msg["voice"] not in app_module.NICE_VOICE_NAMES:
-        pass  # drainer would `continue` here rather than calling subprocess.run
-    else:
-        app_module.subprocess.run(["say", "-v", msg["voice"], msg["text"]], check=False)
-    assert len(app_module._subprocess_calls) == calls_before
-
-
 def test_inject_never_interpolates_message_into_applescript_source(app_module, monkeypatch):
     """_inject_via_iterm must pass the message via argv, not string-interpolate it
     into the AppleScript source (regression guard for the injection fix)."""

@@ -24,11 +24,11 @@ export function makeAnswer({ agent, send, speak = null, out = process.stderr }) 
 }
 
 /** POST the backend's speech queue as `agent`, in its own voice. */
-export function makeSpeaker({ agent, voice, fetchImpl = globalThis.fetch, registryUrl = process.env.LAS_REGISTRY_URL || 'http://localhost:8700' }) {
+export function makeSpeaker({ agent, fetchImpl = globalThis.fetch, registryUrl = process.env.LAS_REGISTRY_URL || 'http://localhost:8700' }) {
   return async function speak(text) {
     const res = await fetchImpl(`${registryUrl}/queue/speak`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, voice: voice || 'Samantha', name: agent }),
+      body: JSON.stringify({ text, name: agent }),
     });
     if (!res.ok) throw new Error(`speak failed: HTTP ${res.status}`);
   };

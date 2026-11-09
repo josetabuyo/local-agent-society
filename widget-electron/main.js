@@ -1724,9 +1724,10 @@ ipcMain.on('mic:status', (_event, name, state, detail) => {
 
 // ── face buttons: this agent's voice + locale (for mic STT + TTS pickVoice) ─
 //
-// Reads the backend's agent registry (voice) and its NICE_VOICES catalogue
-// (voice -> lang), same source of truth as CLAUDE.md rule 7 / rule 3's
-// voice-language table, instead of duplicating that table here.
+// Both come from the agent's own .las-agent.json (via the backend's config
+// view): `locale` is its language, `tts_voice` its Kokoro voice. A file still
+// carrying only the old macOS `voice` name (not yet `las agent normalize`d)
+// gets its language from LEGACY_VOICE_LOCALES, as cli/voice_catalog.py does.
 
 // Connected sessions of an agent — its children (a Claude, a Codex, a
 // shell; docs/adr/0004 phase 2, docs/adr/0005): what the children button
@@ -1923,36 +1924,33 @@ ipcMain.handle('mic:recording', (_event, name, recording) => {
   return recordingWindows.size > 0;
 });
 
-// `tts_voice` (optional, .las-agent.json): a Kokoro voice id (lib/kokoroVoices.js)
-// the agent pins for itself — the renderer's speak() uses it instead of
-// hashing the agent name into the locale's pool. Read through the backend's
-// config view (the one process that knows every agent's path).
-async function fetchPinnedTtsVoice(name) {
+const LEGACY_VOICE_LOCALES = Object.freeze({
+  Samantha: 'en-US', Daniel: 'en-GB', Moira: 'en-IE', Karen: 'en-AU', Tessa: 'en-ZA', Rishi: 'en-IN',
+  Paulina: 'es-MX', 'Mónica': 'es-ES', Jorge: 'es-ES', 'Flo (English (US))': 'en-US',
+  'Sandy (English (US))': 'en-US', 'Shelley (English (US))': 'en-US', 'Reed (English (US))': 'en-US',
+  'Eddy (English (US))': 'en-US',
+});
+
+// The agent's voice settings from its .las-agent.json, read through the
+// backend's config view (the one process that knows every agent's path):
+// `locale` (else what a legacy `voice` name implied, else en-US) and the
+// pinned Kokoro `tts_voice` (lib/kokoroVoices.js) — the renderer's speak()
+// uses it instead of hashing the agent name into the locale's pool.
+async function fetchVoiceConfig(name) {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`);
-    if (!res.ok) return null;
+    if (!res.ok) return { locale: 'en-US', ttsVoice: null };
     const view = await res.json();
-    const pinned = view && view.config ? view.config.tts_voice : null;
-    return typeof pinned === 'string' && pinned.trim() ? pinned.trim() : null;
+    const config = (view && view.config) || {};
+    const pinned = typeof config.tts_voice === 'string' && config.tts_voice.trim() ? config.tts_voice.trim() : null;
+    const locale = (typeof config.locale === 'string' && config.locale) || LEGACY_VOICE_LOCALES[config.voice] || 'en-US';
+    return { locale, ttsVoice: pinned };
   } catch {
-    return null;
+    return { locale: 'en-US', ttsVoice: null };
   }
 }
 
-ipcMain.handle('agent:info', async (_event, name) => {
-  const ttsVoice = await fetchPinnedTtsVoice(name);
-  try {
-    const agents = await fetchAgents();
-    const voice = agents && agents[name] ? agents[name].voice : null;
-    if (!voice) return { voice: null, locale: 'en-US', ttsVoice };
-    const res = await fetch(`${REGISTRY_URL}/voices/${encodeURIComponent(voice)}`);
-    if (!res.ok) return { voice, locale: 'en-US', ttsVoice };
-    const data = await res.json();
-    return { voice, locale: data.lang || 'en-US', ttsVoice };
-  } catch {
-    return { voice: null, locale: 'en-US', ttsVoice };
-  }
-});
+ipcMain.handle('agent:info', async (_event, name) => fetchVoiceConfig(name));
 
 // "Door" button: mark this agent inactive on the backend, then close this
 // very widget window — mirrors `las agent deactivate`. Does not touch the
