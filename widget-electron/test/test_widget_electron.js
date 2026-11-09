@@ -1992,8 +1992,22 @@ test('pin-only Spanish female blends are pinnable but never in the hash pool', (
     assert.ok(!KOKORO_HASH_POOL.includes(v), `${id} must stay out of the hash pool`);
   }
   // The hash pool is exactly the voices that were there before — no agent's hashed voice moves.
-  assert.equal(KOKORO_HASH_POOL.length, KOKORO_VOICES.length - wanted.length);
+  assert.equal(KOKORO_HASH_POOL.length, KOKORO_VOICES.filter((v) => !v.pinOnly).length);
+  assert.equal(KOKORO_HASH_POOL.length, 37, "the hashed pool keeps its 37 original voices");
   const src = readSrc('renderer/widget.js');
   assert.match(src, /pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
   assert.match(readSrc('preload.js'), /ttsHashPool: KOKORO_HASH_POOL/);
+});
+
+test('pin-only male Spanish blends: em_alex, em_santa and their blend with every English man', () => {
+  const { KOKORO_HASH_POOL } = require('../lib/kokoroVoices');
+  const men = KOKORO_VOICES.filter((v) => /^(am|bm)_/.test(v.name)).map((v) => v.name);
+  for (const base of ['em_alex', 'em_santa', 'em_alex+em_santa']) {
+    for (const m of men) {
+      const v = KOKORO_VOICES.find((x) => x.name === `${base}+${m}`);
+      assert.ok(v, `${base}+${m} must be pinnable`);
+      assert.equal(v.kokoroLang, 'es');
+      assert.ok(v.pinOnly && !KOKORO_HASH_POOL.includes(v));
+    }
+  }
 });
