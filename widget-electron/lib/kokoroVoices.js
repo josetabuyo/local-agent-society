@@ -55,6 +55,24 @@ const KOKORO_VOICES = Object.freeze([
   { name: 'ef_dora+em_alex+em_santa', lang: 'es-ES', kokoroLang: 'es' },
   { name: 'ef_dora+ef_dora+em_alex', lang: 'es-ES', kokoroLang: 'es' },
   { name: 'ef_dora+ef_dora+em_santa', lang: 'es-ES', kokoroLang: 'es' },
+  // Female Spanish voices for agents that pin one (`tts_voice`): Kokoro's one
+  // Spanish woman (ef_dora) blended with an English one, spoken with the
+  // Spanish phonemizer. pinOnly: never in the hash pool, so adding them
+  // changes no agent's existing hashed voice.
+  { name: 'ef_dora+af_heart', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+af_bella', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+bf_emma', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+af_nicole', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+bf_isabella', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+af_sky', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+af_aoede', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+af_kore', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+af_river', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+bf_alice', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
+  { name: 'ef_dora+bf_lily', lang: 'es-ES', kokoroLang: 'es', pinOnly: true },
 ]);
 
-module.exports = { KOKORO_VOICES };
+/** The voices an agent's name hashes into — every voice except the pin-only ones. */
+const KOKORO_HASH_POOL = Object.freeze(KOKORO_VOICES.filter((v) => !v.pinOnly));
+
+module.exports = { KOKORO_VOICES, KOKORO_HASH_POOL };

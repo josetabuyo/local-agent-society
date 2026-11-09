@@ -1570,7 +1570,7 @@ test("widget.js's speak() no longer uses window.speechSynthesis (replaced by loc
 test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays back the returned WAV", () => {
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
-  assert.match(body, /window\.las\.pickVoice\(agentName, locale, window\.las\.ttsVoices\)/);
+  assert.match(body, /window\.las\.pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
   assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang\)/);
   assert.match(body, /new Audio\(url\)/);
 });
@@ -1582,7 +1582,7 @@ test("widget.js's speak() honours a Kokoro voice pinned via tts_voice before fal
   assert.match(initBody, /if \(info && info\.ttsVoice\) ttsVoice = info\.ttsVoice;/);
   const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
   assert.match(body, /window\.las\.ttsVoices\.find\(\(v\) => v && v\.name === ttsVoice\)/);
-  assert.match(body, /pinned \? \{ voice: pinned, warning: null \} : window\.las\.pickVoice\(agentName, locale, window\.las\.ttsVoices\)/);
+  assert.match(body, /pinned \? \{ voice: pinned, warning: null \} : window\.las\.pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
   // An unknown id must not silently mute the agent — it warns and hashes as before.
   assert.match(body, /is not in the Kokoro pool/);
 });
@@ -1978,4 +1978,22 @@ test('at launch the app writes every stored agent color to its file, open widget
   assert.match(all, /mirrorColorToConfig\(name, p\.color\)/);
   const ready = main.slice(main.indexOf('app.whenReady().then(async () => {'));
   assert.match(ready.slice(0, 3000), /mirrorAllColors\(\);\s*setTimeout\(mirrorAllColors, 30000\)/);
+});
+
+test('pin-only Spanish female blends are pinnable but never in the hash pool', () => {
+  const { KOKORO_HASH_POOL } = require('../lib/kokoroVoices');
+  const wanted = ['af_heart', 'af_bella', 'bf_emma', 'af_nicole', 'bf_isabella', 'af_sky',
+    'af_aoede', 'af_kore', 'af_river', 'bf_alice', 'bf_lily'].map((b) => `ef_dora+${b}`);
+  for (const id of wanted) {
+    const v = KOKORO_VOICES.find((x) => x.name === id);
+    assert.ok(v, `${id} must be pinnable`);
+    assert.equal(v.kokoroLang, 'es');
+    assert.equal(v.pinOnly, true);
+    assert.ok(!KOKORO_HASH_POOL.includes(v), `${id} must stay out of the hash pool`);
+  }
+  // The hash pool is exactly the voices that were there before — no agent's hashed voice moves.
+  assert.equal(KOKORO_HASH_POOL.length, KOKORO_VOICES.length - wanted.length);
+  const src = readSrc('renderer/widget.js');
+  assert.match(src, /pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
+  assert.match(readSrc('preload.js'), /ttsHashPool: KOKORO_HASH_POOL/);
 });

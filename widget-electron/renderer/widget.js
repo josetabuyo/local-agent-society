@@ -1164,7 +1164,7 @@ async function speak(text, envelope) {
   }
   const pinned = ttsVoice ? window.las.ttsVoices.find((v) => v && v.name === ttsVoice) : null;
   if (ttsVoice && !pinned) console.warn(`[widget] tts_voice "${ttsVoice}" is not in the Kokoro pool — falling back to the hashed voice`);
-  const { voice, warning } = pinned ? { voice: pinned, warning: null } : window.las.pickVoice(agentName, locale, window.las.ttsVoices);
+  const { voice, warning } = pinned ? { voice: pinned, warning: null } : window.las.pickVoice(agentName, locale, window.las.ttsHashPool || window.las.ttsVoices);
   if (warning) console.warn('[widget]', warning);
   if (!voice) {
     ackSpeak(envelope, 'skipped', 'no-voice');

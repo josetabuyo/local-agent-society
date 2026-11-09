@@ -8,7 +8,7 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 const { pickVoice } = require('./lib/voiceHash');
-const { KOKORO_VOICES } = require('./lib/kokoroVoices');
+const { KOKORO_VOICES, KOKORO_HASH_POOL } = require('./lib/kokoroVoices');
 
 contextBridge.exposeInMainWorld('las', {
   /** Deterministic voice selection — see lib/voiceHash.js. */
@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('las', {
   /** The local Kokoro voice pool (see lib/kokoroVoices.js) — plain data, fed
    * into pickVoice() in place of the old speechSynthesis.getVoices() list. */
   ttsVoices: KOKORO_VOICES,
+  /** The subset an agent's name hashes into (pin-only voices left out). */
+  ttsHashPool: KOKORO_HASH_POOL,
 
   /** Synthesize `text` with a Kokoro voice id + kokoro-onnx lang code (both
    * from ttsVoices) via the backend's /tts/synthesize; returns
