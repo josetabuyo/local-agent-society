@@ -297,3 +297,62 @@ def with_friend(config: dict | None, friend: str, *, linked: bool = True) -> lis
     if linked:
         return current if friend in current else current + [friend]
     return [f for f in current if f != friend]
+
+
+# ── map elements: what an agent added to its map by hand ───────────────────
+#
+#     "map": [
+#       {"type": "repo", "path": "relay-ros"},
+#       {"type": "url", "url": "https://github.com/x/y", "label": "Board"}
+#     ]
+#
+# The map (docs/adr/0007) shows an agent's sessions and friends, which are
+# derived, plus these: elements added with `las map add`. A list, in the
+# order added; each element is identified by its type and its target
+# (`repo:<path>`, `url:<url>`). A repo path inside the agent's folder is kept
+# relative to it, so moving the folder keeps the map.
+
+MAP_KEY = "map"
+MAP_TYPES = ("repo", "url")
+_MAP_TARGET = {"repo": "path", "url": "url"}
+
+
+def map_element_id(element: dict) -> str:
+    """`<type>:<target>` — the stable id `las map remove` takes."""
+    kind = element.get("type")
+    return f"{kind}:{element.get(_MAP_TARGET.get(kind, ''), '')}"
+
+
+def map_elements_of(config: dict | None) -> list:
+    """The declared map elements of `config`: known types with a non-empty target, unique by id, in file order.
+
+    Tolerant of a hand-edited file — anything malformed is ignored, never a crash."""
+    declared = _dict(config).get(MAP_KEY)
+    if not isinstance(declared, list):
+        return []
+    out, seen = [], set()
+    for item in declared:
+        if not isinstance(item, dict) or item.get("type") not in MAP_TYPES:
+            continue
+        target = item.get(_MAP_TARGET[item["type"]])
+        if not isinstance(target, str) or not target.strip():
+            continue
+        element = {"type": item["type"], _MAP_TARGET[item["type"]]: target.strip()}
+        if isinstance(item.get("label"), str) and item["label"].strip():
+            element["label"] = item["label"].strip()
+        eid = map_element_id(element)
+        if eid not in seen:
+            seen.add(eid)
+            out.append(element)
+    return out
+
+
+def with_map_element(config: dict | None, element: dict, *, added: bool = True) -> list:
+    """The map list after adding `element` (replacing one with the same id, in place) or removing it (by id)."""
+    current = map_elements_of(config)
+    eid = map_element_id(element)
+    if not added:
+        return [e for e in current if map_element_id(e) != eid]
+    if any(map_element_id(e) == eid for e in current):
+        return [element if map_element_id(e) == eid else e for e in current]
+    return current + [element]

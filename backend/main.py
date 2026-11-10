@@ -26,7 +26,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (FRIENDS_KEY, friends_of, with_friend, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
+from cli.agent_config import (FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
                               descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
                               write_agent_config)
 from cli.path_utils import agent_config_path
@@ -1012,6 +1012,114 @@ def add_friend(name: str, friend: str):
 def remove_friend(name: str, friend: str):
     """Unlink `friend` from `name` — only `name`'s side. Idempotent."""
     return _link_friend(name, friend, False)
+
+
+# ── the map: elements an agent added by hand (docs/adr/0007) ────────────────
+
+class MapElementRequest(BaseModel):
+    type: str
+    path: str | None = None
+    url: str | None = None
+    label: str | None = None
+
+
+def _git(folder: Path, *args: str) -> str | None:
+    try:
+        out = subprocess.run(["git", "-C", str(folder), *args], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+_GITHUB_REMOTE = re.compile(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$")
+
+
+def _map_row(element: dict, base: Path | None) -> dict:
+    """One element as the map draws it: what was declared, plus what can be read about it now."""
+    row = {"id": map_element_id(element), **element}
+    if element["type"] == "repo":
+        folder = Path(element["path"]).expanduser()
+        if not folder.is_absolute() and base is not None:
+            folder = base / folder
+        row["abs_path"] = str(folder)
+        row["exists"] = (folder / ".git").exists()
+        remote = _git(folder, "config", "--get", "remote.origin.url") if row["exists"] else None
+        match = _GITHUB_REMOTE.search(remote or "")
+        # symbolic-ref also names the branch of a repo with no commit yet; a detached HEAD gives its short hash.
+        row["branch"] = (_git(folder, "symbolic-ref", "--short", "-q", "HEAD") or _git(folder, "rev-parse", "--short", "HEAD")) if row["exists"] else None
+        row["remote"] = remote
+        row["github"] = match.group(1) if match else None
+        row.setdefault("label", folder.name)
+    else:
+        row.setdefault("label", re.sub(r"^https?://(www\.)?", "", element["url"]).rstrip("/"))
+    return row
+
+
+def _map_view(name: str) -> dict:
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    file = _agent_config_file(name, registry)
+    base = Path(registry[name]["path"]) if registry[name].get("path") else None
+    elements = map_elements_of(read_agent_config(file) if file else {})
+    return {"agent": name, "elements": [_map_row(e, base) for e in elements]}
+
+
+@app.get("/agents/{name}/map")
+def list_map(name: str):
+    """The elements added to `name`'s map (`map` in its .las-agent.json), in the order added, with live repo info."""
+    return _map_view(name)
+
+
+def _edit_map(name: str, element: dict, added: bool) -> dict:
+    registry = load_json(REGISTRY_FILE, {})
+    file = _agent_config_file(name, registry)
+    if file is None:
+        raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
+    with _sessions_lock:
+        try:
+            current = read_agent_config(file, strict=True)
+        except BrokenAgentConfig as exc:
+            raise HTTPException(status_code=409, detail=f"{exc} — fix it by hand, then retry")
+        write_agent_config(file, merge_config_patch(current, {MAP_KEY: with_map_element(current, element, added=added)}))
+    return _map_view(name)
+
+
+@app.post("/agents/{name}/map")
+def add_map_element(name: str, req: MapElementRequest):
+    """Add an element to `name`'s map (or update its label). A repo must be a git folder; a url must be http(s). Idempotent."""
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if req.type not in MAP_TYPES:
+        raise HTTPException(status_code=422, detail=f"unknown element type {req.type!r} — one of: {', '.join(MAP_TYPES)}")
+    if req.type == "repo":
+        if not req.path:
+            raise HTTPException(status_code=422, detail="a repo needs a path")
+        folder = Path(req.path).expanduser().resolve()
+        if not (folder / ".git").exists():
+            raise HTTPException(status_code=422, detail=f"{folder} is not a git repository")
+        base = Path(registry[name].get("path") or "/").resolve()
+        # Inside the agent's folder → kept relative, so moving the folder keeps the map.
+        stored = str(folder.relative_to(base)) if folder.is_relative_to(base) else str(folder)
+        element = {"type": "repo", "path": stored}
+    else:
+        if not req.url or not re.match(r"^https?://\S+$", req.url):
+            raise HTTPException(status_code=422, detail="a url must start with http:// or https://")
+        element = {"type": "url", "url": req.url}
+    if req.label and req.label.strip():
+        element["label"] = req.label.strip()
+    return _edit_map(name, element, True)
+
+
+@app.delete("/agents/{name}/map")
+def remove_map_element(name: str, id: str):
+    """Remove the element with this id (`repo:<path>` / `url:<url>`, as GET lists it) from `name`'s map. Idempotent."""
+    kind, _, target = id.partition(":")
+    if kind not in MAP_TYPES or not target:
+        raise HTTPException(status_code=422, detail=f"{id!r} is not a map element id (repo:<path> or url:<url>)")
+    key = "path" if kind == "repo" else "url"
+    return _edit_map(name, {"type": kind, key: target}, False)
 
 
 def _session_summaries(name: str, sessions: dict, policy: dict | None = None) -> list:

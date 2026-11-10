@@ -11,6 +11,7 @@ from cli.commands.boarding import boarding
 from cli.commands.completion import completion
 from cli.commands.shell_init import shell_init
 from cli.commands.vocab import vocab_cmd
+from cli.commands.map import map_group
 from cli.commands.bridge import attach_cmd, bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
 
 
@@ -71,6 +72,7 @@ cli.add_command(speak)
 cli.add_command(agents_list, name="agents")
 cli.add_command(agent)
 cli.add_command(widget)
+cli.add_command(map_group, name="map")
 cli.add_command(widgets_all, name="widgets")
 cli.add_command(link)
 cli.add_command(ports)
