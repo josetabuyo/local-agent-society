@@ -163,6 +163,18 @@ contextBridge.exposeInMainWorld('las', {
 
   /** This agent's las-friends with their state: {agent, friends: [{name, registered, inactive, sessions, mutual}]} or null. */
   getFriends: (name) => ipcRenderer.invoke('agent:friends', name),
+  /** The elements added to `name`'s map (`las map add`, GET /agents/{name}/map): {agent, elements:[...]} or null. */
+  /** Open `name`'s map window (the 👥 click) — the same window `las map` opens. */
+  openMap: (name) => ipcRenderer.invoke('map:open', name),
+  getMap: (name) => ipcRenderer.invoke('agent:map', name),
+  /** Remove one element (id `repo:<path>` / `url:<url>`) from `name`'s map — a map tile's ✕. */
+  removeMapElement: (name, id) => ipcRenderer.invoke('agent:map-remove', name, id),
+  /** A map tile's 🎤 or ⌨: the agent's own widget runs it (its recorder, its keyboard drawer), aimed at that item. */
+  mapItemAction: (name, item, action) => ipcRenderer.invoke('map:item-action', name, item, action),
+  /** (widget side) The map asked this widget to dictate/type to one of its items. @param {(item: object, action: string) => void} cb */
+  onMapItemAction: (cb) => ipcRenderer.on('map:item-action', (_e, item, action) => cb(item, action)),
+  /** Open an http(s) URL in the default browser — the map window's link/repo tiles. */
+  openUrl: (url) => ipcRenderer.invoke('map:open-url', url),
   /** Link (`linked` true) or unlink `friend`; resolves to the new friends view, or null. */
   linkFriend: (name, friend, linked) => ipcRenderer.invoke('agent:friend-link', name, friend, linked),
   /** Every registered agent's name, sorted. */

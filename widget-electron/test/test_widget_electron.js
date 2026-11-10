@@ -1459,11 +1459,9 @@ test('an open drawer hides no face button: settings and the society panel leave 
   assert.doesNotMatch(css, /\.widget\.settings-open \.buttonbar/);
 });
 
-test('the society panel works like settings: only its own button closes it, and the button shows it is open', () => {
+test('the society list works like settings: only its own button closes it, and the button shows it is open', () => {
   const src = readSrc('renderer', 'widget.js');
-  const outside = src.slice(src.indexOf("document.addEventListener('mousedown', (e) => {\n  if (!childrenMenuOpen) return;"));
-  const body = extractFunctionBody(outside, "document.addEventListener('mousedown', (e) => {");
-  assert.doesNotMatch(body, /closeChildrenMenu|closeDrawer/, 'a click elsewhere only closes a tile\'s floating bar, never the panel');
+  assert.doesNotMatch(src, /document\.addEventListener\('mousedown', \(e\) => \{\n  if \(!childrenMenuOpen\) return;[\s\S]{0,200}closeChildrenMenu/, 'a click elsewhere never closes the list');
   assert.match(extractFunctionBody(src, 'async function showChildrenMenu()'), /childrenEl\.classList\.add\('active'\)/);
   assert.match(extractFunctionBody(src, 'function closeChildrenMenu()'), /childrenEl\.classList\.remove\('active'\)/);
   assert.doesNotMatch(src, /widgetEl\.addEventListener\('mouseleave'[\s\S]{0,800}closeChildrenMenu/, 'leaving the widget never closes it');
@@ -1651,14 +1649,16 @@ test('agent:sessions reports an UNKNOWN policy (target: null) on failure and the
   assert.match(refresh, /typeof view\.target === 'string'/);
 });
 
-test('the children button lists the sessions on click, hold or right-click; a row writes sessions.target to .las-agent.json via the backend; no cc toggle in the menu (settings only)', () => {
+test('the children button: click opens the map window; hold or right-click lists the sessions; a row writes sessions.target to .las-agent.json via the backend; no cc toggle in the menu (settings only)', () => {
   const src = readSrc('renderer', 'widget.js');
   const down = extractFunctionBody(src, "childrenEl.addEventListener('mousedown', (e) => {");
   assert.match(down, /showChildrenMenu\(\)/);
   assert.match(down, /OPEN_LONG_PRESS_MS/);
   assert.match(src, /childrenEl\.addEventListener\('contextmenu'/);
   const click = extractFunctionBody(src, "childrenEl.addEventListener('click', () => {");
-  assert.match(click, /showChildrenMenu\(\)/);
+  assert.match(click, /window\.las\.openMap\(agentName\)/, 'click = the map window (docs/adr/0007)');
+  assert.doesNotMatch(click, /showChildrenMenu\(\)/);
+  assert.match(readSrc('main.js'), /ipcMain\.handle\('map:open', \(_event, name\) => openMapWindow\(name\)\)/);
   assert.match(extractFunctionBody(src, 'function renderChildrenMenu()'), /renderSessionRows\(body\)/);
   const render = extractFunctionBody(src, 'function renderSessionRows(body)');
   assert.match(render, /setSessionsConfig\(\{\s*target:\s*row\.value\s*\}\)/);

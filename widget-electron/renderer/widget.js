@@ -581,10 +581,8 @@ function capDrawer(el, wanted = null) {
   if (!el.classList.contains('drawer-sized') && room > 0 && el.offsetHeight > room) setDrawerHeight(el, fitSplit(el.offsetHeight, room).drawer);
 }
 
-/** The Panel board fills whatever height its drawer now has. */
-function drawerResized(name) {
-  if (name === 'children' && childrenMenuOpen && currentSocietyTab() === 'panel') renderChildrenMenu();
-}
+/** A drawer was resized — nothing inside one needs redrawing for it any more (the 2D board moved to the map window). */
+function drawerResized() {}
 
 drawerSplitterEl.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !activeDrawer) return;
@@ -2183,13 +2181,13 @@ async function showChildrenMenu() {
   fitWindowToDrawer();
 }
 
-// ── the society drawer: sessions + las-friends, as a List or a 2D Panel ────
+// ── the society drawer: sessions + las-friends, as a list ────────────────
 //
-// One model (society-model.js: terminals, commands, friends as items with
-// the same two actions), two views (society-views.js). The tab choice and
-// where each tile was dropped are this window's prefs (childrenView,
-// societyLayout); the friends themselves are the agent's own `friends` in
-// its .las-agent.json, through the backend — what `las agent friends` edits.
+// One model (society-model.js: terminals, commands, friends as items), the
+// list view of society-views.js. The 2D board that used to be this drawer's
+// Panel tab is the map window now (map.js, `las map`, 👥 click — docs/adr/0007).
+// The friends themselves are the agent's own `friends` in its
+// .las-agent.json, through the backend — what `las agent friends` edits.
 
 let knownFriends = [];
 // Each friend's own widget mute (its prefs), for the 🔊 in its tile's button bar.
@@ -2233,40 +2231,11 @@ function societyItems() {
   });
 }
 
-function currentSocietyTab() {
-  return prefs.childrenView === 'panel' ? 'panel' : 'list';
-}
-
-function societyTabs() {
-  const bar = document.createElement('div');
-  bar.className = 'society-tabs';
-  for (const [tab, label] of [['list', '☰ List'], ['panel', '▦ Panel']]) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'society-tab' + (currentSocietyTab() === tab ? ' active' : '');
-    b.textContent = label;
-    b.addEventListener('click', async () => {
-      if (currentSocietyTab() === tab) return;
-      await persist({ childrenView: tab });
-      renderChildrenMenu();
-      fitWindowToDrawer();
-    });
-    bar.appendChild(b);
-  }
-  return bar;
-}
-
 function renderChildrenMenu() {
-  if (currentSocietyTab() !== 'panel') window.LasSocietyViews.closeTilePopup();
   childrenMenuEl.innerHTML = '';
-  childrenMenuEl.appendChild(societyTabs());
   const body = document.createElement('div');
   body.className = 'society-body';
   childrenMenuEl.appendChild(body);
-  if (currentSocietyTab() === 'panel') {
-    window.LasSocietyViews.renderPanel(body, societyItems(), prefs.societyLayout || {}, societyHandlers);
-    return;
-  }
   renderSessionRows(body);
   renderFriendRows(body);
 }
@@ -2313,9 +2282,6 @@ const societyHandlers = {
       });
     }
   },
-  async onMove(key, pos) {
-    await persist({ societyLayout: { ...(prefs.societyLayout || {}), [key]: pos } });
-  },
 };
 
 /** The item's mic: start a dictation for it, or stop (and send) the one in flight. */
@@ -2327,6 +2293,12 @@ function societyMic(item) {
     : { to: agentName, session: item.sid, label: `${item.runtime} session` };
   startRecording(destination);
 }
+
+// The map window (map.js) has the same 🎤 / ⌨ on its tiles; this widget runs them.
+window.las.onMapItemAction((item, action) => {
+  if (action === 'mic') societyMic(item);
+  else if (action === 'keyboard') societyKeyboard(item);
+});
 
 /** The item's ⌨: the keyboard drawer, aimed at that friend or that one session. */
 function societyKeyboard(item) {
@@ -2530,6 +2502,8 @@ childrenEl.addEventListener('mousedown', (e) => {
 });
 childrenEl.addEventListener('mouseup', cancelChildrenLongPress);
 childrenEl.addEventListener('mouseleave', cancelChildrenLongPress);
+// Click: the map window (sessions, friends, repos, URLs as mini widgets — docs/adr/0007).
+// Hold or right-click: this drawer's list, where the mic's target is chosen.
 childrenEl.addEventListener('click', () => {
   if (childrenLongPressFired) {
     // The release of a hold that already opened the menu: keep it open.
@@ -2537,21 +2511,16 @@ childrenEl.addEventListener('click', () => {
     return;
   }
   if (childrenMenuOpen) closeChildrenMenu();
-  else showChildrenMenu();
+  else window.las.openMap(agentName);
 });
 childrenEl.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (childrenMenuOpen) closeChildrenMenu();
   else showChildrenMenu();
 });
-// Like settings: the panel stays open until its own button closes it (or
+// Like settings: the list stays open until its own button closes it (or
 // another drawer replaces it) — clicking elsewhere in the widget, or leaving
-// it, never closes it. Only a tile's floating bar closes on a click elsewhere.
-document.addEventListener('mousedown', (e) => {
-  if (!childrenMenuOpen) return;
-  if (e.target.closest('.tile-popup') || e.target.closest('.society-tile')) return;
-  window.LasSocietyViews.closeTilePopup();
-});
+// it, never closes it.
 
 // -- open: a NEW terminal window, or the folder, at this agent's path -------
 //

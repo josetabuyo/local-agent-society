@@ -134,9 +134,9 @@
     const { background, color } = M.chipColors(item.color, alpha);
     w.style.background = background;
     w.style.color = color;
-    if (item.kind === 'terminal' || item.kind === 'command') {
+    if (item.kind === 'terminal' || item.kind === 'command' || item.kind === 'repo' || item.kind === 'url') {
       const head = el('div', 'mw-head');
-      head.append(el('span', 'mw-icon', M.KIND_ICONS[item.kind] || ''), el('span', 'mw-runtime', item.label));
+      head.append(el('span', 'mw-icon', item.icon || M.KIND_ICONS[item.kind] || ''), el('span', 'mw-runtime', item.label));
       w.append(head, el('div', 'mw-detail', item.detail));
     } else {
       w.appendChild(el('div', 'mw-name', item.label));
@@ -144,13 +144,36 @@
     return w;
   }
 
-  /** Panel tab: a mini widget placed on the board — draggable, with its button bar on double-click or hold. */
-  function tile(item, pos, handlers) {
+  /**
+   * Panel tab: a mini widget placed on the board — draggable, with its button bar on double-click or hold.
+   * `readOnly` (the map window): no button bar; a click opens the item's `href`, if any, via handlers.onOpen,
+   * handlers.onClose, when given (the map), adds a ✕ in the tile's corner, in either mode.
+   */
+  function tile(item, pos, handlers, readOnly = false) {
     const t = miniWidget(item, { className: `society-tile${item.isDefault ? ' is-default' : ''}${item.widgetClosed ? ' widget-closed' : ''}` });
     t.dataset.key = item.key;
     t.style.left = `${pos.x}px`;
     t.style.top = `${pos.y}px`;
     t.style.width = t.style.height = `${M.TILE}px`;
+    if (handlers.onClose) {
+      // The map's ✕ in the corner (closes a terminal or a friend's widget, takes a repo/url off the map).
+      const close = el('button', 'mw-close', '✕');
+      close.type = 'button';
+      close.title = handlers.closeTitle ? handlers.closeTitle(item) : 'Close';
+      close.addEventListener('pointerdown', (e) => e.stopPropagation());
+      close.addEventListener('dblclick', (e) => e.stopPropagation());
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handlers.onClose(item, close);
+      });
+      t.appendChild(close);
+    }
+    if (readOnly) {
+      t.title = `${item.label}${item.detail ? ` — ${item.detail}` : ''}${item.href ? `\nClick: open ${item.href}` : ''}\nDrag to move`;
+      if (item.href) t.classList.add('has-href');
+      makeDraggable(t, item, handlers, true);
+      return t;
+    }
     t.title = `${item.label}${item.detail ? ` — ${item.detail}` : ''}\nDouble-click or hold for actions, drag to move`;
     t.addEventListener('dblclick', (e) => {
       e.stopPropagation();
@@ -166,13 +189,15 @@
   const LONG_PRESS_MS = 600;
 
   /** Drag to move; hold still for LONG_PRESS_MS to open the tile's button bar. */
-  function makeDraggable(t, item, handlers) {
+  function makeDraggable(t, item, handlers, readOnly = false) {
     t.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       const area = t.parentElement;
       const start = { x: e.clientX, y: e.clientY, left: t.offsetLeft, top: t.offsetTop };
       let dragging = false;
-      let hold = setTimeout(() => {
+      // The map (readOnly) has no button bar: no hold timer at all.
+      let hold = null;
+      if (!readOnly) hold = setTimeout(() => {
         hold = null;
         if (!dragging && !(popup && popup.tile === t)) openTilePopup(t, item, handlers);
       }, LONG_PRESS_MS);
@@ -194,7 +219,10 @@
         t.removeEventListener('pointermove', move);
         t.removeEventListener('pointerup', up);
         t.removeEventListener('pointercancel', up);
-        if (!dragging) return;
+        if (!dragging) {
+          if (readOnly && item.href && handlers.onOpen) handlers.onOpen(item);
+          return;
+        }
         t.classList.remove('dragging');
         handlers.onMove(t.dataset.key, { x: t.offsetLeft, y: t.offsetTop });
       };
@@ -207,8 +235,12 @@
 
   const PANEL_MIN_HEIGHT = 2 * M.TILE + M.GAP;
 
-  /** Panel tab: every item as a draggable mini sticky, at its saved (or a free) spot. */
-  function renderPanel(container, items, saved, handlers) {
+  /**
+   * Panel tab: every item as a draggable mini sticky, at its saved (or a free) spot.
+   * `opts.readOnly`: the map window — tiles drag and open their link, never show a button bar.
+   * `opts.empty`: the text shown when there is nothing to draw.
+   */
+  function renderPanel(container, items, saved, handlers, opts = {}) {
     // Redrawn (a mute toggled, a session came or went): keep the popup on the same item.
     const reopenKey = popup && popup.bar.dataset.key;
     closeTilePopup();
@@ -220,11 +252,11 @@
     const room = Math.max(PANEL_MIN_HEIGHT, container.clientHeight);
     const positions = M.layout(items, saved, width, room);
     area.style.height = `${M.panelHeight(positions, room)}px`;
-    for (const item of items) area.appendChild(tile(item, positions[item.key], handlers));
+    for (const item of items) area.appendChild(tile(item, positions[item.key], handlers, !!opts.readOnly));
     const again = reopenKey && items.find((i) => i.key === reopenKey);
     const againEl = again && [...area.children].find((c) => c.dataset.key === reopenKey);
     if (againEl) openTilePopup(againEl, again, handlers);
-    if (!items.length) area.appendChild(el('div', 'society-empty', 'Nothing here yet — open a session, or link a friend in the List tab.'));
+    if (!items.length) area.appendChild(el('div', 'society-empty', opts.empty || 'Nothing here yet — open a session, or link a friend in the List tab.'));
     return area;
   }
 

@@ -22,7 +22,7 @@
   const DEFAULT_COLOR = '#90c060';
 
   // Only sessions carry an icon (top-left, next to their runtime); an agent — a friend, or a widget at icon size — is just its name.
-  const KIND_ICONS = { terminal: '\u{1F4BB}', command: '⚙️' };
+  const KIND_ICONS = { terminal: '\u{1F4BB}', command: '⚙️', repo: '\u{1F4E6}', url: '\u{1F517}' };
 
   /**
    * The actions every item offers — the actions it offers, in the order of a
@@ -34,6 +34,9 @@
     friend: ['exit', 'settings', 'open', 'speaker', 'keyboard', 'mic'],
     terminal: ['exit', 'find', 'keyboard', 'mic'],
     command: ['exit', 'log', 'keyboard', 'mic'],
+    // The map's own elements (docs/adr/0007): take it off the map, open its link.
+    repo: ['exit', 'open'],
+    url: ['exit', 'open'],
   };
   /** Actions shared by every kind. */
   const ACTIONS = ['exit', 'keyboard', 'mic'];
@@ -116,6 +119,10 @@
     const away = friend && item.remote ? ` — ${item.agent} lives on ${item.remote}` : '';
     if (action === 'settings') {
       return { title: local ? `${item.agent}'s settings — brings its widget here, settings open` : `Settings${away || ' — not registered'}`, enabled: local };
+    }
+    if ((item.kind === 'repo' || item.kind === 'url') && (action === 'open' || action === 'exit')) {
+      if (action === 'exit') return { title: 'Take it off the map', enabled: true };
+      return { title: item.href ? `Open ${item.href}` : 'No link — this repo has no GitHub remote', enabled: !!item.href };
     }
     if (action === 'open') {
       return { title: local ? `Open a terminal at ${item.agent}'s folder (right-click: the folder)` : `Open${away || ' — not registered'}`, enabled: local };

@@ -356,11 +356,21 @@ las agent friends --add Vortexia          # link (--remove to unlink, only my si
 las agent send --to Monkey --friends "..."   # one delivery per registered friend
 ```
 
-The widget's 👥 drawer shows them under the sessions, as chips in each
-agent's color (List tab), and as draggable mini stickies with terminals and
-commands (Panel tab): double-click a tile → 🎤 dictate to it (that friend, or
-that one session) · 🚪 close it (a friend's widget, or that terminal/command).
-Endpoints: `GET/PUT/DELETE /agents/{name}/friends[/{friend}]`.
+A click on the widget's 👥 opens the **map** (`las map`, docs/adr/0007). It is a
+widget of its own with one 2D board of mini widgets: sessions, friends, and the
+repos and URLs added with `las map add repo|url`. Double-click or hold a tile for
+its button bar:
+- 🎤 dictate to it (that friend, or that one session);
+- ⌨ type to it;
+- ⚙ ⧉ 🔊 on a friend;
+- ⌖ 📄 on a session;
+- 🚪 close it.
+
+The ✕ in a tile's corner closes it too, and on a repo/URL takes it off the map.
+Canvas/List sits at the board's top right. Holding 👥, or a right-click on it,
+opens the drawer's list, where the mic's target and friend links are chosen.
+Endpoints: `GET/PUT/DELETE /agents/{name}/friends[/{friend}]`,
+`GET/POST/DELETE /agents/{name}/map`.
 
 ### Known issues
 

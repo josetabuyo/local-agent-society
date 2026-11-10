@@ -1,0 +1,142 @@
+/* The map window: a widget face (widget.css) holding the society panel's 2D
+ * board at window size. Only layout lives here — colors come from the same
+ * variables the widget uses (--widget-bg, --btn-fill, set by map.js). */
+
+.map-face {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  padding: 10px 12px 12px;
+  border-radius: 14px;
+  background: var(--widget-bg, rgba(144, 192, 96, 0.72));
+  color: var(--map-text, #141414);
+  -webkit-app-region: drag;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* The agent's name, written like a widget's title. */
+.map-name {
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--text-fill, rgba(20, 20, 20, 0.9));
+  -webkit-text-stroke: 1.2px rgba(15, 15, 15, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-summary {
+  font-size: 11px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+.header-actions {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--map-tint, rgba(0, 0, 0, 0.07));
+  border: 1px solid var(--map-border, rgba(0, 0, 0, 0.25));
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 2px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.segmented button.active { background: rgba(0, 0, 0, 0.22); opacity: 1; font-weight: 700; }
+
+/* ── the board(s) ─────────────────────────────────────────────────────── */
+.map-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.map-board { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The board is sized when drawn; keep it filling the window even if the window grew since. */
+.map-board > .society-panel { flex: 1; min-height: 100%; }
+
+.society-tile.has-href { cursor: pointer; }
+
+/* ── list layout ──────────────────────────────────────────────────────── */
+.layout-list .map-board {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+}
+.map-row { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 6px; min-width: 0; }
+.map-row.has-href { cursor: pointer; }
+.map-row.has-href:hover { background: var(--map-tint, rgba(0, 0, 0, 0.07)); }
+.map-row-detail { font-size: 11px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.map-list-empty { position: static; }
+
+/* Every mini widget's ✕ (map.js onClose): top-right corner, shown on hover so it never hides the name. */
+.society-tile { position: absolute; }
+.mw-close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font-size: 9px;
+  line-height: 15px;
+  cursor: pointer;
+  opacity: 0;
+}
+.society-tile:hover .mw-close, .map-row:hover .mw-close, .mw-close.armed { opacity: 1; }
+.mw-close:hover { background: rgba(0, 0, 0, 0.45); }
+.mw-close.armed { background: rgba(200, 40, 40, 0.85); color: #fff; }
+.map-row-close { position: static; margin-left: auto; flex: none; opacity: 0.45; }
+
+/* The board and, over its top-right corner, the small Canvas/List switch. */
+.map-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.map-layout {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 5;
+  font-size: 9px;
+  padding: 1px;
+  -webkit-app-region: no-drag;
+}
+.map-layout button { padding: 1px 6px; }

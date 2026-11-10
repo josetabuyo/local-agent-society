@@ -90,7 +90,8 @@ test('wiring: the page loads the model and views before widget.js, and widget.js
   assert.ok(order.every((i) => i > 0) && order[0] < order[1] && order[1] < order[2], 'script order');
   const widget = read('renderer', 'widget.js');
   assert.match(widget, /LasSociety\.buildItems\(/);
-  assert.match(widget, /LasSocietyViews\.renderPanel\(/);
+  assert.doesNotMatch(widget, /LasSocietyViews\.renderPanel\(/, 'the 2D board left the drawer for the map window (map.js)');
+  assert.match(read('renderer', 'map.js'), /V\.renderPanel\(/);
   assert.match(widget, /LasSocietyViews\.listRow\(/);
   assert.ok(JSON.parse(read('package.json')).build.files.includes('renderer/**/*'), 'the new renderer files ship in the app');
 });
@@ -225,10 +226,7 @@ test('wiring: the tile bar floats above the tile, and every action is handled', 
   assert.match(widget, /showAgentSettings\(item\.agent, anchor\)/);
 });
 
-test('wiring: pressing a button in the floating bar does not close the drawer under it; a hold opens the bar', () => {
-  const widget = read('renderer', 'widget.js');
-  // The drawer's outside-mousedown used to close drawer + popup before the click landed: no button did anything.
-  assert.match(widget, /if \(e\.target\.closest\('\.tile-popup'\) \|\| e\.target\.closest\('\.society-tile'\)\) return;/);
+test('wiring: a hold on a tile opens its floating bar (map window tiles)', () => {
   const views = read('renderer', 'society-views.js');
   assert.match(views, /LONG_PRESS_MS = 600/);
   assert.match(views, /hold = setTimeout\([\s\S]{0,120}openTilePopup\(t, item, handlers\)/);
@@ -237,7 +235,7 @@ test('wiring: pressing a button in the floating bar does not close the drawer un
 test('every shipped script parses (a syntax error in main.js only shows up as a crash dialog at launch)', () => {
   const { execFileSync } = require('node:child_process');
   const path = require('node:path');
-  for (const f of ['main.js', 'preload.js', 'tray.js', 'bubbles.js', 'renderer/widget.js', 'renderer/society-model.js', 'renderer/society-views.js']) {
+  for (const f of ['main.js', 'preload.js', 'tray.js', 'bubbles.js', 'renderer/widget.js', 'renderer/society-model.js', 'renderer/society-views.js', 'renderer/map-model.js', 'renderer/map.js']) {
     execFileSync(process.execPath, ['--check', path.join(__dirname, '..', f)]);
   }
 });

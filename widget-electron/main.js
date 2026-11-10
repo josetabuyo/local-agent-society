@@ -271,7 +271,9 @@ function handleProtocolUrl(rawUrl) {
   }
   if (!name) return;
 
-  if (action === 'reopen') {
+  if (action === 'map') {
+    openMapWindow(name);
+  } else if (action === 'reopen') {
     reopenWidget(name);
   } else if (action === 'close') {
     closeWidget(name);
@@ -1823,6 +1825,85 @@ ipcMain.handle('agent:friend-link', async (_event, name, friend, linked) => {
     log.error('friends', `${linked ? 'link' : 'unlink'} ${friend} for ${name} failed: ${err && err.message ? err.message : err}`);
     return null;
   }
+});
+
+// ── the map window (docs/adr/0007): an agent's sessions, friends and added elements ──
+// The society panel's 2D board in a widget of its own — same glass, same mini widgets — read-only. Opened by `las map` (?action=map); like
+// `las widget`, a second open closes and recreates it so it lands on the
+// current Space instead of staying wherever it was.
+const mapWindows = new Map();
+
+function openMapWindow(name) {
+  const existing = mapWindows.get(name);
+  if (existing && !existing.isDestroyed()) existing.destroy();
+  const prefs = getPrefs(name);
+  const win = new BrowserWindow({
+    width: 560,
+    height: 420,
+    minWidth: 260,
+    minHeight: 200,
+    title: `Map — ${name}`,
+    // A widget face, not a document window: the agent's color glass, no chrome.
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: true,
+    webPreferences: { preload: WIDGET_SOURCES.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
+  });
+  win.isMap = true;
+  win.agentName = name;
+  mapWindows.set(name, win);
+  win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'map.html'), { query: { agent: name, color: prefs.color || '', opacity: String(prefs.opacity) } });
+  win.webContents.on('console-message', (_event, _level, message) => console.log(`[map:${name}]`, message));
+  win.on('closed', () => { if (mapWindows.get(name) === win) mapWindows.delete(name); });
+  log.info('map', `${name}: open`);
+}
+
+ipcMain.handle('map:open', (_event, name) => openMapWindow(name));
+
+ipcMain.handle('agent:map', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/map`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('agent:map-remove', async (_event, name, id) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/map?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('map', `remove ${id} from ${name} failed: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('map', `${name}: removed ${id}`);
+    return json;
+  } catch (err) {
+    log.error('map', `remove ${id} from ${name} failed: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
+// A map tile's 🎤 / ⌨ run on the agent's own widget — it owns the recorder
+// and the keyboard drawer — exactly as the same buttons in its panel did.
+ipcMain.handle('map:item-action', (_event, name, item, action) => {
+  if (action !== 'mic' && action !== 'keyboard') return false;
+  const win = windows.get(name);
+  if (!win || win.isDestroyed()) {
+    log.warn('map', `${name}: ${action} on ${item && item.key} — the widget is closed`);
+    return false;
+  }
+  win.webContents.send('map:item-action', item, action);
+  if (action === 'keyboard') win.focus();
+  return true;
+});
+
+ipcMain.handle('map:open-url', async (_event, url) => {
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return false;
+  await shell.openExternal(url);
+  return true;
 });
 
 /** Names of every registered agent (the "link a friend" picker). */

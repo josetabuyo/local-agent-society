@@ -707,36 +707,11 @@ html, body {
   overflow-y: auto;
 }
 
-/* ── society drawer (children menu): List / Panel tabs ──────────────────────
+/* ── society drawer (children menu): the list — the 2D board is the map window ──
  * Sessions (terminals, commands) and las-friends from one model
  * (society-model.js), drawn by society-views.js. Chips and mini stickies are
  * tinted with each agent's own widget color; text contrast comes from its
  * luminance (chipColors), never a fixed plate. */
-.society-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 0 0 6px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-  margin-bottom: 4px;
-}
-
-.society-tab {
-  flex: 1;
-  font: inherit;
-  font-size: 11px;
-  padding: 3px 6px;
-  border-radius: 6px;
-  border: 1px solid rgba(20, 20, 20, 0.3);
-  background: rgba(0, 0, 0, 0.06);
-  color: inherit;
-  cursor: pointer;
-}
-
-.society-tab.active {
-  background: rgba(0, 0, 0, 0.22);
-  font-weight: 700;
-}
-
 .society-heading .open-label {
   font-size: 10px;
   font-weight: 700;
