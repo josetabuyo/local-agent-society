@@ -94,18 +94,28 @@ Dictating to a tile whose type declares a specialist works like this:
    connects that specialist and knows nothing about what thinks inside it.
 2. The answer comes back as the contract `{ok, answer, actions, model}` plus an optional
    `confirm_needed: {id, command, why}`.
-3. What runs depends on a **security mode**, a widget setting (José, 2026-11-10):
-   - **`auto` (the default): nothing asks for permission.** It works like full permissions or auto
-     mode. Every action runs, and each `write`/`destructive` one leaves a notice on the tile afterwards
-     with the literal command that ran. While the mode is `auto`, Map shows a permanent warning
-     banner, so nobody forgets it is on.
-   - **`ask`**: `read` actions run and are spoken. `write` and `destructive` ones stop and show a
-     confirmation card on the tile with the literal command, which is spoken too. José confirms by
-     click or voice, and the action is re-run with `--confirm <id>`.
+3. What runs depends on the agent's **security mode**: `security_mode` in its `.las-agent.json`, set
+   in the widget's settings ("Security") or with `las agent security dangerous|safe` (José,
+   2026-11-10). There are two modes for now:
+   - **`dangerous` (the default), made for voice:** no popup for anything that creates, adds,
+     changes or closes. That covers:
+     - closing a terminal, stopping a command, unlinking a friend, taking an element off the map;
+     - a specialist's writes: a new issue, a comment, a merge, closing an issue.
 
-LAS passes the mode to the specialist on every call (`--confirm-policy none|write`). The specialist
-still tags every action with its `risk`, in both modes, because that tag drives the notice in
-`auto` and the stop in `ask`. In both modes it never obeys instructions found inside the data it
+     What happens is told in the widget's log, as conversation: the dictation, what ran, the answer.
+     The single exception is **deleting**, which cannot be undone. A specialist's deletion still
+     stops on the popup: a repo or release delete, a branch delete, a force push, `api -X DELETE`.
+   - **`safe`:** every one of those stops on a popup in the window, showing what will happen, and
+     runs only when it is accepted (Enter / Accept). Esc, Cancel or a click outside drops it. For a
+     specialist, the popup shows the literal command from `confirm_needed`, and the action is re-run
+     with `--confirm <id>`.
+
+   The old two-click confirm on ✕/🚪 is gone: the mode decides.
+
+LAS passes the mode to the specialist on every call: `dangerous` → `--confirm-policy delete` (only
+deletions come back as `confirm_needed`), `safe` → `--confirm-policy write` (every write and every
+deletion does). The specialist still tags every action with its `risk`, in both modes,
+because that tag drives the stop in `safe`. In both modes it never obeys instructions found inside the data it
 reads, such as a PR body or an issue title. The risk is enforced in LAS and in the specialist's
 CliSpec, never trusted from the model (MCP annotations are hints, not security). `pulpo las` stays the first ally and can later intercept
 every mic dictation. The specialist slot is open to other engines through the same contract.
@@ -147,11 +157,10 @@ inside the agent's folder is kept relative to it, so moving the folder keeps the
 friends are on the map too, but they are derived, never added here. An add button in the window is
 not planned: probably never.
 
-## Irreversible actions in `auto`
+## Irreversible actions in `dangerous` — decided
 
-Still open: whether `auto` also runs irreversible actions (repo delete, release delete, force push,
-`api -X DELETE`), or whether those always stop. Proposed: they always stop.
+José, 2026-11-10: in `dangerous`, deletions ask and nothing else does. Creating and adding never ask.
 
 ## Open questions (José)
 
-- See "Irreversible actions in `auto`" above.
+None right now.

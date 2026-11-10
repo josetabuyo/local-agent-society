@@ -147,6 +147,8 @@ contextBridge.exposeInMainWorld('las', {
    * ({target?, cc_default?}) through the backend — the same file
    * `las agent target` writes. Resolves to the backend's config view. */
   setSessionsConfig: (name, patch) => ipcRenderer.invoke('agent:config-sessions', name, patch),
+  /** Write `security_mode` ('dangerous' | 'safe') to `name`'s .las-agent.json — the key `las agent security` sets. */
+  setSecurityMode: (name, mode) => ipcRenderer.invoke('agent:set-security', name, mode),
 
   /** Ask every intelligent session of this agent to title itself (children
    * menu refresh). Resolves to {asked, skipped} or null; the titles arrive

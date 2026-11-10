@@ -79,6 +79,14 @@
         <label for="ccDefault">Copy last-used session</label>
         <input id="ccDefault" type="checkbox" />
       </div>
+      <!-- security_mode in .las-agent.json (`las agent security`): does a destructive action ask first? -->
+      <div class="settings-row" title="Dangerous (made for voice): nothing asks except deleting — a repo, a release, a branch. Safe: closing, stopping, unlinking, removing and every write ask in a popup first.">
+        <label for="securityMode">Security</label>
+        <select id="securityMode">
+          <option value="dangerous">Dangerous — asks only to delete</option>
+          <option value="safe">Safe — asks first</option>
+        </select>
+      </div>
       <div class="settings-row">
         <label for="micLanguage">Dictation language</label>
         <select id="micLanguage">

@@ -140,3 +140,27 @@ def test_cli_add_list_remove_call_the_backend(monkeypatch, tmp_path):
     assert calls[-1] == ("post", "/agents/Monkey/map", {"type": "repo", "path": str(tmp_path.resolve()), "label": None})
     out = runner.invoke(map_cmd.map_group, ["remove", "url:https://x.y"])
     assert calls[-1] == ("delete", "/agents/Monkey/map?id=url%3Ahttps%3A%2F%2Fx.y") and "nothing on the map" in out.output
+
+
+# ── security mode ──────────────────────────────────────────────────────────
+
+def test_security_mode_defaults_to_dangerous_and_only_takes_the_two_modes(app):
+    from cli.agent_config import security_mode_of
+    assert security_mode_of(None) == "dangerous" and security_mode_of({"security_mode": "weird"}) == "dangerous"
+    _main, client, folder = app
+    assert client.get("/agents/Monkey/config").json()["security_mode"] == "dangerous"
+    assert client.patch("/agents/Monkey/config", json={"security_mode": "safe"}).json()["security_mode"] == "safe"
+    assert _file(folder)["security_mode"] == "safe"
+    assert client.patch("/agents/Monkey/config", json={"security_mode": "yolo"}).status_code == 422
+
+
+def test_cli_security_shows_and_sets(monkeypatch):
+    from cli.commands import agents as agents_cmd
+    calls = []
+    monkeypatch.setattr(agents_cmd, "resolve_agent_name", lambda n: n or "Monkey")
+    monkeypatch.setattr(agents_cmd.api, "get", lambda p: calls.append(("get", p)) or {"security_mode": "dangerous"})
+    monkeypatch.setattr(agents_cmd.api, "patch", lambda p, d=None: calls.append(("patch", p, d)) or {"security_mode": d["security_mode"]})
+    out = CliRunner().invoke(agents_cmd.security, [])
+    assert "Monkey: dangerous" in out.output
+    out = CliRunner().invoke(agents_cmd.security, ["safe"])
+    assert calls[-1] == ("patch", "/agents/Monkey/config", {"security_mode": "safe"}) and "Monkey: safe" in out.output

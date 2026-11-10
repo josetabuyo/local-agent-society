@@ -260,5 +260,55 @@
     return area;
   }
 
-  root.LasSocietyViews = { chip, miniWidget, listRow, renderPanel, closeTilePopup };
+  // ── the security gate (docs/adr/0007 §4): does a destructive action ask? ──
+  // `dangerous` (the default, made for voice): it just runs. `safe`: a popup
+  // in this window asks first — never a browser alert/confirm, which would
+  // freeze the window. One open at a time; Esc or Cancel drops the action.
+
+  let confirmEl = null;
+
+  function closeConfirm() {
+    if (!confirmEl) return;
+    document.removeEventListener('keydown', confirmEl.onKey, true);
+    confirmEl.remove();
+    confirmEl = null;
+  }
+
+  /** Ask `question` in a popup; resolves true (Accept) or false (Cancel, Esc, a click outside). */
+  function confirmPopup(question, { okLabel = 'Accept', cancelLabel = 'Cancel' } = {}) {
+    closeConfirm();
+    return new Promise((resolve) => {
+      const veil = el('div', 'las-confirm-veil');
+      const box = el('div', 'las-confirm');
+      box.setAttribute('role', 'alertdialog');
+      box.append(el('div', 'las-confirm-title', '\u{1F6E1}\uFE0F Safe mode'), el('div', 'las-confirm-text', question));
+      const row = el('div', 'las-confirm-buttons');
+      const cancel = el('button', 'las-confirm-cancel', cancelLabel);
+      const ok = el('button', 'las-confirm-ok', okLabel);
+      cancel.type = ok.type = 'button';
+      row.append(cancel, ok);
+      box.appendChild(row);
+      veil.appendChild(box);
+      const done = (answer) => { closeConfirm(); resolve(answer); };
+      cancel.addEventListener('click', () => done(false));
+      ok.addEventListener('click', () => done(true));
+      veil.addEventListener('pointerdown', (e) => { if (e.target === veil) done(false); });
+      veil.onKey = (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); done(false); }
+        if (e.key === 'Enter') { e.preventDefault(); done(true); }
+      };
+      document.addEventListener('keydown', veil.onKey, true);
+      confirmEl = veil;
+      document.body.appendChild(veil);
+      ok.focus();
+    });
+  }
+
+  /** Run `action` now (dangerous), or only after the popup is accepted (safe). */
+  async function guarded(mode, question, action) {
+    if (mode === 'safe' && !(await confirmPopup(question))) return undefined;
+    return action();
+  }
+
+  root.LasSocietyViews = { chip, miniWidget, listRow, renderPanel, closeTilePopup, confirmPopup, guarded };
 })(self);

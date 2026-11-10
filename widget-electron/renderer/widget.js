@@ -37,6 +37,7 @@ const speechBubblesEl = document.getElementById('speechBubbles');
 const wakeEnabledEl = document.getElementById('wakeEnabled');
 const micLanguageEl = document.getElementById('micLanguage');
 const micTargetEl = document.getElementById('micTarget');
+const securityModeEl = document.getElementById('securityMode');
 const ccDefaultEl = document.getElementById('ccDefault');
 const tileShrinkMsEl = document.getElementById('tileShrinkMs');
 const tileTickMsEl = document.getElementById('tileTickMs');
@@ -639,6 +640,7 @@ function setSettingsOpen(open, fromDrawer = false) {
     else closeDrawer('settings');
   }
   if (open) {
+    loadSecurityMode();
     refreshSessions().then(() => {
       syncMicTargetSelect();
       fitWindowToDrawer();
@@ -755,6 +757,12 @@ expandWhenHiddenEl.addEventListener('change', () => {
 speechBubblesEl.addEventListener('change', () => persist({ speechBubbles: speechBubblesEl.checked }));
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
 micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value }));
+securityModeEl.addEventListener('change', async () => {
+  const view = await window.las.setSecurityMode(agentName, securityModeEl.value);
+  if (view && view.security_mode) securityMode = view.security_mode;
+  else window.las.log('warn', 'security', `could not save security_mode ${securityModeEl.value} — is the backend up?`);
+  securityModeEl.value = securityMode;
+});
 ccDefaultEl.addEventListener('change', () => setSessionsConfig({ cc_default: ccDefaultEl.checked }));
 
 // Backend-synced, not electron-store: `las agent focus`'s wake fallback
@@ -2246,8 +2254,8 @@ const societyHandlers = {
     if (action === 'mic') return societyMic(item);
     if (action === 'keyboard') return societyKeyboard(item);
     if (action === 'exit') {
-      if (item.kind === 'friend') return closeFriendWidget(item);
-      return armConfirm(button, async () => {
+      if (item.kind === 'friend') return guard(`Close ${item.agent}'s widget?`, () => closeFriendWidget(item));
+      return guard(item.kind === 'command' ? `Stop the command “${item.detail}”?` : `Close this ${item.runtime} terminal?`, async () => {
         await window.las.closeSession(agentName, item.sid);
         await reloadChildrenMenu();
       });
@@ -2276,7 +2284,7 @@ const societyHandlers = {
     }
     if (action === 'log') return window.las.openSessionLog(item.detached && item.detached.log);
     if (action === 'unlink') {
-      return armConfirm(button, async () => {
+      return guard(`Unlink ${item.agent} from ${agentName}'s friends?`, async () => {
         await window.las.linkFriend(agentName, item.agent, false);
         await reloadChildrenMenu();
       });
@@ -2412,7 +2420,6 @@ async function reloadChildrenMenu() {
   fitWindowToDrawer();
 }
 
-const CLOSE_CONFIRM_MS = 3000;
 
 function iconButton(text, title, onClick) {
   const b = document.createElement('button');
@@ -2427,8 +2434,8 @@ function iconButton(text, title, onClick) {
 /**
  * Per-session buttons: find (the terminal gets a beacon title + bell and,
  * in Ghostty, is focused — window to front, Space switched) and close (its
- * tty is hung up, like closing the window). Close takes a second click
- * within CLOSE_CONFIRM_MS: no modal dialog, no accidental kill.
+ * tty is hung up, like closing the window). Close goes through the
+ * security gate: immediate in dangerous mode, a popup in safe mode.
  * A detached session (docs/adr/0006) has no terminal to find: 📄 opens its log.
  */
 function sessionActionButtons(sid, detached) {
@@ -2437,29 +2444,34 @@ function sessionActionButtons(sid, detached) {
     if (res && res.focused) closeChildrenMenu();
     else find.title = res && res.ok ? 'Look for the terminal titled "◉ … here ◉" (it rang its bell)' : 'Could not reach this terminal';
   });
-  const close = iconButton('✕', 'Close this terminal', () => armConfirm(close, async () => {
+  const close = iconButton('✕', 'Close this terminal', () => guard('Close this terminal?', async () => {
     await window.las.closeSession(agentName, sid);
     await reloadChildrenMenu();
   }));
   return [find, close];
 }
 
-/**
- * Two-click confirm for anything destructive (close a terminal, unlink a
- * friend): the first click arms `button` for CLOSE_CONFIRM_MS, a second
- * click within it runs `onConfirm`. No modal dialog, no accidental kill.
- */
-function armConfirm(button, onConfirm) {
-  if (!button._armed) {
-    const idleTitle = button.title;
-    button.classList.add('armed');
-    button.title = 'Click again to confirm';
-    button._armed = setTimeout(() => { button._armed = null; button.classList.remove('armed'); button.title = idleTitle; }, CLOSE_CONFIRM_MS);
-    return;
+// ── security mode (docs/adr/0007 §4) ────────────────────────────────────
+// `security_mode` in the agent's .las-agent.json, through the backend — the
+// same key `las agent security` writes. dangerous (default, made for voice):
+// a destructive action just runs. safe: a popup asks first.
+let securityMode = 'dangerous';
+
+async function loadSecurityMode() {
+  try {
+    const view = await window.las.getAgentConfig(agentName);
+    if (view && (view.security_mode === 'safe' || view.security_mode === 'dangerous')) securityMode = view.security_mode;
+  } catch {
+    // keep what we knew
   }
-  clearTimeout(button._armed);
-  button._armed = null;
-  return onConfirm();
+  if (securityModeEl) securityModeEl.value = securityMode;
+  return securityMode;
+}
+
+/** Run a destructive action through the security gate. */
+async function guard(question, action) {
+  await loadSecurityMode();
+  return window.LasSocietyViews.guarded(securityMode, question, action);
 }
 
 /**

@@ -356,3 +356,25 @@ def with_map_element(config: dict | None, element: dict, *, added: bool = True) 
     if any(map_element_id(e) == eid for e in current):
         return [element if map_element_id(e) == eid else e for e in current]
     return current + [element]
+
+
+# ── security mode: does a destructive action ask first? ────────────────────
+#
+#     "security_mode": "dangerous"   # default, made for voice — only a deletion asks
+#     "security_mode": "safe"        # every destructive action asks in a popup
+#
+# Destructive = closing a terminal, stopping a command, unlinking a friend,
+# taking an element off the map — and, through a specialist like pulpo gh,
+# any write the tool can do. In dangerous only a specialist's deletion (repo,
+# release, branch, force push) asks (docs/adr/0007 §4: dangerous →
+# --confirm-policy delete, safe → --confirm-policy write).
+
+SECURITY_KEY = "security_mode"
+SECURITY_MODES = ("dangerous", "safe")
+DEFAULT_SECURITY_MODE = "dangerous"
+
+
+def security_mode_of(config: dict | None) -> str:
+    """The agent's security mode; anything unknown or missing is the default (dangerous)."""
+    mode = _dict(config).get(SECURITY_KEY)
+    return mode if mode in SECURITY_MODES else DEFAULT_SECURITY_MODE

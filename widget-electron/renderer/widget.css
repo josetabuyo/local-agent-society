@@ -1018,3 +1018,43 @@ html, body {
 .settings.drawer-sized {
   overflow-y: auto;
 }
+
+/* The safe-mode popup (society-views.js confirmPopup): over the whole window,
+ * the widget's own glass, never a browser dialog. */
+.las-confirm-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-app-region: no-drag;
+}
+.las-confirm {
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--widget-bg, rgba(144, 192, 96, 0.92));
+  backdrop-filter: blur(14px);
+  border: 1.5px solid rgba(20, 20, 20, 0.45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--log-text, var(--map-text, #141414));
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.las-confirm-title { font-weight: 800; }
+.las-confirm-text { line-height: 1.35; overflow-wrap: anywhere; }
+.las-confirm-buttons { display: flex; justify-content: flex-end; gap: 6px; }
+.las-confirm-buttons button {
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(20, 20, 20, 0.45);
+  background: rgba(0, 0, 0, 0.12);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.las-confirm-ok { background: rgba(200, 40, 40, 0.75) !important; color: #fff !important; font-weight: 700; }

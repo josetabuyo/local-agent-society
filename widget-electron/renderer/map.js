@@ -6,8 +6,9 @@
  * board (no grouping), and the same button bar on double-click or hold
  * (🚪 ⚙ ⧉ 🔊 ⌨ 🎤 ⌖ 📄, per kind — society-model.js ACTIONS_BY_KIND). 🎤 and ⌨
  * run on the agent's own widget, which owns the recorder and the keyboard.
- * Every tile also has a ✕: a terminal or command closes (click twice), a
- * friend's widget closes, a repo or URL leaves the map. Elements are added
+ * Every tile also has a ✕: a terminal or command closes, a friend's widget
+ * closes, a repo or URL leaves the map — straight away in dangerous mode, after
+ * a popup in safe mode (security_mode, `las agent security`). Elements are added
  * with `las map add`. Canvas/List is the only display choice.
  */
 (function () {
@@ -54,7 +55,6 @@
     },
   };
   const DEFAULT_VIEW = { layout: 'canvas' };
-  const CONFIRM_MS = 3000;
   const view = store.get(VIEW_KEY, DEFAULT_VIEW);
   const positions = store.get(POS_KEY, {});
   const saveView = () => store.set(VIEW_KEY, view);
@@ -87,44 +87,42 @@
   }
 
   // ── drawing ─────────────────────────────────────────────────────────────
-  /** Two clicks to close a terminal or a command (the widget's armConfirm): a stray click never kills a session. */
-  function armConfirm(button, onConfirm) {
-    if (!button._armed) {
-      const idle = button.title;
-      button.classList.add('armed');
-      button.title = 'Click again to confirm';
-      button._armed = setTimeout(() => { button._armed = null; button.classList.remove('armed'); button.title = idle; }, CONFIRM_MS);
-      return;
+  /** The agent's security mode (docs/adr/0007 §4), re-read before each destructive action. */
+  async function securityMode() {
+    try {
+      const view = await window.las.getAgentConfig(agentName);
+      return view && view.security_mode === 'safe' ? 'safe' : 'dangerous';
+    } catch {
+      return 'dangerous';
     }
-    clearTimeout(button._armed);
-    button._armed = null;
-    onConfirm();
+  }
+
+  /** dangerous: run now. safe: the popup asks first. */
+  async function guard(question, action) {
+    return V.guarded(await securityMode(), question, action);
   }
 
   function closeTitle(item) {
     if (item.kind === 'friend') return item.remote ? `${item.agent}'s widget lives on ${item.remote}` : `Close ${item.agent}'s widget`;
     if (item.kind === 'repo' || item.kind === 'url') return 'Take it off the map';
-    return item.kind === 'command' ? 'Stop this command (click twice)' : 'Close this terminal (click twice)';
+    return item.kind === 'command' ? 'Stop this command' : 'Close this terminal';
   }
 
-  async function onClose(item, button) {
+  async function onClose(item) {
     if (item.kind === 'friend') {
       if (item.remote || item.widgetClosed) return;
-      await window.las.closeAgentWidget(item.agent);
+      await guard(`Close ${item.agent}'s widget?`, () => window.las.closeAgentWidget(item.agent));
     } else if (item.kind === 'repo' || item.kind === 'url') {
-      await window.las.removeMapElement(agentName, item.elementId);
+      await guard(`Take “${item.label}” off the map?`, () => window.las.removeMapElement(agentName, item.elementId));
     } else {
-      return armConfirm(button, async () => {
-        await window.las.closeSession(agentName, item.sid);
-        refresh();
-      });
+      await guard(item.kind === 'command' ? `Stop the command “${item.detail}”?` : `Close this ${item.runtime} terminal?`, () => window.las.closeSession(agentName, item.sid));
     }
     refresh();
   }
 
   /** What a tile's button does — the same meaning as in the widget's panel (widget.js societyHandlers). */
   async function onAction(item, action, button, event) {
-    if (action === 'exit') return onClose(item, button);
+    if (action === 'exit') return onClose(item);
     if (action === 'mic' || action === 'keyboard') return window.las.mapItemAction(agentName, item, action);
     if (action === 'open') {
       if (item.kind === 'repo' || item.kind === 'url') return item.href && window.las.openUrl(item.href);
@@ -144,10 +142,8 @@
     if (action === 'find') return window.las.findSession(agentName, item.sid);
     if (action === 'log') return window.las.openSessionLog(item.detached && item.detached.log);
     if (action === 'unlink') {
-      return armConfirm(button, async () => {
-        await window.las.linkFriend(agentName, item.agent, false);
-        refresh();
-      });
+      await guard(`Unlink ${item.agent} from ${agentName}'s friends?`, () => window.las.linkFriend(agentName, item.agent, false));
+      return refresh();
     }
     return undefined;
   }

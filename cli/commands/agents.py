@@ -891,6 +891,30 @@ def title(title, name, sid):
     click.echo(_show_terminal_title(name, mine, title))
 
 
+@agent.command("security")
+@click.argument("mode", required=False, type=click.Choice(["dangerous", "safe"]))
+@click.option("--agent", "name", default=None, shell_complete=complete_agent_names, help="Whose (default: the agent in the cwd).")
+def security(mode, name):
+    """Show or set the agent's security mode — does a destructive action ask first?
+
+    \b
+      las agent security             # show it
+      las agent security dangerous   # default, made for voice: only a deletion asks
+      las agent security safe        # every destructive action asks in a popup
+
+    Destructive: closing a terminal, stopping a command, unlinking a friend,
+    taking something off the map, and any write a specialist (pulpo gh) does.
+    Stored as `security_mode` in the agent's .las-agent.json; the widget's
+    settings change the same key.
+    """
+    name = resolve_agent_name(name)
+    path = f"/agents/{quote(name, safe='')}/config"
+    view = api.patch(path, {"security_mode": mode}) if mode else api.get(path)
+    current = view.get("security_mode", "dangerous")
+    hint = "made for voice — only a deletion asks" if current == "dangerous" else "every destructive action asks in a popup"
+    click.echo(f"{name}: {current} ({hint})")
+
+
 @agent.command("target")
 @click.argument("target", required=False)
 @click.option("--name", "name", default=None, shell_complete=complete_agent_names, help="Which agent (default: the one in the current directory).")

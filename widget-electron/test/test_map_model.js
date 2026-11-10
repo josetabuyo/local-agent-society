@@ -81,8 +81,9 @@ test('the map window: one board (no Display popover), the panel tiles with their
     assert.match(js, new RegExp(`action === '${action}'`), `the map handles ${action}, like the panel did`);
   }
   assert.match(js, /mapItemAction\(agentName, item, action\)/, '🎤/⌨ run on the agent widget, which owns the recorder');
-  assert.match(js, /armConfirm\(button, async \(\) => \{\s*await window\.las\.closeSession/, 'a terminal or command needs two clicks to close');
-  assert.match(js, /removeMapElement\(agentName, item\.elementId\)/, 'a repo/url ✕ takes it off the map');
+  assert.match(js, /guard\([^;]*window\.las\.closeSession\(agentName, item\.sid\)/, 'closing a terminal goes through the security gate');
+  assert.match(js, /guard\([^;]*removeMapElement\(agentName, item\.elementId\)/, 'a repo/url ✕ goes through the gate too');
+  assert.doesNotMatch(js, /armConfirm/, 'no two-click confirm any more: the security mode decides');
   const widget = read('renderer', 'widget.js');
   assert.match(widget, /onMapItemAction\(\(item, action\) => \{\s*if \(action === 'mic'\) societyMic\(item\);\s*else if \(action === 'keyboard'\) societyKeyboard\(item\);/);
 });
@@ -93,4 +94,17 @@ test('repo and url tiles: ✕/🚪 takes them off the map, ⧉ opens their link 
   assert.equal(S.describeAction({ kind: 'url', href: 'https://x.y' }, 'open').enabled, true);
   assert.equal(S.describeAction({ kind: 'repo', href: null }, 'open').enabled, false);
   assert.match(S.describeAction({ kind: 'repo' }, 'exit').title, /off the map/);
+});
+
+test('security gate: dangerous runs at once, safe asks in an in-window popup (never a browser dialog)', async () => {
+  const views = read('renderer', 'society-views.js');
+  assert.match(views, /async function guarded\(mode, question, action\) \{\s*if \(mode === 'safe' && !\(await confirmPopup\(question\)\)\) return undefined;\s*return action\(\);/);
+  for (const f of ['society-views.js', 'map.js', 'widget.js']) {
+    assert.doesNotMatch(read('renderer', f), /window\.confirm\(|[^.\w]confirm\(|alert\(/, `${f}: no browser dialogs — they freeze the window`);
+  }
+  const widget = read('renderer', 'widget.js');
+  assert.doesNotMatch(widget, /armConfirm|CLOSE_CONFIRM_MS/);
+  assert.match(widget, /guard\(`Unlink /);
+  assert.match(read('renderer', 'index.html'), /<select id="securityMode">[\s\S]*value="dangerous"[\s\S]*value="safe"/);
+  assert.match(read('main.js'), /ipcMain\.handle\('agent:set-security'/);
 });

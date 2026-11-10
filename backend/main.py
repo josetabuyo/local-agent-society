@@ -26,7 +26,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
+from cli.agent_config import (SECURITY_KEY, SECURITY_MODES, security_mode_of, FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
                               descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
                               write_agent_config)
 from cli.path_utils import agent_config_path
@@ -820,7 +820,8 @@ def _agent_config(name: str, registry: dict | None = None) -> dict:
 def _config_view(name: str) -> dict:
     file = _agent_config_file(name)
     config = read_agent_config(file) if file else {}
-    return {"agent": name, "file": str(file) if file else None, "config": config, "sessions": sessions_config(config)}
+    return {"agent": name, "file": str(file) if file else None, "config": config, "sessions": sessions_config(config),
+            "security_mode": security_mode_of(config)}
 
 
 @app.get("/agents/{name}/config")
@@ -841,6 +842,8 @@ def patch_agent_config(name: str, patch: dict):
         raise HTTPException(status_code=422, detail="rename with `las agent rename`, not a config patch")
     if "color" in patch and not _is_hex_color(patch["color"]):
         raise HTTPException(status_code=422, detail="color must be #rrggbb")
+    if SECURITY_KEY in patch and patch[SECURITY_KEY] not in SECURITY_MODES:
+        raise HTTPException(status_code=422, detail=f"{SECURITY_KEY} must be one of: {', '.join(SECURITY_MODES)}")
     sessions = patch.get("sessions")
     if sessions is not None and (not isinstance(sessions, dict) or ("target" in sessions and not (isinstance(sessions["target"], str) and sessions["target"]))):
         raise HTTPException(status_code=422, detail="sessions.target must be a non-empty string: default, all, a runtime or a session id")

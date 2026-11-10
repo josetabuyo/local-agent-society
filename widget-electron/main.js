@@ -1780,6 +1780,29 @@ ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {
   }
 });
 
+// security_mode (docs/adr/0007 §4): dangerous (default) never asks, safe asks
+// in a popup before anything destructive. Same file, same key as `las agent security`.
+ipcMain.handle('agent:set-security', async (_event, name, mode) => {
+  if (mode !== 'dangerous' && mode !== 'safe') return null;
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ security_mode: mode }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('security', `${name}: set ${mode} failed: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('security', `${name}: security_mode -> ${mode}`);
+    return json;
+  } catch (err) {
+    log.error('security', `${name}: set ${mode} failed: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
 /** POST (`body` as JSON, if any) to the backend; the parsed JSON, or null (logged under `what`). */
 async function postBackend(urlPath, what, body) {
   try {
