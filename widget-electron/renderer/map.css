@@ -140,3 +140,7 @@
   -webkit-app-region: no-drag;
 }
 .map-layout button { padding: 1px 6px; }
+
+/* 🙏 while the terminals are being asked for their descriptions. */
+#describeBtn.asking { animation: map-asking 1.2s ease-in-out infinite; }
+@keyframes map-asking { 50% { opacity: 0.35; } }

@@ -189,6 +189,33 @@
   });
   $('closeBtn').addEventListener('click', () => window.close());
 
+  /**
+   * 🙏 — ask every Claude/Codex session what it is working on (backend
+   * request_session_titles; a shell cannot describe itself). Each one answers
+   * with `las agent title`, asynchronously: re-read a few times so the new
+   * descriptions land on the tiles without waiting for the 5 s refresh.
+   */
+  async function askDescriptions() {
+    const btn = $('describeBtn');
+    if (btn.classList.contains('asking')) return;
+    btn.classList.add('asking');
+    const res = await window.las.requestSessionTitles(agentName).catch(() => null);
+    if (!res || !Array.isArray(res.asked)) {
+      btn.title = 'Could not ask the terminals — is the backend up?';
+      btn.classList.remove('asking');
+      return;
+    }
+    btn.title = res.asked.length
+      ? `Asked ${res.asked.length} terminal${res.asked.length === 1 ? '' : 's'} — their descriptions arrive in a few seconds`
+      : 'No terminal here can describe itself (a shell cannot)';
+    for (const delay of [3000, 5000, 7000, 15000]) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      await refresh();
+    }
+    btn.classList.remove('asking');
+  }
+  $('describeBtn').addEventListener('click', askDescriptions);
+
   // ── start ───────────────────────────────────────────────────────────────
   document.title = `Map — ${agentName}`;
   $('agentName').textContent = agentName;

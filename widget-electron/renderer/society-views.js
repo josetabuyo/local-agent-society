@@ -129,15 +129,40 @@
    * @param {object} item  a LasSociety item (buildItems / agentItem)
    * @param {{alpha?: number, className?: string}} [opts]
    */
+  /** One line of a mini widget: the text in an inner span that marquee() can slide. */
+  function scrollLine(className, text) {
+    const line = el('div', `mw-line ${className}`);
+    line.appendChild(el('span', 'mw-scroll', text || ''));
+    return line;
+  }
+
+  /** Hover: every line that overflows slides left to show its end, then back (a sign); leave: reset. */
+  function marquee(widget, on) {
+    for (const line of widget.querySelectorAll('.mw-line')) {
+      const overflow = line.scrollWidth - line.clientWidth;
+      if (!on || overflow <= 2) {
+        line.classList.remove('marquee');
+        continue;
+      }
+      line.style.setProperty('--mw-shift', `-${overflow + 4}px`);
+      line.style.setProperty('--mw-dur', `${Math.max(2.5, overflow / 22 + 1.5).toFixed(1)}s`);
+      line.classList.add('marquee');
+    }
+  }
+
   function miniWidget(item, { alpha = 0.78, className = '' } = {}) {
     const w = el('div', `mini-widget kind-${item.kind}${className ? ` ${className}` : ''}`);
     const { background, color } = M.chipColors(item.color, alpha);
     w.style.background = background;
     w.style.color = color;
     if (item.kind === 'terminal' || item.kind === 'command' || item.kind === 'repo' || item.kind === 'url') {
+      // Title (bold) on top, its description below — one line each; a line too long to
+      // fit scrolls sideways like a sign while the pointer is over the tile (marquee()).
       const head = el('div', 'mw-head');
-      head.append(el('span', 'mw-icon', item.icon || M.KIND_ICONS[item.kind] || ''), el('span', 'mw-runtime', item.label));
-      w.append(head, el('div', 'mw-detail', item.detail));
+      head.append(el('span', 'mw-icon', item.icon || M.KIND_ICONS[item.kind] || ''), scrollLine('mw-runtime', item.label));
+      w.append(head, scrollLine('mw-detail', item.detail));
+      w.addEventListener('mouseenter', () => marquee(w, true));
+      w.addEventListener('mouseleave', () => marquee(w, false));
     } else {
       w.appendChild(el('div', 'mw-name', item.label));
     }

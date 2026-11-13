@@ -108,3 +108,17 @@ test('security gate: dangerous runs at once, safe asks in an in-window popup (ne
   assert.match(read('renderer', 'index.html'), /<select id="securityMode">[\s\S]*value="dangerous"[\s\S]*value="safe"/);
   assert.match(read('main.js'), /ipcMain\.handle\('agent:set-security'/);
 });
+
+test('🙏 asks every terminal for its description; a mini widget is a bold title over a sliding description', () => {
+  assert.match(read('renderer', 'map.html'), /id="describeBtn"[^>]*>🙏</);
+  assert.match(read('renderer', 'map.js'), /\$\('describeBtn'\)\.addEventListener\('click', askDescriptions\)/);
+  assert.match(read('renderer', 'map.js'), /requestSessionTitles\(agentName\)/, 'the same backend request the children list uses');
+  const views = read('renderer', 'society-views.js');
+  assert.match(views, /scrollLine\('mw-runtime', item\.label\)/);
+  assert.match(views, /scrollLine\('mw-detail', item\.detail\)/);
+  assert.match(views, /addEventListener\('mouseenter', \(\) => marquee\(w, true\)\)/);
+  const css = read('renderer', 'widget.css');
+  assert.match(css, /\.mw-runtime \{[^}]*font-weight: 800/);
+  assert.match(css, /\.mw-detail \{[^}]*font-size: 10px/);
+  assert.match(css, /@keyframes mw-marquee/);
+});

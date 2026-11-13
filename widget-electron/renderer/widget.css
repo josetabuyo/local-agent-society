@@ -827,24 +827,33 @@ html, body {
   flex-shrink: 0;
 }
 
-.mw-runtime {
-  font-size: 10px;
-  font-weight: 700;
+/* A mini widget's title and description: one line each, readable sizes. A
+ * line too long to fit slides sideways on hover (society-views.js marquee). */
+.mw-line {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.mw-line.marquee { text-overflow: clip; }
+.mw-scroll { display: inline-block; }
+.mw-line.marquee .mw-scroll { animation: mw-marquee var(--mw-dur, 4s) ease-in-out infinite alternate; }
+@keyframes mw-marquee {
+  0%, 15% { transform: translateX(0); }
+  85%, 100% { transform: translateX(var(--mw-shift, 0)); }
+}
+
+.mw-runtime {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 800;
+}
 
 .mw-detail {
-  margin-top: 2px;
-  font-size: 8px;
-  line-height: 1.2;
-  opacity: 0.8;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.25;
 }
 
 /* On the panel board: placed and dragged. */
