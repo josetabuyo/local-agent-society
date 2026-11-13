@@ -86,7 +86,11 @@
 
 .map-board { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The board is sized when drawn; keep it filling the window even if the window grew since. */
-.map-board > .society-panel { flex: 1; min-height: 100%; }
+.map-board > .society-panel { flex: 1; min-height: 100%; box-sizing: border-box; }
+/* A transparent top border (the board's own background paints under it) is the
+ * strip the two pills sit on: inside the board, never over a tile. */
+.layout-canvas .map-board > .society-panel { border-top: 24px solid transparent; }
+.layout-list .map-board { padding-top: 26px; }
 
 .society-tile.has-href { cursor: pointer; }
 
@@ -130,7 +134,8 @@
 
 /* The board and, over its top-right corner, the small Canvas/List switch. */
 .map-stage { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.map-layout {
+.map-layout,
+.map-tools {
   position: absolute;
   top: 5px;
   right: 5px;
@@ -139,7 +144,9 @@
   padding: 1px;
   -webkit-app-region: no-drag;
 }
-.map-layout button { padding: 1px 6px; }
+.map-layout button, .map-tools button { padding: 1px 6px; }
+.map-tools { right: auto; left: 5px; }
+.map-tools button { opacity: 1; font-size: 11px; line-height: 1.2; padding: 0 6px; }
 
 /* 🙏 while the terminals are being asked for their descriptions. */
 #describeBtn.asking { animation: map-asking 1.2s ease-in-out infinite; }

@@ -110,7 +110,7 @@ test('security gate: dangerous runs at once, safe asks in an in-window popup (ne
 });
 
 test('🙏 asks every terminal for its description; a mini widget is a bold title over a sliding description', () => {
-  assert.match(read('renderer', 'map.html'), /id="describeBtn"[^>]*>🙏</);
+  assert.match(read('renderer', 'map.html'), /id="toolsPill">\s*<button id="describeBtn"[^>]*>🙏</, 'in a pill inside the board, top left');
   assert.match(read('renderer', 'map.js'), /\$\('describeBtn'\)\.addEventListener\('click', askDescriptions\)/);
   assert.match(read('renderer', 'map.js'), /requestSessionTitles\(agentName\)/, 'the same backend request the children list uses');
   const views = read('renderer', 'society-views.js');

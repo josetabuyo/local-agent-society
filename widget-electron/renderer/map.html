@@ -17,13 +17,16 @@
         <span id="agentName" class="map-name">Agent</span>
       </div>
       <div class="header-actions">
-        <button id="describeBtn" class="facebtn" type="button" title="Ask every terminal what it is working on — its description shows on its mini widget">🙏</button>
         <button id="closeBtn" class="facebtn" type="button" title="Close the map">✕</button>
       </div>
     </header>
     <!-- Canvas/List sits inside the board, top right, over the panel (not in the header). -->
     <div class="map-stage">
       <main id="map" class="map-body"></main>
+      <!-- Board actions, top left: a pill like Canvas/List, room for more buttons. -->
+      <div class="segmented map-tools" id="toolsPill">
+        <button id="describeBtn" type="button" title="Ask every terminal what it is working on — its description shows on its mini widget">🙏</button>
+      </div>
       <div class="segmented map-layout" id="layoutSeg" title="Layout">
         <button type="button" data-value="canvas">Canvas</button>
         <button type="button" data-value="list">List</button>
