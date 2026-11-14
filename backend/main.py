@@ -3,10 +3,11 @@ Local Agent Society — Backend
 Port: 8700
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
+import hashlib
 import json
 import os
 import re
@@ -1316,6 +1317,66 @@ def close_session(name: str, sid: str):
     if not hangup_tty(tty):
         raise HTTPException(status_code=409, detail=f"could not hang up {tty}")
     return {**unregister_session(name, sid), "tty": tty}
+
+
+def _society_node(name: str, registry: dict, inactive: list, sessions_by_agent: dict) -> dict:
+    """One agent as a tile of the society panel: identity, scope, its
+    terminals and map elements. Children are attached by society_tree."""
+    config = _agent_config(name, registry)
+    sessions = sessions_by_agent.get(name) or {}
+    elements = []
+    for el in map_elements_of(config):
+        if el["type"] == "url":
+            elements.append({"type": "url", "url": el["url"], "label": el.get("label") or el["url"]})
+        else:
+            elements.append({"type": "repo", "label": el.get("label") or Path(el["path"]).name})
+    return {
+        "name": name,
+        "color": config.get("color"),
+        "locale": config.get("locale"),
+        "tts_voice": config.get("tts_voice"),
+        "short_description": config.get("short_description"),
+        "long_description": config.get("long_description"),
+        "inactive": name in inactive,
+        "sessions": _session_summaries(name, sessions, sessions_config(config)) if sessions else [],
+        "friends": friends_of(config),
+        "map": elements,
+        "children": [],
+    }
+
+
+def _society_tree_body() -> dict:
+    from cli.hierarchy import parent_of
+    with _registry_lock:
+        registry = load_json(REGISTRY_FILE, {})
+    with _inactive_lock:
+        inactive = load_json(INACTIVE_FILE, [])
+    with _sessions_lock:
+        sessions_by_agent = {name: _load_sessions(name) for name in load_json(SESSIONS_FILE, {}) if name in registry}
+    nodes = {name: _society_node(name, registry, inactive, sessions_by_agent) for name in registry}
+    roots = []
+    for name in sorted(registry, key=str.lower):
+        parent = parent_of(name, registry)
+        (nodes[parent]["children"] if parent in nodes else roots).append(nodes[name])
+    return {"env": os.environ.get("VORTEXIA_ENV_NAME") or None, "agents": roots}
+
+
+@app.get("/society/tree")
+@app.get("/device/society/tree")
+def society_tree(request: Request):
+    """The whole society as one nested tree — every agent of this machine,
+    each with its subordinates under it (folder-derived, cli/hierarchy.py),
+    its sessions, scope and map: the same shape at every level, so a panel
+    can open any agent and show its own panel inside. The first consumer is
+    the phone app through vortexia's gateway, which proxies /device/* to
+    loopback (vortexia docs/adr/0001 §8); a Mac-wide view can use it too.
+    Kept small and cacheable: an ETag, and 304 on If-None-Match."""
+    from fastapi.responses import Response as FastResponse
+    body = json.dumps(_society_tree_body(), ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    etag = '"' + hashlib.sha256(body.encode()).hexdigest()[:20] + '"'
+    if request.headers.get("if-none-match") == etag:
+        return FastResponse(status_code=304, headers={"ETag": etag})
+    return FastResponse(content=body, media_type="application/json", headers={"ETag": etag, "Cache-Control": "no-cache"})
 
 
 @app.get("/agents/{name}/hierarchy")
