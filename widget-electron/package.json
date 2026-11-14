@@ -36,6 +36,7 @@
       "tray.js",
       "bubbles.js",
       "bubble-preload.js",
+      "decoder-preload.js",
       "lib/**/*",
       "renderer/**/*",
       "node_modules/**/*",

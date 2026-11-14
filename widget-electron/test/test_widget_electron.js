@@ -442,7 +442,12 @@ test('main.js vortexia:send handler resolves the sending agent from the window m
 test('main.js never opens a second vortexia connection for face-button sends (no new VortexiaClient construction outside connectVortexia)', () => {
   const src = readSrc('main.js');
   const matches = [...src.matchAll(/new VortexiaClient\(/g)];
-  assert.equal(matches.length, 1, 'expected exactly one `new VortexiaClient(` call site (inside connectVortexia)');
+  // One per widget window (connectVortexia), plus the system mailbox that
+  // consumes a paired phone's clips (startDeviceAudio, lib/deviceAudio.js) —
+  // a different identity (`las-device-audio`), never used for face buttons.
+  assert.equal(matches.length, 2, 'expected exactly two `new VortexiaClient(` call sites (connectVortexia, startDeviceAudio)');
+  assert.equal([...extractFunctionBody(src, 'async function connectVortexia(name, win) {').matchAll(/new VortexiaClient\(/g)].length, 1);
+  assert.equal([...extractFunctionBody(src, 'async function startDeviceAudio() {').matchAll(/new VortexiaClient\(/g)].length, 1);
 });
 
 // ── "Open" button (replaced the command palette) ────────────────────────────

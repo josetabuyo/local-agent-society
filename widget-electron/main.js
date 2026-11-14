@@ -2482,10 +2482,160 @@ async function fetchAgentsWhenRegistryUp({ delayMs = 3000 } = {}) {
 // (resolveInitialAgentNames is defined above the single-instance-lock block,
 // since userData scoping needs the agent name before that lock is requested.)
 
+// ── device audio: dictations recorded on a paired phone ─────────────────────
+//
+// vortexia's gateway decrypts each clip into its device inbox and notifies
+// the SYSTEM mailbox `las-device-audio` (vortexia docs/adr/0001): a mailbox
+// nobody but this process holds — not an agent, no LLM reads it — so the
+// broker queues clips even while this app is down. Each clip is decoded in
+// a hidden window, transcribed with the same Whisper as the widget mic and
+// delivered to its target {agent, session?} as a mic dictation. The file is
+// the source of truth (lib/deviceAudio.js): it is deleted only after
+// delivery, and the inbox is scanned at startup.
+
+const deviceAudio = require('./lib/deviceAudio');
+
+// Where clips may live: the broker announces its own at startup (retained
+// `vortexia/paths` → deviceInboxDir; VORTEXIA_DATA_DIR moves it), so that is
+// read, never assumed. The default only covers a broker too old to say.
+const VORTEXIA_PATHS_TOPIC = 'vortexia/paths';
+const DEVICE_INBOX_ROOTS = (process.env.VORTEXIA_DEVICE_INBOX || path.join(os.homedir(), 'Development', 'vortexia', 'data', 'device-inbox'))
+  .split(path.delimiter).filter(Boolean);
+
+function scanDeviceInbox(root) {
+  const left = deviceAudio.scanInbox(root, (file, why) => log.warn('device-audio', `skipping ${file}: ${why}`));
+  if (left.length) log.info('device-audio', `${left.length} clip(s) left in ${root} — processing`);
+  left.forEach((clip) => deviceAudioQueue.enqueue(clip));
+}
+const DECODE_TIMEOUT_MS = 120000;
+let decoderWindow = null;
+let decoderSeq = 0;
+const decoderWaiting = new Map();
+let deviceAudioClient = null;
+let deviceAudioQueue = null;
+
+ipcMain.on('decoder:reply', (_event, id, pcm, error) => {
+  const waiting = decoderWaiting.get(id);
+  if (!waiting) return;
+  decoderWaiting.delete(id);
+  clearTimeout(waiting.timer);
+  if (error || !pcm) waiting.reject(new Error(`decode failed: ${error || 'no audio'}`));
+  else waiting.resolve(new Float32Array(pcm));
+});
+
+function getDecoderWindow() {
+  if (decoderWindow && !decoderWindow.isDestroyed()) return Promise.resolve(decoderWindow);
+  decoderWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { preload: path.join(__dirname, 'decoder-preload.js'), contextIsolation: true, sandbox: true, backgroundThrottling: false },
+  });
+  decoderWindow.on('closed', () => { decoderWindow = null; });
+  const win = decoderWindow;
+  return win.loadFile(path.join(__dirname, 'renderer', 'decoder.html')).then(() => win);
+}
+
+async function decodeCompressedAudio(bytes) {
+  const win = await getDecoderWindow();
+  const id = ++decoderSeq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      decoderWaiting.delete(id);
+      reject(new Error('decode timed out'));
+    }, DECODE_TIMEOUT_MS);
+    decoderWaiting.set(id, { resolve, reject, timer });
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    win.webContents.send('decoder:request', id, ab);
+  });
+}
+
+function deviceAudioDeps() {
+  return {
+    roots: () => DEVICE_INBOX_ROOTS,
+    agentExists: async (name) => {
+      const res = await fetch(`${REGISTRY_URL}/agents`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error(`backend answered HTTP ${res.status}`);   // unknown ≠ absent: retry later
+      return Object.prototype.hasOwnProperty.call(await res.json(), name);
+    },
+    decode: (bytes) => decodeCompressedAudio(bytes),
+    transcribe: async (pcm, agent) => {
+      const language = getPrefs(agent).micLanguage;
+      const text = await transcribeAudio(null, pcm, language && language !== 'auto' ? language : null);
+      return text ? fixDictation(text) : text;
+    },
+    // A mic dictation of the target agent, exactly as its widget's mic
+    // sends one (from = to = the agent, source human): the backend picks
+    // the session unless the phone named one.
+    deliver: async (clip, text) => {
+      const body = { message: text, to: clip.target.agent, source: 'human', from_agent: clip.target.agent };
+      if (clip.target.session) body.session = clip.target.session;
+      const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+      const json = await res.json().catch(() => ({}));
+      return res.ok && json.injected ? { ok: true } : { ok: false, error: json.detail || `HTTP ${res.status}` };
+    },
+    reply: async (to, payload) => {
+      if (!deviceAudioClient) return;
+      try {
+        await deviceAudioClient.sendConfirmed(to, JSON.stringify(payload), { from: deviceAudio.SYSTEM_MAILBOX, source: 'system' });
+      } catch (err) {
+        log.warn('device-audio', `reply to ${to} failed: ${err && err.message ? err.message : err}`);
+      }
+    },
+    log: (level, message) => (log[level] || log.info)('device-audio', message),
+  };
+}
+
+async function startDeviceAudio() {
+  if (!deviceAudioQueue) {
+    deviceAudioQueue = new deviceAudio.DeviceAudioQueue(deviceAudioDeps());
+    DEVICE_INBOX_ROOTS.forEach(scanDeviceInbox);
+  }
+  let VortexiaClient;
+  try {
+    ({ VortexiaClient } = await import('vortexia/src/client.js'));
+  } catch (err) {
+    log.error('device-audio', `vortexia client unavailable: ${err}`);
+    return;
+  }
+  const client = new VortexiaClient();
+  const retry = () => setTimeout(startDeviceAudio, 5000);
+  client.on('message', (envelope, topic) => {
+    if (topic === VORTEXIA_PATHS_TOPIC) {
+      const dir = envelope && typeof envelope.deviceInboxDir === 'string' ? envelope.deviceInboxDir : null;
+      if (dir && path.isAbsolute(dir) && !DEVICE_INBOX_ROOTS.includes(dir)) {
+        DEVICE_INBOX_ROOTS.push(dir);
+        log.info('device-audio', `broker's device inbox: ${dir}`);
+        scanDeviceInbox(dir);
+      }
+      return;
+    }
+    const parsed = deviceAudio.parseNotice(envelope);
+    if (parsed.ok) deviceAudioQueue.enqueue(parsed.clip);
+    else if (envelope && envelope.text && String(envelope.text).includes('device-audio')) {
+      log.warn('device-audio', `bad notice from ${(envelope && envelope.from) || '?'}: ${parsed.error}`);
+      if (parsed.from) deviceAudioDeps().reply(parsed.from, { type: 'device-audio-result', ok: false, error: parsed.error });
+    }
+  });
+  client.on('close', () => {
+    if (deviceAudioClient !== client) return;
+    deviceAudioClient = null;
+    retry();
+  });
+  try {
+    await client.register(deviceAudio.SYSTEM_MAILBOX, { mailbox: true, presence: false });
+    deviceAudioClient = client;
+    client.mqttClient.subscribe(VORTEXIA_PATHS_TOPIC, { qos: 0 });
+    log.info('device-audio', `holding the ${deviceAudio.SYSTEM_MAILBOX} mailbox; inbox ${DEVICE_INBOX_ROOTS.join(', ')}`);
+  } catch (err) {
+    log.warn('device-audio', `mailbox connect failed (${err && err.message ? err.message : err}) — retrying`);
+    retry();
+  }
+}
+
 app.whenReady().then(async () => {
   if (process.platform === 'darwin') {
     app.dock?.hide();
   }
+  startDeviceAudio();
   // No window records at launch: closes any "[mic] recording started" a
   // crash or restart left open, which restart-widget.sh would otherwise
   // wait on forever.
