@@ -224,6 +224,11 @@
         clearInterval(micTick);
         micTick = setInterval(() => { micTime.textContent = fmt(Date.now() - micStart); }, 500);
         micTime.textContent = '0:00';
+      } else if (state === 'warning') {
+        // The widget's signal watchdog: still recording, but no usable audio.
+        micLabel.textContent = `⚠ ${(detail && detail.error) || 'No audio'}`;
+      } else if (state === 'signal-ok') {
+        micLabel.textContent = 'Listening…';
       } else if (state === 'transcribing') {
         setMic('transcribing');
         clearInterval(micTick);

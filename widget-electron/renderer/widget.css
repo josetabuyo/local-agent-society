@@ -449,6 +449,18 @@ html, body {
   position: relative;
 }
 
+/* Signal watchdog (widget.js startSignalWatch): recording, but no usable
+ * audio is arriving — amber ring, so a glance tells it from a live mic. */
+#mic.active.no-signal {
+  box-shadow: 0 0 0 2px #ff9f0a;
+  animation: mic-no-signal 0.9s ease-in-out infinite;
+}
+
+@keyframes mic-no-signal {
+  0%, 100% { box-shadow: 0 0 0 2px #ff9f0a; }
+  50% { box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.25); }
+}
+
 .mic-test-toast {
   position: absolute;
   left: 50%;

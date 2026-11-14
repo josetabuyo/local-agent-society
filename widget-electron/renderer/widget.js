@@ -1665,7 +1665,13 @@ async function stopRecordingAndTranscribe() {
       'mic',
       `transcribeAudio returned ok=${!!(result && result.ok)} chars=${result && result.text ? result.text.length : 0}`
     );
-    if (result && result.ok && result.text) {
+    if (result && result.ok && result.text && isNonSpeechText(result.text)) {
+      // The whole dictation came out as "[Música]" & co.: there is no speech
+      // in it, so nothing is sent — the person hears it and sees why.
+      window.las.log('warn', 'mic', `transcription is non-speech only (${JSON.stringify(result.text.slice(0, 60))}) — nothing published`);
+      warnBeep();
+      reportMic('failed', { error: MIC_WARNINGS.nonspeech });
+    } else if (result && result.ok && result.text) {
       // Publish via vortexia — NOT a direct live write into the linked
       // terminal. An earlier pass here did the opposite (writeToTty first,
       // vortexia only as a fallback), faithfully porting the retired Swift
@@ -1737,17 +1743,118 @@ function startLiveTranscription(stream) {
   const mute = ctx.createGain();
   mute.gain.value = 0;                             // a processor only runs when wired to the output; never echo the mic
   const st = { ctx, proc, rate: ctx.sampleRate, chunks: [], total: 0, commitOffset: 0, committed: '', tail: '', inFlight: null, timer: null, stopped: false };
+  const watch = startSignalWatch(stream);
+  st.watch = watch;
   proc.onaudioprocess = (e) => {
     if (st.stopped) return;
     const d = e.inputBuffer.getChannelData(0);
     st.chunks.push(new Float32Array(d));
     st.total += d.length;
+    watch.feed(d);
   };
   src.connect(proc);
   proc.connect(mute);
   mute.connect(ctx.destination);
   live = st;
   st.timer = setTimeout(liveTick, LIVE_TICK_MS);
+}
+
+// ── signal watchdog: find out a dictation is lost WHILE it is recorded ──────
+// The failure this exists for: a long dictation with the laptop lid closed
+// (macOS cuts the built-in mic in clamshell), a muted or unplugged input, or
+// a mic that only picks up a room's music — minutes of talking that end up
+// transcribed as "[Música]". Two signals, checked live, each one a warning
+// beep (a low falling pair, unlike the countdown's rising pips) plus a mic
+// state the bubble and the log can show, repeated every SIGNAL_REALERT_MS
+// while it lasts:
+//   dead      — the input's peak stays below SIGNAL_DEAD_PEAK for
+//               SIGNAL_DEAD_S: digital silence, under any live mic's noise
+//               floor, so a quiet room never trips it;
+//   nonspeech — after NONSPEECH_MIN_S, the live transcription holds only
+//               Whisper's non-speech tags ([Música], [BLANK_AUDIO], ♪…).
+// The track ending or muting (device unplugged, taken by another app) warns
+// at once. Nothing is stopped: the person decides.
+const SIGNAL_DEAD_PEAK = 0.0008;   // ≈ −62 dBFS
+const SIGNAL_DEAD_S = 4;
+const NONSPEECH_MIN_S = 12;
+const SIGNAL_REALERT_MS = 20000;
+const SIGNAL_CHECK_MS = 1000;
+
+const MIC_WARNINGS = {
+  dead: 'No audio is reaching the mic — lid closed, input muted or disconnected?',
+  lost: 'The mic input stopped (unplugged or taken by another app)',
+  nonspeech: 'Only music/noise is being heard, no speech',
+};
+
+/** True when the text holds no words: only non-speech tags, notes, punctuation. */
+function isNonSpeechText(text) {
+  const words = String(text || '')
+    .replace(/[[(（【][^\])）】]*[\])）】]/g, ' ')
+    .replace(/\*[^*]*\*/g, ' ')
+    .replace(/[♪♫♬*.…,;:!?¡¿\-–—'"«»\s]/g, '');
+  return words.length === 0;
+}
+
+function warnBeep() {
+  playBeep(392, 160);
+  setTimeout(() => playBeep(262, 260), 210);
+}
+
+function startSignalWatch(stream) {
+  const startedAt = performance.now();
+  const w = { lastAliveAt: startedAt, warnedAt: {}, active: null, timer: null };
+  const track = stream.getAudioTracks()[0];
+  if (track) {
+    window.las.log('info', 'mic', `input device: ${track.label || '(unnamed)'}`);
+    track.addEventListener('ended', () => w.warn('lost'));
+    track.addEventListener('mute', () => w.warn('lost'));
+    track.addEventListener('unmute', () => w.clear('lost'));
+  }
+  w.feed = (samples) => {
+    let peak = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const v = samples[i] < 0 ? -samples[i] : samples[i];
+      if (v > peak) peak = v;
+    }
+    if (peak >= SIGNAL_DEAD_PEAK) {
+      w.lastAliveAt = performance.now();
+      if (w.active === 'dead') w.clear('dead');
+    }
+  };
+  w.warn = (kind) => {
+    const now = performance.now();
+    if (w.warnedAt[kind] && now - w.warnedAt[kind] < SIGNAL_REALERT_MS) return;
+    const first = !w.warnedAt[kind];
+    w.warnedAt[kind] = now;
+    w.active = kind;
+    warnBeep();
+    micEl.classList.add('no-signal');
+    micEl.title = `${MIC_WARNINGS[kind]} — click to stop`;
+    if (first) window.las.log('warn', 'mic', `signal warning (${kind}) after ${((now - startedAt) / 1000).toFixed(1)}s: ${MIC_WARNINGS[kind]}`);
+    reportMic('warning', { kind, error: MIC_WARNINGS[kind] });
+  };
+  w.clear = (kind) => {
+    if (w.active !== kind) return;
+    w.active = null;
+    micEl.classList.remove('no-signal');
+    micEl.title = 'Recording… click to stop';
+    window.las.log('info', 'mic', `signal back (${kind} cleared)`);
+    reportMic('signal-ok');
+  };
+  /** Called by liveTick with the running live transcript. */
+  w.checkText = (text) => {
+    if ((performance.now() - startedAt) / 1000 < NONSPEECH_MIN_S) return;
+    if (String(text || '').trim() && isNonSpeechText(text)) w.warn('nonspeech');
+    else if (w.active === 'nonspeech') w.clear('nonspeech');
+  };
+  w.timer = setInterval(() => {
+    if ((performance.now() - w.lastAliveAt) / 1000 >= SIGNAL_DEAD_S) w.warn('dead');
+  }, SIGNAL_CHECK_MS);
+  w.stop = () => {
+    clearInterval(w.timer);
+    micEl.classList.remove('no-signal');
+  };
+  return w;
 }
 
 function livePcmSince(st, offset) {
@@ -1790,6 +1897,7 @@ async function liveTick() {
     if (res && res.ok) {
       st.tail = (res.text || '').trim();
       reportMic('partial', { text: `${st.committed} ${st.tail}`.trim() });
+      if (st.watch) st.watch.checkText(`${st.committed} ${st.tail}`);
       if (newSeconds >= LIVE_COMMIT_S) {
         st.committed = `${st.committed} ${st.tail}`.trim();
         st.tail = '';
@@ -1806,6 +1914,7 @@ function stopLiveTranscription() {
   if (!st) return null;
   st.stopped = true;
   clearTimeout(st.timer);
+  if (st.watch) st.watch.stop();
   try { st.proc.disconnect(); } catch { /* already gone */ }
   st.ctx.close().catch(() => {});
   live = null;
