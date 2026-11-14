@@ -25,4 +25,11 @@ export PYTHONPATH="$SCRIPT_DIR/.."
 # place vortexia's own env name/Gist/Nostr config lives) or the calling
 # shell's environment for a manual run; if neither sets it, federation is
 # simply off for this run, same as vortexia's own opt-in behavior.
-exec "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT
+# Loopback only (2026-11-14): the backend has no authentication, so on
+# 0.0.0.0 anyone on the same Wi-Fi could inject messages or claim ports.
+# Every client on this Mac already uses localhost; devices from outside
+# (the phone app) reach it only through vortexia's authenticated gateway,
+# which proxies /device/* to loopback (vortexia docs/adr/0001 §8).
+# LAS_BACKEND_HOST overrides it for a deliberate, temporary exception.
+HOST="${LAS_BACKEND_HOST:-127.0.0.1}"
+exec "$VENV/bin/python" -m uvicorn main:app --host "$HOST" --port $PORT

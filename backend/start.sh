@@ -37,7 +37,14 @@ cd "$SCRIPT_DIR"
 # value here is exactly the bug that shipped "ba-mac" to a second Mac via
 # `git pull`. Federation is simply off for a manual `start.sh` run unless
 # the calling shell already has VORTEXIA_ENV_NAME exported.
-PYTHONPATH="$SCRIPT_DIR/.." nohup "$VENV/bin/python" -m uvicorn main:app --host 0.0.0.0 --port $PORT > "$LOG_FILE" 2>&1 &
+# Loopback only (2026-11-14): the backend has no authentication, so on
+# 0.0.0.0 anyone on the same Wi-Fi could inject messages or claim ports.
+# Every client on this Mac already uses localhost; devices from outside
+# (the phone app) reach it only through vortexia's authenticated gateway,
+# which proxies /device/* to loopback (vortexia docs/adr/0001 §8).
+# LAS_BACKEND_HOST overrides it for a deliberate, temporary exception.
+HOST="${LAS_BACKEND_HOST:-127.0.0.1}"
+PYTHONPATH="$SCRIPT_DIR/.." nohup "$VENV/bin/python" -m uvicorn main:app --host "$HOST" --port $PORT > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 sleep 2
 
