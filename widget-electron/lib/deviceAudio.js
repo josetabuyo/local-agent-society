@@ -170,12 +170,18 @@ class DeviceAudioQueue {
           await this._process(clip);
         } catch (err) {
           // Not delivered: the clip stays on disk for the next run's scan.
-          // Retried by a later scan, but not sooner than retryDelayMs: the
-          // inbox is rescanned every few seconds and each try re-transcribes.
+          // Retried after retryDelayMs (each try re-transcribes, so not in a
+          // tight loop), while the file is still there; 0 = leave it to the
+          // next scan.
           const delay = this.deps.retryDelayMs ?? 60000;
           this.deps.log('error', `device-audio: ${clip.sha256.slice(0, 12)} failed, kept for retry in ${Math.round(delay / 1000)}s: ${err && err.stack ? err.stack : err}`);
           if (delay <= 0) this.seen.delete(clip.sha256);
-          else setTimeout(() => this.seen.delete(clip.sha256), delay).unref?.();
+          else {
+            setTimeout(() => {
+              this.seen.delete(clip.sha256);
+              if (fs.existsSync(clip.path)) this.enqueue(clip, { quiet: true });
+            }, delay).unref?.();
+          }
         }
       }
     } finally {

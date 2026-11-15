@@ -2503,11 +2503,38 @@ const DEVICE_INBOX_ROOTS = (process.env.VORTEXIA_DEVICE_INBOX || path.join(os.ho
   .split(path.delimiter).filter(Boolean);
 
 // The notice is only a hint — the file is the source of truth — so the inbox
-// is also rescanned on a timer: a notice that never arrives (the gateway's
-// MQTT client dropped by a keep-alive timeout and queueing its publishes in
-// memory, found live 2026-11-15) costs a few seconds, not the dictation.
-const DEVICE_INBOX_RESCAN_MS = 10000;
+// is also WATCHED (FSEvents on macOS, no polling): the gateway's write of the
+// sidecar (a rename) triggers the scan the instant it lands. A notice that
+// never arrives — the gateway's MQTT client dropped by a keep-alive timeout,
+// queueing its publishes in memory, found live 2026-11-15 — no longer
+// strands the clip. Dedup by sha256 makes notice + watch harmless.
 const deviceInboxSkipped = new Set();   // sidecars already warned about
+const deviceInboxWatchers = new Map();  // root → fs.FSWatcher
+
+function watchDeviceInbox(root) {
+  if (deviceInboxWatchers.has(root)) return;
+  let timer = null;
+  const rescan = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => scanDeviceInbox(root, { quiet: true }), 250);
+  };
+  try {
+    const watcher = fs.watch(root, { recursive: true, persistent: false }, (_type, file) => {
+      if (!file || String(file).endsWith('.json')) rescan();
+    });
+    watcher.on('error', (err) => {
+      log.warn('device-audio', `watch ${root} failed (${err.message}) — re-watching`);
+      deviceInboxWatchers.delete(root);
+      watcher.close();
+      setTimeout(() => { watchDeviceInbox(root); scanDeviceInbox(root, { quiet: true }); }, 5000);
+    });
+    deviceInboxWatchers.set(root, watcher);
+  } catch (err) {
+    // The broker has not created it yet: try again later (rare, cheap).
+    setTimeout(() => watchDeviceInbox(root), 30000).unref?.();
+    if (err.code !== 'ENOENT') log.warn('device-audio', `cannot watch ${root}: ${err.message}`);
+  }
+}
 
 function scanDeviceInbox(root, { quiet = false } = {}) {
   const left = deviceAudio.scanInbox(root, (file, why) => {
@@ -2688,8 +2715,7 @@ ipcMain.handle('pairing:revoke', (_event, envName) => pairingControl.revoke(Stri
 async function startDeviceAudio() {
   if (!deviceAudioQueue) {
     deviceAudioQueue = new deviceAudio.DeviceAudioQueue(deviceAudioDeps());
-    DEVICE_INBOX_ROOTS.forEach((root) => scanDeviceInbox(root));
-    setInterval(() => DEVICE_INBOX_ROOTS.forEach((root) => scanDeviceInbox(root, { quiet: true })), DEVICE_INBOX_RESCAN_MS).unref?.();
+    DEVICE_INBOX_ROOTS.forEach((root) => { scanDeviceInbox(root); watchDeviceInbox(root); });
   }
   let VortexiaClient;
   try {
@@ -2708,6 +2734,7 @@ async function startDeviceAudio() {
         DEVICE_INBOX_ROOTS.push(dir);
         log.info('device-audio', `broker's device inbox: ${dir}`);
         scanDeviceInbox(dir);
+        watchDeviceInbox(dir);
       }
       return;
     }

@@ -160,9 +160,10 @@ test('the renderer keeps the same non-speech rule as lib/deviceAudio.js', () => 
   assert.equal(body(widget), body(fs.readFileSync(path.join(__dirname, '..', 'lib', 'deviceAudio.js'), 'utf8')));
 });
 
-test('main.js rescans the inbox on a timer: a notice that never arrives does not strand a clip', () => {
+test('main.js watches the inbox (no polling): a notice that never arrives does not strand a clip', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-  assert.match(main, /setInterval\(\(\) => DEVICE_INBOX_ROOTS\.forEach\(\(root\) => scanDeviceInbox\(root, \{ quiet: true \}\)\), DEVICE_INBOX_RESCAN_MS\)/);
+  assert.match(main, /fs\.watch\(root, \{ recursive: true/);
+  assert.doesNotMatch(main, /DEVICE_INBOX_RESCAN_MS/, 'no timer rescan');
   const root = inbox();
   const { notice } = clipFile(root, 'rescan');
   const q = new D.DeviceAudioQueue(deps(root));
@@ -178,4 +179,18 @@ test('a failed clip is not retried before retryDelayMs (each try re-transcribes)
   q.enqueue(D.parseNotice(notice).clip);
   await q.idle;
   assert.equal(q.enqueue(D.scanInbox(root)[0], { quiet: true }), false, 'held back');
+});
+
+test('a failed clip retries on its own after retryDelayMs, with no scan', async () => {
+  const root = inbox();
+  const { file, notice } = clipFile(root, 'self-retry');
+  let attempts = 0;
+  const d = deps(root, { retryDelayMs: 20, deliver: async () => (++attempts === 1 ? { ok: false, error: 'down' } : { ok: true }) });
+  const q = new D.DeviceAudioQueue(d);
+  q.enqueue(D.parseNotice(notice).clip);
+  await q.idle;
+  await new Promise((r) => setTimeout(r, 60));
+  await q.idle;
+  assert.equal(attempts, 2);
+  assert.equal(fs.existsSync(file), false);
 });
