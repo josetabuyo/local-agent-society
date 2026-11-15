@@ -959,6 +959,65 @@ def _remote_color(agent: str, env: str) -> str | None:
     return None
 
 
+# ── Chat history (backend/chat_history.py) ───────────────────────────────
+# A passive observer of every inbox and of las/speak — QoS 0, clean session,
+# never a mailbox client id, so it consumes nothing — keeps what each widget
+# shows in its three bubble kinds, for the phone app's agent card.
+import chat_history as _chat_history
+
+CHAT_HISTORY_DIR = DATA_DIR / "chat-history"
+_chat = _chat_history.ChatHistory(CHAT_HISTORY_DIR)
+_chat_watcher: dict = {"client": None}
+_chat_watcher_lock = threading.Lock()
+_CHAT_TOPICS = [("las/agent/+/inbox", 0), ("las/agent/+/sessions/+/inbox", 0), (SPEAK_TOPIC, 0)]
+
+
+def _on_chat_message(topic: str, payload: bytes) -> None:
+    try:
+        envelope = json.loads(payload.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return
+    parts = topic.split("/")
+    session = parts[4] if len(parts) == 6 and parts[3] == "sessions" else None
+    try:
+        _chat.record(envelope, session)
+    except Exception as exc:  # a bad envelope must never stop the observer
+        logger.warning(f"[chat-history] {topic}: {exc}")
+
+
+def _watch_chat() -> None:
+    """Start (once) the passive subscriber that feeds `_chat`."""
+    with _chat_watcher_lock:
+        if _chat_watcher["client"] is not None:
+            return
+        try:
+            import paho.mqtt.client as mqtt
+            client = mqtt.Client(client_id=f"las-chat-observer-{uuid.uuid4().hex[:8]}", clean_session=True, protocol=mqtt.MQTTv311)
+            client.on_connect = lambda c, *_a: c.subscribe(_CHAT_TOPICS)
+            client.on_message = lambda _c, _u, msg: _on_chat_message(msg.topic, msg.payload)
+            client.reconnect_delay_set(min_delay=1, max_delay=30)
+            client.connect_async("localhost", _vortexia_mqtt_port(), keepalive=30)
+            client.loop_start()
+            _chat_watcher["client"] = client
+        except Exception as exc:
+            logger.warning(f"[chat-history] could not watch the inboxes: {exc}")
+
+
+threading.Thread(target=_watch_chat, daemon=True).start()
+
+
+@app.get("/agents/{name}/chat")
+@app.get("/device/agents/{name}/chat")
+def agent_chat(name: str, after: Optional[int] = None, limit: int = 100):
+    """`name`'s conversation, chronological: mic dictations (source human,
+    from == to == name), its own speech (from "queue", kind "speak"), what
+    other agents sent it and what it sent them. `after` (a ts) returns only
+    newer messages — poll with the last ts seen. The last `limit` (max 500)."""
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(404, f"no agent named {name}")
+    return {"agent": name, "messages": _chat.query(name, after=after, limit=max(0, min(limit, _chat_history.MAX_PER_AGENT)))}
+
+
 @app.get("/agents/{name}/friends")
 def list_friends(name: str):
     """The agents `name` is linked to (`friends` in its .las-agent.json), in the order they were added."""
