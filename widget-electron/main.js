@@ -2307,11 +2307,56 @@ async function synthesizeSpeech(text, voiceId, lang) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-ipcMain.handle('tts:synthesize', async (event, text, voiceId, lang) => {
+// ── Speech for a paired phone (backend/speech_store.py) ──────────────────
+// Every speak this widget synthesizes also goes to the backend as AAC m4a
+// (afconvert, macOS: ~10x smaller than the WAV), so the phone app can play
+// the agent's own Kokoro voice. Fire-and-forget: never delays playback here.
+function wavDurationMs(wav) {
+  try {
+    const rate = wav.readUInt32LE(24);
+    const channels = wav.readUInt16LE(22);
+    const bits = wav.readUInt16LE(34);
+    const bytes = wav.length - 44;
+    return rate && channels && bits ? Math.round((bytes / (rate * channels * (bits / 8))) * 1000) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function shareSpeechWithDevices(wav, text, speech) {
+  if (process.platform !== 'darwin' || !speech || !speech.id || !speech.agent) return;
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'las-speech-'));
+  try {
+    const src = path.join(dir, 'in.wav');
+    const dst = path.join(dir, 'out.m4a');
+    await fs.promises.writeFile(src, wav);
+    await new Promise((resolve, reject) => execFile('/usr/bin/afconvert', ['-f', 'm4af', '-d', 'aac', '-b', '48000', src, dst], { timeout: 20000 }, (err) => (err ? reject(err) : resolve())));
+    const body = await fs.promises.readFile(dst);
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(speech.agent)}/speech/${encodeURIComponent(speech.id)}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'audio/mp4',
+        'x-speech-ts': String(Number(speech.ts) || Date.now()),
+        'x-speech-text': encodeURIComponent(String(text).slice(0, 2000)),
+        ...(wavDurationMs(wav) ? { 'x-speech-duration-ms': String(wavDurationMs(wav)) } : {}),
+      },
+      body,
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) log.warn('tts', `speech for devices: backend answered ${res.status}`);
+  } catch (err) {
+    log.warn('tts', `speech for devices failed: ${err && err.message ? err.message : err}`);
+  } finally {
+    fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+ipcMain.handle('tts:synthesize', async (event, text, voiceId, lang, speech) => {
   try {
     const startedAt = Date.now();
     const wav = await synthesizeSpeech(String(text || ''), String(voiceId || 'af_heart'), String(lang || 'en-us'));
     log.info('tts', `synthesized ${text.length} chars (voice=${voiceId}) in ${Date.now() - startedAt}ms`);
+    shareSpeechWithDevices(wav, String(text || ''), speech);
     return { ok: true, wav: wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) };
   } catch (err) {
     log.error('tts', `tts:synthesize IPC failed: ${err && err.stack ? err.stack : err}`);

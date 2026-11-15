@@ -1179,7 +1179,8 @@ async function speak(text, envelope) {
   }
   let result;
   try {
-    result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang);
+    const speech = envelope && envelope.id ? { id: String(envelope.id), agent: agentName, ts: envelope.ts || Date.now() } : null;
+    result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang, speech);
   } catch (err) {
     console.warn('[widget] synthesizeSpeech IPC failed', err);
     ackSpeak(envelope, 'skipped', 'synthesis-ipc-failed');

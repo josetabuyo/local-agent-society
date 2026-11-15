@@ -23,7 +23,8 @@ contextBridge.exposeInMainWorld('las', {
   /** Synthesize `text` with a Kokoro voice id + kokoro-onnx lang code (both
    * from ttsVoices) via the backend's /tts/synthesize; returns
    * {ok:true, wav: ArrayBuffer} or {ok:false, error}. */
-  synthesizeSpeech: (text, voiceId, lang) => ipcRenderer.invoke('tts:synthesize', text, voiceId, lang),
+  // `speech` ({id, agent, ts}) also hands the clip to the backend for a paired phone.
+  synthesizeSpeech: (text, voiceId, lang, speech) => ipcRenderer.invoke('tts:synthesize', text, voiceId, lang, speech || null),
 
   /** Speak-queue handshake: report one speak envelope's progress back to the
    * backend drainer (POST /queue/ack) so the NEXT agent's clip is held until

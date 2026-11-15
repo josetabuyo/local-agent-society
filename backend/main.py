@@ -1018,6 +1018,58 @@ def agent_chat(name: str, after: Optional[int] = None, limit: int = 100):
     return {"agent": name, "messages": _chat.query(name, after=after, limit=max(0, min(limit, _chat_history.MAX_PER_AGENT)))}
 
 
+# ── Speech clips for the phone (backend/speech_store.py) ─────────────────
+import speech_store as _speech_store
+
+_speech = _speech_store.SpeechStore(DATA_DIR / "speech")
+
+
+def _known_agent(name: str) -> None:
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(404, f"no agent named {name}")
+
+
+@app.put("/agents/{name}/speech/{clip_id}")
+async def put_speech(name: str, clip_id: str, request: Request):
+    """The widget hands over a speak it just synthesized (AAC m4a body;
+    X-Speech-Ts, X-Speech-Text (URI-encoded), X-Speech-Duration-Ms headers).
+    Not under /device/: the phone only reads."""
+    from urllib.parse import unquote
+    _known_agent(name)
+    audio = await request.body()
+    try:
+        meta = _speech.put(
+            name, clip_id, audio,
+            ts=int(request.headers.get("x-speech-ts") or time.time() * 1000),
+            text=unquote(request.headers.get("x-speech-text") or ""),
+            duration_ms=int(request.headers["x-speech-duration-ms"]) if request.headers.get("x-speech-duration-ms", "").isdigit() else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return {"ok": True, "parts": meta["parts"]}
+
+
+@app.get("/agents/{name}/speech")
+@app.get("/device/agents/{name}/speech")
+def list_speech(name: str, after: Optional[int] = None):
+    """`name`'s recent speech clips (last 20, last hour), chronological;
+    `after` (a ts) returns only newer ones. Fetch each with /speech/{id}?part=N."""
+    _known_agent(name)
+    return {"agent": name, "items": _speech.list(name, after=after)}
+
+
+@app.get("/agents/{name}/speech/{clip_id}")
+@app.get("/device/agents/{name}/speech/{clip_id}")
+def get_speech_part(name: str, clip_id: str, part: int = 0):
+    """One part of a clip: {id, part, parts, b64} — at most 40000 raw bytes,
+    so it fits vortexia's NIP-44 envelope. Concatenate the decoded parts."""
+    _known_agent(name)
+    res = _speech.part(name, clip_id, part)
+    if res is None:
+        raise HTTPException(404, "no such clip or part")
+    return res
+
+
 @app.get("/agents/{name}/friends")
 def list_friends(name: str):
     """The agents `name` is linked to (`friends` in its .las-agent.json), in the order they were added."""

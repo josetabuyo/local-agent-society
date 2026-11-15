@@ -1553,7 +1553,7 @@ test('pickVoice resolves a real Kokoro voice id for an English-locale agent', ()
 test('preload.js exposes the Kokoro voice pool and synthesis bridge on window.las', () => {
   const src = readSrc('preload.js');
   assert.match(src, /ttsVoices:\s*KOKORO_VOICES/);
-  assert.match(src, /synthesizeSpeech:\s*\(text, voiceId, lang\) => ipcRenderer\.invoke\('tts:synthesize', text, voiceId, lang\)/);
+  assert.match(src, /synthesizeSpeech:\s*\(text, voiceId, lang, speech\) => ipcRenderer\.invoke\('tts:synthesize', text, voiceId, lang, speech \|\| null\)/);
 });
 
 test('main.js exposes a tts:synthesize IPC handler that calls the backend, not in-process ONNX', () => {
@@ -1574,7 +1574,7 @@ test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays 
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
   assert.match(body, /window\.las\.pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
-  assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang\)/);
+  assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang, speech\)/);
   assert.match(body, /new Audio\(url\)/);
 });
 
@@ -2021,4 +2021,11 @@ test('pin-only male Spanish blends: em_alex, em_santa and their blend with every
       assert.ok(v.pinOnly && !KOKORO_HASH_POOL.includes(v));
     }
   }
+});
+
+test('every synthesized speak is also shared with a paired phone, off the playback path', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const handler = src.slice(src.indexOf("ipcMain.handle('tts:synthesize'"), src.indexOf("ipcMain.handle('tts:synthesize'") + 600);
+  assert.match(handler, /\n    shareSpeechWithDevices\(wav, String\(text \|\| ''\), speech\);/, 'not awaited: playback never waits for it');
+  assert.match(src, /'\/usr\/bin\/afconvert', \['-f', 'm4af', '-d', 'aac'/);
 });
