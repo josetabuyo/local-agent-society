@@ -2029,3 +2029,14 @@ test('every synthesized speak is also shared with a paired phone, off the playba
   assert.match(handler, /\n    shareSpeechWithDevices\(wav, String\(text \|\| ''\), speech\);/, 'not awaited: playback never waits for it');
   assert.match(src, /'\/usr\/bin\/afconvert', \['-f', 'm4af', '-d', 'aac'/);
 });
+
+test('a speak routed to a phone is synthesized and handed over, but not played on the Mac', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'widget.js'), 'utf8');
+  const body = src.slice(src.indexOf('async function speak(text, envelope)'), src.indexOf('async function speak(text, envelope)') + 4000);
+  const synth = body.indexOf('window.las.synthesizeSpeech(');
+  const skip = body.indexOf("ackSpeak(envelope, 'skipped', 'routed-to-device')");
+  const play = body.indexOf('new Audio(url)');
+  assert.ok(synth > 0 && skip > synth && play > skip, 'synthesize (and share) first, then skip before any playback');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(main, /via: `device:\$\{clip\.from\}`/, "a phone's dictation is marked as coming from it");
+});

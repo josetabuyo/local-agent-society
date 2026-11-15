@@ -66,13 +66,14 @@ class SpeechStore:
             for ext in ("m4a", "json"):
                 (d / f"{m['id']}.{ext}").unlink(missing_ok=True)
 
-    def put(self, agent: str, clip_id: str, audio: bytes, *, ts: int, text: str, duration_ms: int | None, mime: str = "audio/mp4") -> dict:
+    def put(self, agent: str, clip_id: str, audio: bytes, *, ts: int, text: str, duration_ms: int | None, mime: str = "audio/mp4", route: str = "mac") -> dict:
         if not self.valid_id(clip_id):
             raise ValueError("bad id")
         if not audio or len(audio) > MAX_CLIP_BYTES:
             raise ValueError("empty or too large")
         meta = {"agent": agent, "id": clip_id, "ts": int(ts), "text": text, "durationMs": duration_ms, "mime": mime,
-                "bytes": len(audio), "parts": max(1, math.ceil(len(audio) / PART_BYTES)), "storedAt": self.now()}
+                "bytes": len(audio), "parts": max(1, math.ceil(len(audio) / PART_BYTES)), "storedAt": self.now(),
+                "route": route if _ID.match(route or "") else "mac"}
         with self._lock:
             d = self._agent_dir(agent)
             d.mkdir(parents=True, exist_ok=True)
@@ -89,7 +90,7 @@ class SpeechStore:
             metas = self._metas(agent)
         if after is not None:
             metas = [m for m in metas if (m.get("ts") or 0) > after]
-        return [{k: m.get(k) for k in ("id", "ts", "text", "durationMs", "mime", "parts")} for m in metas]
+        return [{**{k: m.get(k) for k in ("id", "ts", "text", "durationMs", "mime", "parts")}, "route": m.get("route") or "mac"} for m in metas]
 
     def list_all(self, agents, after: int | None = None) -> list[dict]:
         """Every agent's recent clips in one chronological list (`agents`: the

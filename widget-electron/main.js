@@ -2338,6 +2338,7 @@ async function shareSpeechWithDevices(wav, text, speech) {
         'content-type': 'audio/mp4',
         'x-speech-ts': String(Number(speech.ts) || Date.now()),
         'x-speech-text': encodeURIComponent(String(text).slice(0, 2000)),
+        'x-speech-route': String(speech.route || 'mac'),
         ...(wavDurationMs(wav) ? { 'x-speech-duration-ms': String(wavDurationMs(wav)) } : {}),
       },
       body,
@@ -2649,7 +2650,8 @@ function deviceAudioDeps() {
     // sends one (from = to = the agent, source human): the backend picks
     // the session unless the phone named one.
     deliver: async (clip, text) => {
-      const body = { message: text, to: clip.target.agent, source: 'human', from_agent: clip.target.agent };
+      // via: the agent's spoken answer goes back to this phone, not the Mac.
+      const body = { message: text, to: clip.target.agent, source: 'human', from_agent: clip.target.agent, via: `device:${clip.from}` };
       if (clip.target.session) body.session = clip.target.session;
       const res = await fetch(`${REGISTRY_URL}/agents/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
       const json = await res.json().catch(() => ({}));

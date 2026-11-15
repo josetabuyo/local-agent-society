@@ -335,6 +335,8 @@ def _drain_one() -> bool:
             "kind": "speak",
             "text": text,
             "ts": int(time.time() * 1000),
+            # "mac" plays in this Mac's widget; "<envName>" on that phone only.
+            "route": _reply_route(name),
         }
         if not _vortexia_publish(SPEAK_TOPIC, envelope):
             return True
@@ -503,6 +505,11 @@ class SendRequest(BaseModel):
     # all_sessions = every live session, one publish each (like --children).
     session:      Optional[str] = None
     all_sessions: bool          = False
+    # Which medium a human input came through: unset = this Mac (the widget
+    # mic, a terminal); "device:<envName>" = a paired phone (its dictation,
+    # transcribed by the widget). The agent's spoken answers follow it —
+    # "answer through the medium you were spoken to" (see _reply_routes).
+    via:          Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9._:@-]{1,96}$")
     # Envelope kind: "message" (prose) or "command" (something a shell runs —
     # ShellSink only ever runs kind=command). Unset: prose, except that a
     # child which accepts nothing but commands (its runtime descriptor) is
@@ -972,11 +979,51 @@ _chat_watcher_lock = threading.Lock()
 _CHAT_TOPICS = [("las/agent/+/inbox", 0), ("las/agent/+/sessions/+/inbox", 0), (SPEAK_TOPIC, 0)]
 
 
+# "Answer through the medium you were spoken to": per agent, where its last
+# HUMAN input came from — "mac" (widget mic, terminal) or a phone's envName.
+# Its speech goes there and only there (the speak envelope's `route`).
+REPLY_ROUTES_FILE = DATA_DIR / "reply-routes.json"
+_reply_routes_lock = threading.Lock()
+
+
+def _route_of_input(envelope: dict) -> str | None:
+    """The medium a message came through, or None if it is not a human input."""
+    if not isinstance(envelope, dict) or envelope.get("source") != "human":
+        return None
+    via = envelope.get("via")
+    if isinstance(via, str) and via.startswith("device:") and via[7:]:
+        return via[7:]
+    if via == "device" and isinstance(envelope.get("from"), str):
+        return envelope["from"]   # typed on the phone: from = its envName
+    return "mac"
+
+
+def _note_reply_route(envelope: dict) -> None:
+    route = _route_of_input(envelope)
+    to = envelope.get("to") if isinstance(envelope, dict) else None
+    if not route or not isinstance(to, str) or envelope.get("kind") in ("cc", "probe", "title-request"):
+        return
+    with _reply_routes_lock:
+        routes = load_json(REPLY_ROUTES_FILE, {})
+        if routes.get(to) != route:
+            routes[to] = route
+            save_json(REPLY_ROUTES_FILE, routes)
+
+
+def _reply_route(name: str) -> str:
+    with _reply_routes_lock:
+        return load_json(REPLY_ROUTES_FILE, {}).get(name, "mac")
+
+
 def _on_chat_message(topic: str, payload: bytes) -> None:
     try:
         envelope = json.loads(payload.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return
+    try:
+        _note_reply_route(envelope)
+    except Exception as exc:
+        logger.warning(f"[reply-route] {topic}: {exc}")
     parts = topic.split("/")
     session = parts[4] if len(parts) == 6 and parts[3] == "sessions" else None
     try:
@@ -1043,6 +1090,7 @@ async def put_speech(name: str, clip_id: str, request: Request):
             ts=int(request.headers.get("x-speech-ts") or time.time() * 1000),
             text=unquote(request.headers.get("x-speech-text") or ""),
             duration_ms=int(request.headers["x-speech-duration-ms"]) if request.headers.get("x-speech-duration-ms", "").isdigit() else None,
+            route=request.headers.get("x-speech-route") or "mac",
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc))
@@ -2101,7 +2149,7 @@ def _kind_for(kind: str | None, target_session: dict, policy: dict) -> str | Non
     return KIND_COMMAND if accepts_only_commands(descriptor_for(policy, target_session.get("runtime", ""))) else None
 
 
-def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False, cc: bool = False, kind: str | None = None) -> dict:
+def _route_send(*, to: str | None, scope: str | None, message: str, source: str, sender: str, session: str | None = None, all_sessions: bool = False, cc: bool = False, kind: str | None = None, via: str | None = None) -> dict:
     """Single delivery path for both /agents/send and the legacy
     /agents/{name}/inject — one implementation, two request shapes on top
     of it (DRY: this used to be duplicated between the two endpoints).
@@ -2157,7 +2205,7 @@ def _route_send(*, to: str | None, scope: str | None, message: str, source: str,
 
     registry = load_json(REGISTRY_FILE, {})
     if "@" not in to and to in registry:
-        envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts, **({"kind": kind} if kind else {})}
+        envelope = {"from": sender, "to": to, "source": source, "text": message, "ts": ts, **({"kind": kind} if kind else {}), **({"via": via} if via else {})}
         policy = sessions_config(_agent_config(to, registry))
         with _sessions_lock:
             sessions = _load_sessions(to)
@@ -2245,7 +2293,7 @@ def send_message(body: SendRequest):
     if bool(body.to) == bool(body.scope):
         raise HTTPException(status_code=422, detail="exactly one of `to` or `scope` must be set")
     sender = body.from_agent or body.source or "external"
-    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions, cc=body.cc, kind=body.kind)
+    return _route_send(to=body.to, scope=body.scope, message=body.message, source=body.source, sender=sender, session=body.session, all_sessions=body.all_sessions, cc=body.cc, kind=body.kind, via=body.via)
 
 
 @app.post("/agents/{name}/inject")

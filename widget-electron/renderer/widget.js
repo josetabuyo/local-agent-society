@@ -1179,7 +1179,8 @@ async function speak(text, envelope) {
   }
   let result;
   try {
-    const speech = envelope && envelope.id ? { id: String(envelope.id), agent: agentName, ts: envelope.ts || Date.now() } : null;
+    const route = (envelope && typeof envelope.route === 'string' && envelope.route) || 'mac';
+    const speech = envelope && envelope.id ? { id: String(envelope.id), agent: agentName, ts: envelope.ts || Date.now(), route } : null;
     result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang, speech);
   } catch (err) {
     console.warn('[widget] synthesizeSpeech IPC failed', err);
@@ -1189,6 +1190,13 @@ async function speak(text, envelope) {
   if (!result || !result.ok) {
     console.warn('[widget] tts synthesis failed', result && result.error);
     ackSpeak(envelope, 'skipped', 'synthesis-failed');
+    return;
+  }
+  // "Answer through the medium you were spoken to": the last human input
+  // came from a paired phone, so this plays there (synthesized above and
+  // handed to the backend for it), not on this Mac.
+  if (envelope && envelope.route && envelope.route !== 'mac') {
+    ackSpeak(envelope, 'skipped', 'routed-to-device');
     return;
   }
   // Muted while synthesizing — the slow part — so never start playing.
