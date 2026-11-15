@@ -2621,8 +2621,8 @@ function openPairingWindow() {
     return pairingWindow;
   }
   pairingWindow = new BrowserWindow({
-    width: 420,
-    height: 600,
+    width: 460,
+    height: 720,
     title: 'Phones',
     resizable: true,
     minimizable: false,
@@ -2653,8 +2653,17 @@ ipcMain.handle('pairing:start', async (_event, label) => {
   if (!res.ok) return res;
   pairingSession = { sessionId: res.sessionId, uri: res.uri, expiresAt: res.expiresAt };
   const QRCode = require('qrcode');
-  const svg = await QRCode.toString(res.uri, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+  // Low error correction and a trimmed URI: the fewest modules a camera
+  // has to resolve (a phone with a damaged autofocus still reads it).
+  const svg = await QRCode.toString(pairing.qrUri(res.uri), { type: 'svg', errorCorrectionLevel: 'L', margin: 2 });
   return { ...res, svg };
+});
+// "Copy link": the full URI, for a phone that can't scan (Universal
+// Clipboard carries it to the iPhone, whose app has a paste field).
+ipcMain.handle('pairing:copy', () => {
+  if (!pairingSession) return { ok: false, error: 'no pairing code on screen' };
+  clipboard.writeText(pairingSession.uri);
+  return { ok: true };
 });
 ipcMain.handle('pairing:cancel', async () => {
   if (!pairingSession) return { ok: true };

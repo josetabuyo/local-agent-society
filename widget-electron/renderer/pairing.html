@@ -25,7 +25,7 @@
     button.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
     button:disabled { opacity: .5; cursor: default; }
     input { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 4px 8px; }
-    #qr { background: #fff; border-radius: 8px; padding: 8px; width: 240px; height: 240px; margin: 8px auto; }
+    #qr { background: #fff; border-radius: 8px; padding: 8px; width: 360px; max-width: 100%; aspect-ratio: 1; margin: 8px auto; }
     #qr svg { width: 100%; height: 100%; display: block; }
     .center { text-align: center; }
     .empty { color: var(--muted); }
@@ -45,10 +45,10 @@
       <button id="pairStart" class="primary" type="button">Show QR</button>
     </div>
     <div id="pairActive" class="hidden center">
-      <div class="sub">Scan with the LAS app on the phone</div>
+      <div class="sub">Scan with the LAS app on the phone — or copy the link and paste it there</div>
       <div id="qr"></div>
       <div class="sub" id="pairCountdown"></div>
-      <div class="row" style="justify-content:center"><button id="pairCancel" type="button">Cancel</button></div>
+      <div class="row" style="justify-content:center"><button id="pairCopy" class="primary" type="button" title="Copies the vxpair: link — Universal Clipboard takes it to the iPhone; paste it in the app">Copy link</button><button id="pairCancel" type="button">Cancel</button></div>
     </div>
     <div id="pairStatus" class="status"></div>
   </div>

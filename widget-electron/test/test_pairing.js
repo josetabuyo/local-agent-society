@@ -89,3 +89,13 @@ test('main.js routes the pairing topics before device-audio and ships the Phones
   for (const f of ['renderer/pairing.html', 'renderer/pairing.js', 'pairing-preload.js']) assert.ok(fs.existsSync(path.join(root, f)), f);
   assert.match(fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8'), /id="pairingOpen"/);
 });
+
+test('the QR carries a trimmed URI: no relays, at most two LAN addresses, IPs first', () => {
+  const full = 'vxpair:1?env=ba-mac&pk=ab12&t=tok_-x&lan=ba-mac.local:9014,192.168.0.16:9014,10.0.0.2:9014&ts=100.1.2.3:9014&r=wss://relay.damus.io,wss://nos.lol';
+  const q = new URLSearchParams(P.qrUri(full).split('?')[1]);
+  assert.equal(q.get('r'), null);
+  assert.equal(q.get('lan'), '192.168.0.16:9014,10.0.0.2:9014');
+  assert.deepEqual([q.get('env'), q.get('pk'), q.get('t'), q.get('ts')], ['ba-mac', 'ab12', 'tok_-x', '100.1.2.3:9014']);
+  assert.ok(P.qrUri(full).length < full.length);
+  assert.equal(P.qrUri('not a uri'), 'not a uri');
+});

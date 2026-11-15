@@ -47,6 +47,26 @@ function livePending(payload, now = Date.now()) {
 }
 
 /**
+ * The URI as drawn in the QR: as few modules as possible, for phone cameras
+ * that can't focus on a dense code. Drops `r=` (relays — the phone gets them
+ * from PAIR_ACK) and keeps at most two `lan=` addresses, numeric IPs first.
+ * Everything else (env, pk, t, ts) stays. "Copy link" hands over the full URI.
+ */
+function qrUri(uri) {
+  const m = /^(vxpair:\d+)\?(.*)$/.exec(String(uri || ''));
+  if (!m) return uri;
+  const q = new URLSearchParams(m[2]);
+  q.delete('r');
+  const lan = q.get('lan');
+  if (lan) {
+    const isIp = (a) => /^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(a);
+    const list = lan.split(',').filter(Boolean);
+    q.set('lan', [...list.filter(isIp), ...list.filter((a) => !isIp(a))].slice(0, 2).join(','));
+  }
+  return `${m[1]}?${q.toString().replace(/%2C/gi, ',').replace(/%3A/gi, ':')}`;
+}
+
+/**
  * `publish(topic, payloadString)` sends; feed every message on TOPICS to
  * `handle(topic, json)`. `onChange(state)` fires on any state change;
  * `onEvent(event)` on each outcome event; `onNewPending(request)` once per
@@ -145,4 +165,4 @@ class PairingControl {
   }
 }
 
-module.exports = { TOPICS, FRIENDS_TOPIC, PENDING_TOPIC, EVENTS_TOPIC, activeFriends, livePending, PairingControl };
+module.exports = { qrUri, TOPICS, FRIENDS_TOPIC, PENDING_TOPIC, EVENTS_TOPIC, activeFriends, livePending, PairingControl };

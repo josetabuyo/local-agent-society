@@ -6,7 +6,7 @@
 const $ = (id) => document.getElementById(id);
 const els = {
   pendingList: $('pendingList'), pairIdle: $('pairIdle'), pairActive: $('pairActive'),
-  pairLabel: $('pairLabel'), pairStart: $('pairStart'), pairCancel: $('pairCancel'),
+  pairLabel: $('pairLabel'), pairStart: $('pairStart'), pairCancel: $('pairCancel'), pairCopy: $('pairCopy'),
   qr: $('qr'), countdown: $('pairCountdown'), status: $('pairStatus'), friends: $('friendList'),
 };
 let state = { connected: false, friends: [], pending: [], session: null };
@@ -128,6 +128,11 @@ els.pairStart.addEventListener('click', async () => {
   if (!res.ok) return setStatus(`Could not start pairing: ${res.error}`, true);
   setStatus('');
   showSession(res);
+});
+
+els.pairCopy.addEventListener('click', async () => {
+  const res = await window.pairing.copy();
+  setStatus(res.ok ? 'Link copied — paste it in the LAS app on the phone.' : `Could not copy: ${res.error}`, !res.ok);
 });
 
 els.pairCancel.addEventListener('click', async () => {
