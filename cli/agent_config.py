@@ -358,6 +358,87 @@ def with_map_element(config: dict | None, element: dict, *, added: bool = True) 
     return current + [element]
 
 
+# ── archive: what an agent put away, not deleted ───────────────────────────
+#
+#     "archive": [
+#       {"type": "friend", "name": "OldBot", "archivedAt": 1794784900000},
+#       {"type": "repo", "path": "old-thing", "archivedAt": 1794784900000}
+#     ]
+#
+# A map element or a friend that is not being worked on now but stays at hand:
+# moving it here takes it off the map / out of `friends`, restoring puts it
+# back, and only the archive's ✕ forgets it for good (a friend is then just
+# unlinked: the agent itself is never touched). Ids: `friend:<name>` and the
+# map element ids.
+
+ARCHIVE_KEY = "archive"
+ARCHIVE_TYPES = ("friend",) + MAP_TYPES
+
+
+def archive_entry_id(entry: dict) -> str:
+    if entry.get("type") == "friend":
+        return f"friend:{entry.get('name', '')}"
+    return map_element_id(entry)
+
+
+def archive_of(config: dict | None) -> list:
+    """The archived entries of `config`, unique by id, in file order. Tolerant of a hand-edited file."""
+    declared = _dict(config).get(ARCHIVE_KEY)
+    if not isinstance(declared, list):
+        return []
+    out, seen = [], set()
+    for item in declared:
+        if not isinstance(item, dict) or item.get("type") not in ARCHIVE_TYPES:
+            continue
+        key = "name" if item["type"] == "friend" else _MAP_TARGET[item["type"]]
+        target = item.get(key)
+        if not isinstance(target, str) or not target.strip():
+            continue
+        entry = {"type": item["type"], key: target.strip()}
+        if isinstance(item.get("label"), str) and item["label"].strip():
+            entry["label"] = item["label"].strip()
+        if isinstance(item.get("archivedAt"), int):
+            entry["archivedAt"] = item["archivedAt"]
+        eid = archive_entry_id(entry)
+        if eid not in seen:
+            seen.add(eid)
+            out.append(entry)
+    return out
+
+
+def archive_move(config: dict | None, entry_id: str, *, archived: bool, now_ms: int) -> dict | None:
+    """The config patch that moves `entry_id` into the archive (`archived`) or back
+    out of it — or None if it is not where it should be coming from."""
+    config = _dict(config)
+    archive = archive_of(config)
+    kind, _, target = entry_id.partition(":")
+    if archived:
+        if kind == "friend":
+            if target not in friends_of(config):
+                return None
+            entry = {"type": "friend", "name": target}
+            patch = {FRIENDS_KEY: with_friend(config, target, linked=False)}
+        else:
+            element = next((e for e in map_elements_of(config) if map_element_id(e) == entry_id), None)
+            if element is None:
+                return None
+            entry = dict(element)
+            patch = {MAP_KEY: with_map_element(config, element, added=False)}
+        entry["archivedAt"] = now_ms
+        patch[ARCHIVE_KEY] = [e for e in archive if archive_entry_id(e) != entry_id] + [entry]
+        return patch
+    entry = next((e for e in archive if archive_entry_id(e) == entry_id), None)
+    if entry is None:
+        return None
+    patch = {ARCHIVE_KEY: [e for e in archive if archive_entry_id(e) != entry_id]}
+    if entry["type"] == "friend":
+        patch[FRIENDS_KEY] = with_friend(config, entry["name"], linked=True)
+    else:
+        element = {k: v for k, v in entry.items() if k != "archivedAt"}
+        patch[MAP_KEY] = with_map_element(config, element, added=True)
+    return patch
+
+
 # ── security mode: does a destructive action ask first? ────────────────────
 #
 #     "security_mode": "dangerous"   # default, made for voice — only a deletion asks

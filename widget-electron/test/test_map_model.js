@@ -90,7 +90,7 @@ test('the map window: one board (no Display popover), the panel tiles with their
 
 test('repo and url tiles: ✕/🚪 takes them off the map, ⧉ opens their link (disabled without one)', () => {
   const S = require('../renderer/society-model.js');
-  assert.deepEqual(S.actionsFor({ kind: 'repo' }), ['exit', 'open']);
+  assert.deepEqual(S.actionsFor({ kind: 'repo' }), ['exit', 'open', 'archive']);
   assert.equal(S.describeAction({ kind: 'url', href: 'https://x.y' }, 'open').enabled, true);
   assert.equal(S.describeAction({ kind: 'repo', href: null }, 'open').enabled, false);
   assert.match(S.describeAction({ kind: 'repo' }, 'exit').title, /off the map/);
@@ -121,4 +121,14 @@ test('🙏 asks every terminal for its description; a mini widget is a bold titl
   assert.match(css, /\.mw-runtime \{[^}]*font-weight: 800/);
   assert.match(css, /\.mw-detail \{[^}]*font-size: 10px/);
   assert.match(css, /@keyframes mw-marquee/);
+});
+
+test('the map has an Archive: 🗄 lists it, ↩ restores, ✕ always asks before forgetting', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'map.html'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'map.js'), 'utf8');
+  assert.match(html, /id="archiveBtn"/);
+  assert.match(js, /V\.guarded\('safe', question/, 'forgetting is permanent: a popup whatever the security mode');
+  assert.match(js, /window\.las\.archiveEntry\(agentName, item\.kind === 'friend' \? `friend:\$\{item\.agent\}` : item\.elementId\)/);
 });

@@ -123,7 +123,7 @@ test('a friend tile offers that friend\'s whole button bar, minus 👥 children,
     friends: [{ name: 'Vortexia', sessions: 1 }],
     mutedOf: (n) => n === 'Vortexia',
   });
-  assert.deepEqual(M.actionsFor(friend), ['exit', 'settings', 'open', 'speaker', 'keyboard', 'mic']);
+  assert.deepEqual(M.actionsFor(friend), ['exit', 'settings', 'open', 'speaker', 'keyboard', 'mic', 'archive']);
   assert.ok(!M.actionsFor(friend).includes('children'), 'no friends/children button inside a friend');
   assert.deepEqual(M.actionsFor(term), ['exit', 'find', 'keyboard', 'mic']);
   assert.deepEqual(M.actionsFor(cmd), ['exit', 'log', 'keyboard', 'mic']);

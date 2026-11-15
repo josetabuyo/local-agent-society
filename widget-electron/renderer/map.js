@@ -145,7 +145,61 @@
       await guard(`Unlink ${item.agent} from ${agentName}'s friends?`, () => window.las.linkFriend(agentName, item.agent, false));
       return refresh();
     }
+    if (action === 'archive') {
+      // Not destructive — it stays in the archive, one click from coming back.
+      V.closeTilePopup();
+      await window.las.archiveEntry(agentName, item.kind === 'friend' ? `friend:${item.agent}` : item.elementId);
+      return refresh();
+    }
     return undefined;
+  }
+
+  // ── the archive: what this agent put away (🗄 in the tools pill) ────────────
+  let archive = [];
+
+  async function refreshArchive() {
+    const res = await window.las.getArchive(agentName).catch(() => null);
+    const next = (res && res.archive) || [];
+    if (JSON.stringify(next) === JSON.stringify(archive)) return false;
+    archive = next;
+    return true;
+  }
+
+  function archiveDetail(entry) {
+    if (entry.type === 'friend') return entry.registered ? 'friend' : 'friend · not registered';
+    if (entry.type === 'repo') return entry.github || entry.abs_path || 'repo';
+    return entry.url || 'url';
+  }
+
+  function archiveRow(entry) {
+    const row = el('div', 'open-row society-row archive-row');
+    const label = el('span', 'open-label society-label');
+    const icon = { friend: '\u{1F464}', repo: '\u{1F4C1}', url: '\u{1F517}' }[entry.type] || '•';
+    label.append(el('span', 'archive-name', `${icon} ${entry.label}`), el('span', 'society-detail', archiveDetail(entry)));
+    row.appendChild(label);
+    const restore = el('button', 'open-move', '↩');
+    restore.type = 'button';
+    restore.title = entry.type === 'friend' ? `Bring ${entry.label} back among the friends` : 'Put it back on the map';
+    restore.addEventListener('click', async () => {
+      await window.las.restoreArchiveEntry(agentName, entry.id);
+      await refreshArchive();
+      render();
+      refresh();
+    });
+    const forget = el('button', 'open-move', '✕');
+    forget.type = 'button';
+    forget.title = 'Forget it for good';
+    // Permanent: always asks, whatever the security mode.
+    const question = entry.type === 'friend'
+      ? `Forget ${entry.label} for good? It is only unlinked from ${agentName} — the agent itself, its folder and its repo stay.`
+      : `Forget “${entry.label}” for good? It leaves the archive and cannot come back from here — the folder or the page itself is not touched.`;
+    forget.addEventListener('click', () => V.guarded('safe', question, async () => {
+      await window.las.forgetArchiveEntry(agentName, entry.id);
+      await refreshArchive();
+      render();
+    }));
+    row.append(restore, forget);
+    return row;
   }
 
   const handlers = {
@@ -167,9 +221,17 @@
   function render() {
     const host = $('map');
     host.replaceChildren();
-    host.className = `map-body layout-${view.layout}`;
+    host.className = `map-body layout-${view.archive ? 'list' : view.layout}`;
     const box = el('div', 'map-board');
     host.append(box);
+    $('archiveBtn').classList.toggle('active', !!view.archive);
+    $('layoutSeg').classList.toggle('hidden', !!view.archive);
+    if (view.archive) {
+      // The archive is a list, for now: what was put away, ↩ back, ✕ for good.
+      for (const entry of archive) box.append(archiveRow(entry));
+      if (!archive.length) box.append(el('div', 'society-empty map-list-empty', 'The archive is empty — 🗄 on a friend, repo or link puts it here'));
+      return;
+    }
     const empty = 'Nothing on this map yet — las map add repo PATH · las map add url URL';
     if (view.layout === 'list') {
       for (const item of items) box.append(listRow(item));
@@ -188,6 +250,12 @@
     render();
   });
   $('closeBtn').addEventListener('click', () => window.close());
+  $('archiveBtn').addEventListener('click', async () => {
+    view.archive = !view.archive;
+    saveView();
+    if (view.archive) await refreshArchive();
+    render();
+  });
 
   /**
    * 🙏 — ask every Claude/Codex session what it is working on (backend
@@ -222,7 +290,11 @@
   applyColor();
   render();
   refresh();
-  setInterval(refresh, REFRESH_MS);
+  if (view.archive) refreshArchive().then(render);
+  setInterval(async () => {
+    await refresh();
+    if (view.archive && (await refreshArchive())) render();
+  }, REFRESH_MS);
   // The board is laid out for the window's width: follow a resize.
   let resizeTimer = null;
   window.addEventListener('resize', () => {

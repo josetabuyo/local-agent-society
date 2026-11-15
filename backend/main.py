@@ -27,7 +27,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (SECURITY_KEY, SECURITY_MODES, security_mode_of, FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
+from cli.agent_config import (ARCHIVE_KEY, archive_of, archive_entry_id, archive_move, SECURITY_KEY, SECURITY_MODES, security_mode_of, FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
                               descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
                               write_agent_config)
 from cli.path_utils import agent_config_path
@@ -1294,6 +1294,93 @@ def remove_map_element(name: str, id: str):
     return _edit_map(name, {"type": kind, key: target}, False)
 
 
+# ── archive (cli/agent_config.py ARCHIVE_KEY) ────────────────────────────
+# Map elements and friends put away — off the map, still at hand. The panel
+# and the phone list it; restoring puts it back; the archive's ✕ forgets it.
+
+def _archive_row(entry: dict, base: Path | None, registry: dict) -> dict:
+    row = {"id": archive_entry_id(entry), "type": entry["type"], "archivedAt": entry.get("archivedAt")}
+    if entry["type"] == "friend":
+        cfg = _agent_config(entry["name"], registry) if entry["name"] in registry else {}
+        row.update(label=entry.get("label") or entry["name"], name=entry["name"],
+                   color=(cfg or {}).get("color"), registered=entry["name"] in registry)
+    else:
+        row.update({k: v for k, v in _map_row(entry, base).items() if k not in ("id",)})
+        row["id"] = archive_entry_id(entry)
+    return row
+
+
+def _archive_view(name: str) -> dict:
+    registry = load_json(REGISTRY_FILE, {})
+    if name not in registry:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    file = _agent_config_file(name, registry)
+    base = Path(registry[name]["path"]) if registry[name].get("path") else None
+    entries = archive_of(read_agent_config(file) if file else {})
+    return {"agent": name, "archive": [_archive_row(e, base, registry) for e in entries]}
+
+
+@app.get("/agents/{name}/archive")
+@app.get("/device/agents/{name}/archive")
+def list_archive(name: str):
+    """What `name` put away: archived map elements and friends, in the order archived."""
+    return _archive_view(name)
+
+
+class ArchiveRequest(BaseModel):
+    id: str = Field(min_length=3, max_length=1024)
+
+
+def _edit_archive(name: str, entry_id: str, archived: bool) -> dict:
+    registry = load_json(REGISTRY_FILE, {})
+    file = _agent_config_file(name, registry)
+    if file is None:
+        raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
+    with _sessions_lock:
+        try:
+            current = read_agent_config(file, strict=True)
+        except BrokenAgentConfig as exc:
+            raise HTTPException(status_code=409, detail=f"{exc} — fix it by hand, then retry")
+        patch = archive_move(current, entry_id, archived=archived, now_ms=int(time.time() * 1000))
+        if patch is None:
+            where = "on the map or among the friends" if archived else "in the archive"
+            raise HTTPException(status_code=404, detail=f"{entry_id!r} is not {where} of {name}")
+        write_agent_config(file, merge_config_patch(current, patch))
+    return _archive_view(name)
+
+
+@app.post("/agents/{name}/archive")
+def archive_entry(name: str, req: ArchiveRequest):
+    """Put a map element (`repo:<path>`, `url:<url>`) or a friend (`friend:<name>`) in the archive."""
+    return _edit_archive(name, req.id, True)
+
+
+@app.post("/agents/{name}/archive/restore")
+def restore_archive_entry(name: str, req: ArchiveRequest):
+    """Take it out of the archive, back onto the map / among the friends."""
+    return _edit_archive(name, req.id, False)
+
+
+@app.delete("/agents/{name}/archive")
+def forget_archive_entry(name: str, id: str):
+    """Forget an archived entry for good. A friend is only unlinked — the agent
+    itself, its folder and its repo are never touched."""
+    registry = load_json(REGISTRY_FILE, {})
+    file = _agent_config_file(name, registry)
+    if file is None:
+        raise HTTPException(status_code=404, detail="Agent not found, or it has no .las-agent.json")
+    with _sessions_lock:
+        try:
+            current = read_agent_config(file, strict=True)
+        except BrokenAgentConfig as exc:
+            raise HTTPException(status_code=409, detail=f"{exc} — fix it by hand, then retry")
+        archive = archive_of(current)
+        if not any(archive_entry_id(e) == id for e in archive):
+            raise HTTPException(status_code=404, detail=f"{id!r} is not in the archive of {name}")
+        write_agent_config(file, merge_config_patch(current, {ARCHIVE_KEY: [e for e in archive if archive_entry_id(e) != id]}))
+    return _archive_view(name)
+
+
 def _session_summaries(name: str, sessions: dict, policy: dict | None = None) -> list:
     """One compact row per session — enough for another agent to pick where to send."""
     policy = policy or sessions_config(_agent_config(name))
@@ -1509,6 +1596,10 @@ def _society_node(name: str, registry: dict, inactive: list, sessions_by_agent: 
         "sessions": _session_summaries(name, sessions, sessions_config(config)) if sessions else [],
         "friends": friends_of(config),
         "map": elements,
+        # Put away (off the map, still at hand): a list for the phone's Archive.
+        "archive": [{"id": archive_entry_id(e), "type": e["type"],
+                     "label": e.get("label") or e.get("name") or e.get("url") or Path(e.get("path", "")).name,
+                     "archivedAt": e.get("archivedAt")} for e in archive_of(config)],
         "children": [],
     }
 

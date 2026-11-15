@@ -174,6 +174,11 @@ contextBridge.exposeInMainWorld('las', {
   getMap: (name) => ipcRenderer.invoke('agent:map', name),
   /** Remove one element (id `repo:<path>` / `url:<url>`) from `name`'s map — a map tile's ✕. */
   removeMapElement: (name, id) => ipcRenderer.invoke('agent:map-remove', name, id),
+  /** The archive: what an agent put away (map elements, friends) — off the map, still at hand. */
+  getArchive: (name) => ipcRenderer.invoke('agent:archive', name),
+  archiveEntry: (name, id) => ipcRenderer.invoke('agent:archive-put', name, id),
+  restoreArchiveEntry: (name, id) => ipcRenderer.invoke('agent:archive-restore', name, id),
+  forgetArchiveEntry: (name, id) => ipcRenderer.invoke('agent:archive-forget', name, id),
   /** A map tile's 🎤 or ⌨: the agent's own widget runs it (its recorder, its keyboard drawer), aimed at that item. */
   mapItemAction: (name, item, action) => ipcRenderer.invoke('map:item-action', name, item, action),
   /** (widget side) The map asked this widget to dictate/type to one of its items. @param {(item: object, action: string) => void} cb */

@@ -151,3 +151,8 @@
 /* 🙏 while the terminals are being asked for their descriptions. */
 #describeBtn.asking { animation: map-asking 1.2s ease-in-out infinite; }
 @keyframes map-asking { 50% { opacity: 0.35; } }
+
+/* The archive (🗄): a list; its button lit while it shows. */
+.map-tools button.active { background: var(--map-tint); box-shadow: inset 0 0 0 1px var(--map-border); }
+.segmented.hidden { visibility: hidden; }
+.archive-row .archive-name { font-weight: 600; margin-right: 8px; }

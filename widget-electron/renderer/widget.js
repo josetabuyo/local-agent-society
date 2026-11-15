@@ -2402,6 +2402,9 @@ const societyHandlers = {
       });
     }
     if (action === 'log') return window.las.openSessionLog(item.detached && item.detached.log);
+    if (action === 'archive' && item.kind === 'friend') {
+      return window.las.archiveEntry(agentName, `friend:${item.agent}`).then(() => reloadChildrenMenu());
+    }
     if (action === 'unlink') {
       return guard(`Unlink ${item.agent} from ${agentName}'s friends?`, async () => {
         await window.las.linkFriend(agentName, item.agent, false);

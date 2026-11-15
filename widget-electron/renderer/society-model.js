@@ -31,18 +31,19 @@
    * terminal or command can do. A view draws whatever this returns.
    */
   const ACTIONS_BY_KIND = {
-    friend: ['exit', 'settings', 'open', 'speaker', 'keyboard', 'mic'],
+    // 🗄 archive: put it away — off the map, still at hand (the map's Archive).
+    friend: ['exit', 'settings', 'open', 'speaker', 'keyboard', 'mic', 'archive'],
     terminal: ['exit', 'find', 'keyboard', 'mic'],
     command: ['exit', 'log', 'keyboard', 'mic'],
     // The map's own elements (docs/adr/0007): take it off the map, open its link.
-    repo: ['exit', 'open'],
-    url: ['exit', 'open'],
+    repo: ['exit', 'open', 'archive'],
+    url: ['exit', 'open', 'archive'],
   };
   /** Actions shared by every kind. */
   const ACTIONS = ['exit', 'keyboard', 'mic'];
   const ACTION_ICONS = {
     exit: '\u{1F6AA}', settings: '⚙', open: '⧉', speaker: '\u{1F50A}', muted: '\u{1F507}',
-    keyboard: '⌨', mic: '\u{1F3A4}', find: '⌖', log: '\u{1F4C4}',
+    keyboard: '⌨', mic: '\u{1F3A4}', find: '⌖', log: '\u{1F4C4}', archive: '\u{1F5C4}',
   };
 
   function actionsFor(item) {
@@ -135,6 +136,7 @@
       if (friend) return { title: `Type a message to ${item.agent}`, enabled: item.registered };
       return { title: `Type to this ${item.runtime} session only`, enabled: true };
     }
+    if (action === 'archive') return { title: 'Put it in the archive — off the map, still at hand (🗄 on the map lists it)', enabled: true };
     if (action === 'find') return { title: 'Find this terminal — bring it to the front', enabled: true };
     if (action === 'log') return { title: "Open this background process's log", enabled: !!(item.detached && item.detached.log) };
     if (action === 'mic') {

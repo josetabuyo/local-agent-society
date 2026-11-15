@@ -1893,6 +1893,29 @@ ipcMain.handle('agent:map', async (_event, name) => {
   }
 });
 
+// The archive (backend /agents/{name}/archive): put away, restore, forget.
+async function archiveCall(name, method, suffix, body) {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/archive${suffix}`, {
+      method,
+      ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('archive', `${method} ${name}/archive${suffix} failed: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    return json;
+  } catch (err) {
+    log.error('archive', `${name}: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+}
+ipcMain.handle('agent:archive', (_event, name) => archiveCall(name, 'GET', ''));
+ipcMain.handle('agent:archive-put', (_event, name, id) => { log.info('archive', `${name}: archived ${id}`); return archiveCall(name, 'POST', '', { id }); });
+ipcMain.handle('agent:archive-restore', (_event, name, id) => { log.info('archive', `${name}: restored ${id}`); return archiveCall(name, 'POST', '/restore', { id }); });
+ipcMain.handle('agent:archive-forget', (_event, name, id) => { log.info('archive', `${name}: forgot ${id}`); return archiveCall(name, 'DELETE', `?id=${encodeURIComponent(id)}`); });
+
 ipcMain.handle('agent:map-remove', async (_event, name, id) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/map?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
