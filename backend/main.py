@@ -1049,6 +1049,15 @@ async def put_speech(name: str, clip_id: str, request: Request):
     return {"ok": True, "parts": meta["parts"]}
 
 
+@app.get("/speech")
+@app.get("/device/speech")
+def list_all_speech(after: Optional[int] = None):
+    """Every agent's recent speech clips, chronological, each with its
+    `agent` — one poll for a phone that plays them all (parts still come
+    from /device/agents/{agent}/speech/{id}?part=N)."""
+    return {"items": _speech.list_all(load_json(REGISTRY_FILE, {}).keys(), after=after)}
+
+
 @app.get("/agents/{name}/speech")
 @app.get("/device/agents/{name}/speech")
 def list_speech(name: str, after: Optional[int] = None):

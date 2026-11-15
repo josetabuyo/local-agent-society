@@ -49,7 +49,7 @@ def client(tmp_path, monkeypatch):
     import backend.main as main
     monkeypatch.undo()
     monkeypatch.setattr(main, "REGISTRY_FILE", tmp_path / "registry.json")
-    (tmp_path / "registry.json").write_text('{"Alpha": {"path": "/x"}}')
+    (tmp_path / "registry.json").write_text('{"Alpha": {"path": "/x"}, "Beta": {"path": "/y"}}')
     monkeypatch.setattr(main, "_speech", ss.SpeechStore(tmp_path / "speech"))
     return TestClient(main.app)
 
@@ -63,3 +63,12 @@ def test_widget_puts_phone_reads(client):
     assert base64.b64decode(part["b64"]) == b"m4a-bytes"
     assert client.put("/device/agents/Alpha/speech/s2", content=b"x").status_code == 405, "the phone only reads"
     assert client.get("/device/agents/Nobody/speech").status_code == 404
+
+
+def test_one_list_for_the_whole_mac(client):
+    client.put("/agents/Beta/speech/b1", content=b"b", headers={"X-Speech-Ts": "20"})
+    client.put("/agents/Alpha/speech/a1", content=b"a", headers={"X-Speech-Ts": "10"})
+    client.put("/agents/Alpha/speech/a2", content=b"a", headers={"X-Speech-Ts": "30"})
+    items = client.get("/device/speech").json()["items"]
+    assert [(i["agent"], i["id"]) for i in items] == [("Alpha", "a1"), ("Beta", "b1"), ("Alpha", "a2")]
+    assert [i["id"] for i in client.get("/device/speech", params={"after": 20}).json()["items"]] == ["a2"]

@@ -71,7 +71,7 @@ class SpeechStore:
             raise ValueError("bad id")
         if not audio or len(audio) > MAX_CLIP_BYTES:
             raise ValueError("empty or too large")
-        meta = {"id": clip_id, "ts": int(ts), "text": text, "durationMs": duration_ms, "mime": mime,
+        meta = {"agent": agent, "id": clip_id, "ts": int(ts), "text": text, "durationMs": duration_ms, "mime": mime,
                 "bytes": len(audio), "parts": max(1, math.ceil(len(audio) / PART_BYTES)), "storedAt": self.now()}
         with self._lock:
             d = self._agent_dir(agent)
@@ -90,6 +90,14 @@ class SpeechStore:
         if after is not None:
             metas = [m for m in metas if (m.get("ts") or 0) > after]
         return [{k: m.get(k) for k in ("id", "ts", "text", "durationMs", "mime", "parts")} for m in metas]
+
+    def list_all(self, agents, after: int | None = None) -> list[dict]:
+        """Every agent's recent clips in one chronological list (`agents`: the
+        registry's names, so a stale folder is never listed)."""
+        items = []
+        for agent in agents:
+            items += [{"agent": agent, **m} for m in self.list(agent, after=after)]
+        return sorted(items, key=lambda m: m.get("ts") or 0)
 
     def part(self, agent: str, clip_id: str, part: int) -> dict | None:
         if not self.valid_id(clip_id):
