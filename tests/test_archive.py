@@ -93,3 +93,13 @@ def test_a_whole_agent_is_archived_off_the_tree_and_comes_back(app, monkeypatch)
     tree = client.get("/device/society/tree").json()
     assert tree["archived"] == [] and [c["name"] for c in next(a for a in tree["agents"] if a["name"] == "Alpha")["children"]] == ["Kid"]
     assert client.delete("/agents/Alpha/archived").status_code == 404
+
+
+def test_main_screen_flag_is_declared_and_carried_by_the_tree(app):
+    _main, client, tmp = app
+    assert client.patch("/agents/Old/config", json={"main_screen": "no"}).status_code == 422
+    assert client.patch("/agents/Old/config", json={"main_screen": False}).status_code == 200
+    tree = {a["name"]: a for a in client.get("/device/society/tree").json()["agents"]}
+    assert tree["Old"]["main_screen"] is False, "still in the tree: it shows inside its context"
+    assert tree["Alpha"]["main_screen"] is True, "default: shown"
+    assert json.loads((tmp / "old" / ".las-agent.json").read_text())["main_screen"] is False

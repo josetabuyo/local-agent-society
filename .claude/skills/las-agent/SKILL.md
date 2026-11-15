@@ -390,6 +390,12 @@ hand, one step from coming back. Two levels:
   the agent or its folder is deleted. `las agent unarchive NAME` brings it back
   (`las widget NAME` reopens its widget).
 
+**Not on the main screen** is lighter than archiving: `las agent main-screen
+hide --agent NAME` (`"main_screen": false`) keeps the agent fully alive but off
+the phone's main screen — it only shows inside its context, as a friend of the
+agents that link it. `show` puts it back. Declared for any panel; today only
+the phone reads it.
+
 When the human says "archive X", pick the level from what X is: an agent of
 this Mac → `las agent archive`; something on a map → the map's archive. Never
 delete files or unregister an agent (`las agent delete`) to "archive" it.

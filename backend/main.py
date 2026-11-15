@@ -27,7 +27,7 @@ import sys as _sys
 _sys.path.insert(0, str(Path(__file__).parent))  # backend/ — for `import vortexia_client` regardless of how main.py itself was imported
 import vortexia_client as vx
 from logging_config import logger
-from cli.agent_config import (ARCHIVE_KEY, archive_of, archive_entry_id, archive_move, SECURITY_KEY, SECURITY_MODES, security_mode_of, FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
+from cli.agent_config import (MAIN_SCREEN_KEY, on_main_screen, ARCHIVE_KEY, archive_of, archive_entry_id, archive_move, SECURITY_KEY, SECURITY_MODES, security_mode_of, FRIENDS_KEY, friends_of, with_friend, MAP_KEY, MAP_TYPES, map_element_id, map_elements_of, with_map_element, KIND_COMMAND, KIND_TITLE_REQUEST, TARGET_ALL, TARGET_DEFAULT, BrokenAgentConfig, accepts_only_commands,
                               descriptor_for, merge_config_patch, read_agent_config, sessions_config, title_request_text,
                               write_agent_config)
 from cli.path_utils import agent_config_path
@@ -850,6 +850,8 @@ def patch_agent_config(name: str, patch: dict):
         raise HTTPException(status_code=422, detail="rename with `las agent rename`, not a config patch")
     if "color" in patch and not _is_hex_color(patch["color"]):
         raise HTTPException(status_code=422, detail="color must be #rrggbb")
+    if MAIN_SCREEN_KEY in patch and not isinstance(patch[MAIN_SCREEN_KEY], bool):
+        raise HTTPException(status_code=422, detail=f"{MAIN_SCREEN_KEY} must be true or false")
     if SECURITY_KEY in patch and patch[SECURITY_KEY] not in SECURITY_MODES:
         raise HTTPException(status_code=422, detail=f"{SECURITY_KEY} must be one of: {', '.join(SECURITY_MODES)}")
     sessions = patch.get("sessions")
@@ -1593,6 +1595,8 @@ def _society_node(name: str, registry: dict, inactive: list, sessions_by_agent: 
         "short_description": config.get("short_description"),
         "long_description": config.get("long_description"),
         "inactive": name in inactive,
+        # false: not on the phone's main screen — only inside its context (as a friend).
+        "main_screen": on_main_screen(config),
         "sessions": _session_summaries(name, sessions, sessions_config(config)) if sessions else [],
         "friends": friends_of(config),
         "map": elements,

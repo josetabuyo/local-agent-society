@@ -915,6 +915,26 @@ def security(mode, name):
     click.echo(f"{name}: {current} ({hint})")
 
 
+@agent.command("main-screen")
+@click.argument("state", required=False, type=click.Choice(["show", "hide"]))
+@click.option("--agent", "name", default=None, shell_complete=complete_agent_names, help="Whose (default: the agent in the cwd).")
+def main_screen(state, name):
+    """Show or set whether the agent is on the main screen of the phone app.
+
+    \b
+      las agent main-screen --agent Wavi        # show it
+      las agent main-screen hide --agent Wavi   # only inside its context: as a friend of the agents that link it
+      las agent main-screen show --agent Wavi   # back on the main screen (the default)
+
+    Stored as `main_screen` in the agent's .las-agent.json (absent = shown).
+    """
+    name = resolve_agent_name(name)
+    path = f"/agents/{quote(name, safe='')}/config"
+    view = api.patch(path, {"main_screen": state == "show"}) if state else api.get(path)
+    shown = view.get("main_screen") is not False
+    click.echo(f"{name}: {'on the main screen' if shown else 'not on the main screen — only as a friend, inside its context'}")
+
+
 @agent.command("target")
 @click.argument("target", required=False)
 @click.option("--name", "name", default=None, shell_complete=complete_agent_names, help="Which agent (default: the one in the current directory).")

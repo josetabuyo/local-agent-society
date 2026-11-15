@@ -358,6 +358,23 @@ def with_map_element(config: dict | None, element: dict, *, added: bool = True) 
     return current + [element]
 
 
+# ── main screen: is the agent shown at the top of a panel? ─────────────────
+#
+#     "main_screen": false
+#
+# Default (absent / true): the agent is on the main screen of the phone app
+# (a root of the society tree). false: it is not — it only shows inside its
+# context, as a friend in the agents that link it (and as a subordinate under
+# its parent, as always). Declared for every panel; today only the phone's
+# main screen reads it.
+
+MAIN_SCREEN_KEY = "main_screen"
+
+
+def on_main_screen(config: dict | None) -> bool:
+    return _dict(config).get(MAIN_SCREEN_KEY) is not False
+
+
 # ── archive: what an agent put away, not deleted ───────────────────────────
 #
 #     "archive": [
