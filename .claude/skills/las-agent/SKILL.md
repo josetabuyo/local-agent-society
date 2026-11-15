@@ -372,6 +372,33 @@ opens the drawer's list, where the mic's target and friend links are chosen.
 Endpoints: `GET/PUT/DELETE /agents/{name}/friends[/{friend}]`,
 `GET/POST/DELETE /agents/{name}/map`.
 
+### The archive — put away, not deleted
+
+What isn't being worked on now goes to the **archive**: off the panel, still at
+hand, one step from coming back. Two levels:
+
+- **An element of an agent's map** — a friend, a repo, a URL. 🗄 in its tile's
+  button bar moves it to that agent's archive (`archive` in its `.las-agent.json`;
+  a friend leaves `friends`, an element leaves `map`). 🗄 in the map's tools pill
+  (top left, next to 🙏) lists the archive: ↩ puts it back, ✕ forgets it **for
+  good** — always after a warning popup, whatever the security mode. Forgetting
+  a friend only unlinks it: the agent itself, its folder and its repo are never
+  touched. Terminals are not archived (a terminal is closed).
+- **A whole agent** — `las agent archive NAME` takes it out of the society tree
+  (the phone's panel, `/society/tree`) into `tree.archived`; its subordinates
+  hang from the nearest live ancestor; its widget is marked inactive. Nothing of
+  the agent or its folder is deleted. `las agent unarchive NAME` brings it back
+  (`las widget NAME` reopens its widget).
+
+When the human says "archive X", pick the level from what X is: an agent of
+this Mac → `las agent archive`; something on a map → the map's archive. Never
+delete files or unregister an agent (`las agent delete`) to "archive" it.
+
+Endpoints: `GET /agents/{name}/archive` (+ `/device/` alias),
+`POST /agents/{name}/archive {id}` (ids: `friend:<name>`, `repo:<path>`,
+`url:<url>`), `POST /agents/{name}/archive/restore {id}`,
+`DELETE /agents/{name}/archive?id=…`; `POST/DELETE /agents/{name}/archived`.
+
 ### Known issues
 
 **Rosetta / Node x86_64** — Pulpo and NeuroFlow have `node_modules` installed with Intel Node (`~/.nvm/versions/node/v20.20.2` is x86_64). `@esbuild/darwin-x64` runs under Rosetta. Pending fix:
@@ -417,6 +444,28 @@ It's also a **signpost**: its label reminds you, when you switch desktops or sit
 A dictated message must never read as this agent talking to itself, and a message from another agent must never read as either of the other two kinds — if you're building or touching widget UI, preserve that distinction; it's deliberate, not an oversight.
 
 Managed exclusively via `las start` / `las widget [name]` / `las stop` — never launch the Electron binary directly (see the project `CLAUDE.md`, "Widget management," for why). `las widget` closes and reopens the window on the current Space rather than just focusing it, so a widget stuck on another Space always comes back to wherever you are.
+
+### The phone — the same society in a pocket
+
+A paired iPhone (the LAS mobile app, `~/Development/las-mobile`, agent
+LasMobile) shows every agent of this Mac as a panel, each with its own mic and
+chat. Pairing is vortexia's friendship (`vortexia/docs/adr/0001`): ⚙ → All
+widgets → **Phones** shows a QR (or Copy link), the human accepts by comparing
+the fingerprint, and revokes there too.
+
+What a session needs to know:
+- **A phone dictation arrives like a widget dictation** — `origin="human"`, from
+  and to this agent. Treat it exactly the same. The widget transcribed it (the
+  phone records, the Mac transcribes); a long one comes as a single message.
+- **Your spoken answer follows the human.** If their last input came from the
+  phone, your `las speak` plays on the phone and not on the Mac; if it came from
+  the widget's mic or the terminal, it plays on the Mac. Speak as always — the
+  backend routes it (`data/reply-routes.json`). Don't send audio yourself.
+- **The chat is the record.** The phone shows each agent's history
+  (`GET /agents/{name}/chat`): mic dictations, your spoken reports, messages to
+  and from other agents. So the closing report matters on the phone too.
+- The phone only reads from this Mac (vortexia proxies `GET /device/*` to the
+  backend); what it sends comes as messages.
 
 ---
 
