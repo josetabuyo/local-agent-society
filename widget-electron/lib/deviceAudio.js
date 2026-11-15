@@ -58,6 +58,12 @@ function parseNotice(input) {
   const target = payload.target;
   if (!target || typeof target !== 'object' || typeof target.agent !== 'string' || !target.agent.trim()) return fail('missing target.agent (there is no general mic)');
   const session = typeof target.session === 'string' && target.session.trim() ? target.session.trim() : null;
+  // A long dictation is recorded in segments (~30 s each): they share a
+  // recordingId, number from 0, and the final one says last.
+  const recordingId = typeof payload.recordingId === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(payload.recordingId) ? payload.recordingId : null;
+  const recording = recordingId && Number.isInteger(payload.segment) && payload.segment >= 0
+    ? { recordingId, segment: payload.segment, last: payload.last === true }
+    : null;
   return {
     ok: true,
     clip: {
@@ -69,6 +75,7 @@ function parseNotice(input) {
       durationMs: Number.isFinite(payload.durationMs) ? payload.durationMs : null,
       capturedAt: Number.isFinite(payload.capturedAt) ? payload.capturedAt : null,
       target: { agent: target.agent.trim(), ...(session ? { session } : {}) },
+      ...(recording ? { recording } : {}),
     },
   };
 }
@@ -146,6 +153,8 @@ class DeviceAudioQueue {
     this.seen = new Set();   // sha256 queued or done this run
     this.running = false;
     this.idle = Promise.resolve();
+    this.recordings = new Map();   // recordingId → {segments: Map(segment → {clip, text}), last, timer}
+    this.finished = new Set();     // recordingIds already delivered (a straggler goes alone)
   }
 
   /** → true when queued; false when this sha256 is already queued or done
@@ -207,6 +216,10 @@ class DeviceAudioQueue {
     deps.log('info', `device-audio: ${short} from ${clip.label} → ${clip.target.agent}${clip.target.session ? `/${clip.target.session}` : ''} (${clip.durationMs != null ? `${(clip.durationMs / 1000).toFixed(1)}s` : '?s'})`);
     const pcm = await deps.decode(fs.readFileSync(clip.path), clip.mime);
     const text = (await deps.transcribe(pcm, clip.target.agent)).trim();
+    if (clip.recording && !this.finished.has(clip.recording.recordingId)) {
+      // A silent stretch inside a long dictation is not an error: it adds nothing.
+      return this._segment(clip, !text || isNonSpeechText(text) ? '' : text);
+    }
     if (!text || isNonSpeechText(text)) return fail(text ? 'only music/noise, no speech' : 'nothing heard');
     const res = await deps.deliver(clip, text);
     if (!res || !res.ok) throw new Error(`delivery failed: ${res && res.error}`);
@@ -214,6 +227,73 @@ class DeviceAudioQueue {
     removeClip(clip, deps);
   }
 }
+
+DeviceAudioQueue.prototype._segment = function _segment(clip, text) {
+  const { recordingId, segment, last } = clip.recording;
+  let rec = this.recordings.get(recordingId);
+  if (!rec) {
+    rec = { segments: new Map(), last: null, timer: null };
+    this.recordings.set(recordingId, rec);
+  }
+  rec.segments.set(segment, { clip, text });
+  if (last) rec.last = segment;
+  this.deps.log('info', `device-audio: recording ${recordingId} segment ${segment}${last ? ' (last)' : ''} — ${text.length} chars, ${rec.segments.size} so far`);
+  clearTimeout(rec.timer);
+  const complete = rec.last !== null && [...Array(rec.last + 1).keys()].every((i) => rec.segments.has(i));
+  if (complete) return this._finishRecording(recordingId, 'complete');
+  // Safety net: a last segment that never comes (the phone died mid-take)
+  // still delivers what was heard, a while after the latest segment.
+  rec.timer = setTimeout(() => {
+    this.idle = this.idle.then(() => this._finishRecording(recordingId, 'timeout')).catch((err) => {
+      this.deps.log('error', `device-audio: recording ${recordingId}: ${err && err.stack ? err.stack : err}`);
+    });
+  }, this.deps.recordingTimeoutMs ?? 120000);
+  rec.timer.unref?.();
+  return undefined;
+};
+
+/** One dictation for the whole recording, in segment order; then each
+ * segment's file goes and the phone gets a result per segment. Files stay
+ * until delivery, so a crash re-transcribes and re-assembles them. */
+DeviceAudioQueue.prototype._finishRecording = async function _finishRecording(recordingId, why) {
+  const rec = this.recordings.get(recordingId);
+  if (!rec) return;
+  this.recordings.delete(recordingId);
+  clearTimeout(rec.timer);
+  const parts = [...rec.segments.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+  const first = parts[0].clip;
+  const text = parts.map((p) => p.text).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const { deps } = this;
+  if (why === 'timeout') deps.log('warn', `device-audio: recording ${recordingId} — no last segment, delivering the ${parts.length} received`);
+  if (!text) {
+    for (const { clip } of parts) {
+      await deps.reply(clip.from, { type: 'device-audio-result', sha256: clip.sha256, ok: false, error: 'only music/noise, no speech', target: clip.target });
+      rejectClip(clip, 'only music/noise, no speech', deps);
+    }
+    this.finished.add(recordingId);
+    return;
+  }
+  const res = await deps.deliver(first, text);
+  if (!res || !res.ok) {
+    // Kept on disk: the whole recording is retried together later (each
+    // segment re-transcribed), never one segment on its own.
+    const delay = deps.retryDelayMs ?? 60000;
+    deps.log('error', `device-audio: delivery of recording ${recordingId} failed (${res && res.error}) — retry in ${Math.round(delay / 1000)}s`);
+    const retry = () => {
+      for (const { clip } of parts) this.seen.delete(clip.sha256);
+      for (const { clip } of parts) if (fs.existsSync(clip.path)) this.enqueue(clip, { quiet: true });
+    };
+    if (delay <= 0) retry();
+    else setTimeout(retry, delay).unref?.();
+    return;
+  }
+  this.finished.add(recordingId);
+  deps.log('info', `device-audio: recording ${recordingId} → ${first.target.agent}: ${parts.length} segment(s), ${text.length} chars`);
+  for (const { clip, text: t } of parts) {
+    await deps.reply(clip.from, { type: 'device-audio-result', sha256: clip.sha256, ok: true, chars: t.length, recordingId, target: clip.target });
+    removeClip(clip, deps);
+  }
+};
 
 function sidecarOf(file) {
   return file.replace(/\.[^./]+$/, '.json');

@@ -194,3 +194,56 @@ test('a failed clip retries on its own after retryDelayMs, with no scan', async 
   assert.equal(attempts, 2);
   assert.equal(fs.existsSync(file), false);
 });
+
+function segment(root, recordingId, seg, last, extra = {}) {
+  return clipFile(root, `${recordingId}-${seg}`, { agent: 'Alpha' }, { recordingId, segment: seg, last, capturedAt: seg, ...extra });
+}
+
+test('a segmented recording is delivered once, joined in segment order, when the last one is in', async () => {
+  const root = inbox();
+  const texts = { 0: 'uno', 1: '[Música]', 2: 'tres' };
+  const files = [];
+  const d = deps(root, { transcribe: async (_pcm, _agent) => texts[d._seg] });
+  const q = new D.DeviceAudioQueue(d);
+  for (const [seg, last] of [[2, true], [0, false], [1, false]]) {   // out of order
+    const c = segment(root, 'rec-1', seg, last);
+    files.push(c.file);
+    d._seg = seg;
+    q.enqueue(D.parseNotice(c.notice).clip);
+    await q.idle;
+    if (seg !== 1) assert.equal(d.calls.delivered.length, 0, 'nothing until every segment is in');
+  }
+  assert.deepEqual(d.calls.delivered, [{ target: { agent: 'Alpha' }, text: 'uno tres' }], 'a silent segment adds nothing');
+  assert.equal(d.calls.replies.length, 3, 'a result per segment');
+  assert.ok(d.calls.replies.every((r) => r.payload.ok && r.payload.recordingId === 'rec-1'));
+  assert.ok(files.every((f) => !fs.existsSync(f)), 'files go only after delivery');
+});
+
+test('a recording whose last segment never comes is delivered after recordingTimeoutMs', async () => {
+  const root = inbox();
+  const d = deps(root, { recordingTimeoutMs: 20 });
+  const q = new D.DeviceAudioQueue(d);
+  const c = segment(root, 'rec-2', 0, false);
+  q.enqueue(D.parseNotice(c.notice).clip);
+  await q.idle;
+  assert.equal(d.calls.delivered.length, 0);
+  assert.ok(fs.existsSync(c.file), 'kept while waiting');
+  await new Promise((r) => setTimeout(r, 60));
+  await q.idle;
+  assert.deepEqual(d.calls.delivered.map((x) => x.text), ['hola mundo']);
+  assert.equal(fs.existsSync(c.file), false);
+});
+
+test('a failed delivery retries the whole recording together', async () => {
+  const root = inbox();
+  let attempts = 0;
+  const d = deps(root, { retryDelayMs: 0, deliver: async (clip, text) => (++attempts === 1 ? { ok: false, error: 'down' } : (d.calls.delivered.push(text), { ok: true })) });
+  const q = new D.DeviceAudioQueue(d);
+  for (const [seg, last] of [[0, false], [1, true]]) {
+    q.enqueue(D.parseNotice(segment(root, 'rec-3', seg, last).notice).clip);
+    await q.idle;
+  }
+  await q.idle;
+  assert.equal(attempts, 2);
+  assert.deepEqual(d.calls.delivered, ['hola mundo hola mundo']);
+});
