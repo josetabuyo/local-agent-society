@@ -1612,12 +1612,61 @@ def _society_tree_body() -> dict:
         inactive = load_json(INACTIVE_FILE, [])
     with _sessions_lock:
         sessions_by_agent = {name: _load_sessions(name) for name in load_json(SESSIONS_FILE, {}) if name in registry}
-    nodes = {name: _society_node(name, registry, inactive, sessions_by_agent) for name in registry}
+    with _archived_agents_lock:
+        archived = {a["name"]: a for a in load_json(ARCHIVED_AGENTS_FILE, []) if isinstance(a, dict) and a.get("name") in registry}
+    live = [n for n in registry if n not in archived]
+    nodes = {name: _society_node(name, registry, inactive, sessions_by_agent) for name in live}
     roots = []
-    for name in sorted(registry, key=str.lower):
+    for name in sorted(live, key=str.lower):
+        # An archived parent steps aside: its subordinates hang from the
+        # nearest ancestor that is not archived.
         parent = parent_of(name, registry)
+        while parent in archived:
+            parent = parent_of(parent, registry)
         (nodes[parent]["children"] if parent in nodes else roots).append(nodes[name])
-    return {"env": os.environ.get("VORTEXIA_ENV_NAME") or None, "agents": roots}
+    shelf = []
+    for name in sorted(archived, key=str.lower):
+        cfg = _agent_config(name, registry) or {}
+        shelf.append({"name": name, "color": cfg.get("color"), "short_description": cfg.get("short_description"),
+                      "archivedAt": archived[name].get("archivedAt"), "path": registry[name].get("path")})
+    return {"env": os.environ.get("VORTEXIA_ENV_NAME") or None, "agents": roots, "archived": shelf}
+
+
+# ── archived agents ─────────────────────────────────────────────────────────
+# A whole agent put away: off the society tree (and the phone's panel), into
+# tree.archived; its widget is marked inactive (the bulk open skips it).
+# Nothing of the agent or its folder is touched; restoring puts it back.
+ARCHIVED_AGENTS_FILE = DATA_DIR / "archived-agents.json"
+_archived_agents_lock = threading.Lock()
+
+
+@app.post("/agents/{name}/archived")
+def archive_agent(name: str):
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(404, f"no agent named {name}")
+    with _archived_agents_lock:
+        rows = [a for a in load_json(ARCHIVED_AGENTS_FILE, []) if isinstance(a, dict) and a.get("name") != name]
+        rows.append({"name": name, "archivedAt": int(time.time() * 1000)})
+        save_json(ARCHIVED_AGENTS_FILE, rows)
+    set_inactive(name)
+    return {"ok": True, "archived": True, "name": name}
+
+
+@app.delete("/agents/{name}/archived")
+def unarchive_agent(name: str):
+    with _archived_agents_lock:
+        rows = load_json(ARCHIVED_AGENTS_FILE, [])
+        kept = [a for a in rows if not (isinstance(a, dict) and a.get("name") == name)]
+        if len(kept) == len(rows):
+            raise HTTPException(404, f"{name} is not archived")
+        save_json(ARCHIVED_AGENTS_FILE, kept)
+    return {"ok": True, "archived": False, "name": name}
+
+
+@app.get("/agents/archived")
+def list_archived_agents():
+    with _archived_agents_lock:
+        return {"archived": load_json(ARCHIVED_AGENTS_FILE, [])}
 
 
 @app.get("/society/tree")

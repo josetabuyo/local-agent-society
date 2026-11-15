@@ -75,3 +75,21 @@ def test_errors_say_where_it_is_not(app):
     assert client.post("/agents/Alpha/archive", json={"id": "friend:Nobody"}).status_code == 404
     assert client.post("/agents/Alpha/archive/restore", json={"id": "friend:Old"}).status_code == 404
     assert client.delete("/agents/Alpha/archive", params={"id": "repo:tool"}).status_code == 404
+
+
+def test_a_whole_agent_is_archived_off_the_tree_and_comes_back(app, monkeypatch):
+    main, client, tmp = app
+    monkeypatch.setattr(main, "ARCHIVED_AGENTS_FILE", tmp / "archived-agents.json")
+    (tmp / "alpha" / "kid" / ".git").mkdir(parents=True)
+    (tmp / "alpha" / "kid" / ".las-agent.json").write_text(json.dumps({"name": "Kid", "locale": "es-MX"}))
+    assert client.post("/agents", json={"name": "Kid", "voice": "Paulina", "path": str(tmp / "alpha" / "kid")}).status_code == 200
+    assert client.post("/agents/Alpha/archived").json()["archived"] is True
+    tree = client.get("/device/society/tree").json()
+    assert [a["name"] for a in tree["agents"]] == ["Kid", "Old"], "Alpha leaves; its subordinate moves up"
+    assert [(a["name"], a["path"]) for a in tree["archived"]] == [("Alpha", str(tmp / "alpha"))]
+    assert "Alpha" in json.loads((tmp / "inactive.json").read_text()), "its widget is put away too"
+    assert (tmp / "alpha" / ".las-agent.json").exists() and "Alpha" in client.get("/agents").json(), "nothing deleted"
+    assert client.delete("/agents/Alpha/archived").status_code == 200
+    tree = client.get("/device/society/tree").json()
+    assert tree["archived"] == [] and [c["name"] for c in next(a for a in tree["agents"] if a["name"] == "Alpha")["children"]] == ["Kid"]
+    assert client.delete("/agents/Alpha/archived").status_code == 404

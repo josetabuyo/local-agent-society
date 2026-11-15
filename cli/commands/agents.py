@@ -1050,6 +1050,25 @@ def activate(name):
     click.echo(f"{name}: active.")
 
 
+@agent.command("archive")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def archive_agent_cmd(name):
+    """Archive a whole agent: off the society tree and the phone's panel, its widget closed. Nothing is deleted."""
+    name = resolve_agent_name(name)
+    api.post(f"/agents/{name}/archived", {})
+    subprocess.run(["open", f"localagentsociety://{quote(name, safe='')}?action=close"], check=False)
+    click.echo(f"{name}: archived (`las agent unarchive {name}` brings it back).")
+
+
+@agent.command("unarchive")
+@click.argument("name", required=False, shell_complete=complete_agent_names)
+def unarchive_agent_cmd(name):
+    """Bring an archived agent back to the society tree (`las widget NAME` opens its widget)."""
+    name = resolve_agent_name(name)
+    api.delete(f"/agents/{name}/archived")
+    click.echo(f"{name}: back in the society.")
+
+
 @agent.command("wake-enable")
 @click.argument("name", required=False, shell_complete=complete_agent_names)
 def wake_enable(name):
