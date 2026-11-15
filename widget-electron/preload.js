@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('las', {
   getUpdateStatus: () => ipcRenderer.invoke('update:get'),
   /** Fetch the upstream now; resolves to the fresh status. */
   checkUpdate: () => ipcRenderer.invoke('update:check'),
+  /** The Phones window: paired devices, pair a phone (QR), accept a request. */
+  openPairing: () => ipcRenderer.invoke('pairing:open'),
   /** Put the update command on the clipboard; resolves to it. */
   copyUpdateCommand: () => ipcRenderer.invoke('update:copy-command'),
   /** The status changed (a new version appeared, or was installed). @param {(status: object) => void} cb */

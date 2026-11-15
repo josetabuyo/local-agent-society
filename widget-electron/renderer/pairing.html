@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:">
+  <title>Phones</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d9d4; --card: #ffffff; --accent: #2f6fdb; --ok: #2e8b57; --bad: #c0392b; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --fg: #ececea; --muted: #9a9a95; --line: #3a3a3c; --card: #2a2a2c; --accent: #6a9ef5; --ok: #5cc28a; --bad: #ef6f61; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+    h2:first-child { margin-top: 0; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+    .row + .row { border-top: 1px solid var(--line); }
+    .grow { flex: 1; min-width: 0; }
+    .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub { color: var(--muted); font-size: 11px; }
+    .fp { font: 600 15px/1.3 ui-monospace, Menlo, monospace; letter-spacing: .04em; margin: 6px 0; }
+    button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+    button.danger { color: var(--bad); }
+    button.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
+    button:disabled { opacity: .5; cursor: default; }
+    input { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 4px 8px; }
+    #qr { background: #fff; border-radius: 8px; padding: 8px; width: 240px; height: 240px; margin: 8px auto; }
+    #qr svg { width: 100%; height: 100%; display: block; }
+    .center { text-align: center; }
+    .empty { color: var(--muted); }
+    .status { color: var(--muted); min-height: 1.4em; margin-top: 6px; }
+    .status.error { color: var(--bad); }
+    .hidden { display: none; }
+    .pending { border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h2>Pair a phone</h2>
+  <div class="card" id="pairCard">
+    <!-- A request that arrives takes the QR's place: same card, nothing moves. -->
+    <div id="pendingList" class="hidden"></div>
+    <div id="pairIdle" class="row">
+      <input id="pairLabel" class="grow" placeholder="Name (optional), e.g. José's iPhone" maxlength="64">
+      <button id="pairStart" class="primary" type="button">Show QR</button>
+    </div>
+    <div id="pairActive" class="hidden center">
+      <div class="sub">Scan with the LAS app on the phone</div>
+      <div id="qr"></div>
+      <div class="sub" id="pairCountdown"></div>
+      <div class="row" style="justify-content:center"><button id="pairCancel" type="button">Cancel</button></div>
+    </div>
+    <div id="pairStatus" class="status"></div>
+  </div>
+
+  <h2>Paired</h2>
+  <div class="card" id="friendList"></div>
+
+  <script src="pairing.js"></script>
+</body>
+</html>

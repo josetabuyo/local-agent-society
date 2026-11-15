@@ -2584,6 +2584,87 @@ function deviceAudioDeps() {
   };
 }
 
+// ── Pairing a phone (vortexia docs/adr/0001 §10) ─────────────────────────
+// Rides on the device-audio client's connection (one more MQTT client would
+// only be one more thing to reconnect). The window (renderer/pairing.html)
+// shows the paired friends with a revoke, a "Pair a phone" QR, and the
+// "Accept <label>?" prompt; a new pending request opens it on its own.
+const pairing = require('./lib/pairing');
+let pairingWindow = null;
+let pairingSession = null;   // {sessionId, uri, expiresAt} while a QR is up
+
+const pairingControl = new pairing.PairingControl({
+  publish: (topic, payload) => {
+    if (!deviceAudioClient) throw new Error('vortexia is not connected');
+    deviceAudioClient.mqttClient.publish(topic, payload, { qos: 1 });
+  },
+  onChange: (state) => sendToPairingWindow('pairing:state', state),
+  onEvent: (event) => {
+    log.info('pairing', `${event.type} ${event.sessionId || ''} ${event.envName || ''}`.trim());
+    if (pairingSession && event.sessionId === pairingSession.sessionId) pairingSession = null;
+    sendToPairingWindow('pairing:event', event);
+  },
+  onNewPending: (request) => {
+    log.info('pairing', `${request.envName} (${request.label}) asks to pair — fingerprint ${request.fingerprint}`);
+    openPairingWindow();
+  },
+});
+
+function sendToPairingWindow(channel, payload) {
+  if (pairingWindow && !pairingWindow.isDestroyed()) pairingWindow.webContents.send(channel, payload);
+}
+
+function openPairingWindow() {
+  if (pairingWindow && !pairingWindow.isDestroyed()) {
+    pairingWindow.show();
+    pairingWindow.focus();
+    return pairingWindow;
+  }
+  pairingWindow = new BrowserWindow({
+    width: 420,
+    height: 600,
+    title: 'Phones',
+    resizable: true,
+    minimizable: false,
+    fullscreenable: false,
+    visibleOnAllWorkspaces: true,
+    webPreferences: { preload: path.join(__dirname, 'pairing-preload.js'), contextIsolation: true, sandbox: true },
+  });
+  pairingWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  pairingWindow.on('closed', () => {
+    pairingWindow = null;
+    // A QR nobody can see any more is a token nobody should use: burn it.
+    if (pairingSession) {
+      const { sessionId } = pairingSession;
+      pairingSession = null;
+      pairingControl.cancel(sessionId).then((res) => { if (!res.ok) log.warn('pairing', `cancel ${sessionId}: ${res.error}`); });
+    }
+  });
+  pairingWindow.loadFile(path.join(__dirname, 'renderer', 'pairing.html'));
+  return pairingWindow;
+}
+
+ipcMain.handle('pairing:open', () => { openPairingWindow(); return true; });
+ipcMain.handle('pairing:state', () => ({ ...pairingControl.state(), session: pairingSession }));
+ipcMain.handle('pairing:start', async (_event, label) => {
+  if (pairingSession) await pairingControl.cancel(pairingSession.sessionId);
+  pairingSession = null;
+  const res = await pairingControl.start(typeof label === 'string' ? label.trim().slice(0, 64) : '');
+  if (!res.ok) return res;
+  pairingSession = { sessionId: res.sessionId, uri: res.uri, expiresAt: res.expiresAt };
+  const QRCode = require('qrcode');
+  const svg = await QRCode.toString(res.uri, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 });
+  return { ...res, svg };
+});
+ipcMain.handle('pairing:cancel', async () => {
+  if (!pairingSession) return { ok: true };
+  const { sessionId } = pairingSession;
+  pairingSession = null;
+  return pairingControl.cancel(sessionId);
+});
+ipcMain.handle('pairing:decide', (_event, sessionId, accept) => pairingControl.decide(String(sessionId), !!accept));
+ipcMain.handle('pairing:revoke', (_event, envName) => pairingControl.revoke(String(envName)));
+
 async function startDeviceAudio() {
   if (!deviceAudioQueue) {
     deviceAudioQueue = new deviceAudio.DeviceAudioQueue(deviceAudioDeps());
@@ -2599,6 +2680,7 @@ async function startDeviceAudio() {
   const client = new VortexiaClient();
   const retry = () => setTimeout(startDeviceAudio, 5000);
   client.on('message', (envelope, topic) => {
+    if (pairing.TOPICS.includes(topic)) return pairingControl.handle(topic, envelope);
     if (topic === VORTEXIA_PATHS_TOPIC) {
       const dir = envelope && typeof envelope.deviceInboxDir === 'string' ? envelope.deviceInboxDir : null;
       if (dir && path.isAbsolute(dir) && !DEVICE_INBOX_ROOTS.includes(dir)) {
@@ -2618,12 +2700,15 @@ async function startDeviceAudio() {
   client.on('close', () => {
     if (deviceAudioClient !== client) return;
     deviceAudioClient = null;
+    pairingControl.setConnected(false);
     retry();
   });
   try {
     await client.register(deviceAudio.SYSTEM_MAILBOX, { mailbox: true, presence: false });
     deviceAudioClient = client;
     client.mqttClient.subscribe(VORTEXIA_PATHS_TOPIC, { qos: 0 });
+    client.mqttClient.subscribe(pairing.TOPICS, { qos: 1 });
+    pairingControl.setConnected(true);
     log.info('device-audio', `holding the ${deviceAudio.SYSTEM_MAILBOX} mailbox; inbox ${DEVICE_INBOX_ROOTS.join(', ')}`);
   } catch (err) {
     log.warn('device-audio', `mailbox connect failed (${err && err.message ? err.message : err}) — retrying`);

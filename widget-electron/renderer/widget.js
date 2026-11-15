@@ -733,6 +733,7 @@ updateCopyEl.addEventListener('click', async () => {
   updateCopyEl.textContent = 'Copied — run it';
   setTimeout(() => { updateCopyEl.textContent = 'Copy las update'; }, 2500);
 });
+document.getElementById('pairingOpen').addEventListener('click', () => window.las.openPairing());
 updateCheckEl.addEventListener('click', async () => {
   updateCheckEl.disabled = true;
   updateCheckEl.textContent = 'Checking…';
