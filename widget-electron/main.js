@@ -2502,10 +2502,21 @@ const VORTEXIA_PATHS_TOPIC = 'vortexia/paths';
 const DEVICE_INBOX_ROOTS = (process.env.VORTEXIA_DEVICE_INBOX || path.join(os.homedir(), 'Development', 'vortexia', 'data', 'device-inbox'))
   .split(path.delimiter).filter(Boolean);
 
-function scanDeviceInbox(root) {
-  const left = deviceAudio.scanInbox(root, (file, why) => log.warn('device-audio', `skipping ${file}: ${why}`));
-  if (left.length) log.info('device-audio', `${left.length} clip(s) left in ${root} — processing`);
-  left.forEach((clip) => deviceAudioQueue.enqueue(clip));
+// The notice is only a hint — the file is the source of truth — so the inbox
+// is also rescanned on a timer: a notice that never arrives (the gateway's
+// MQTT client dropped by a keep-alive timeout and queueing its publishes in
+// memory, found live 2026-11-15) costs a few seconds, not the dictation.
+const DEVICE_INBOX_RESCAN_MS = 10000;
+const deviceInboxSkipped = new Set();   // sidecars already warned about
+
+function scanDeviceInbox(root, { quiet = false } = {}) {
+  const left = deviceAudio.scanInbox(root, (file, why) => {
+    if (deviceInboxSkipped.has(file)) return;
+    deviceInboxSkipped.add(file);
+    log.warn('device-audio', `skipping ${file}: ${why}`);
+  });
+  const fresh = left.filter((clip) => deviceAudioQueue.enqueue(clip, { quiet: true }));
+  if (fresh.length) log.info('device-audio', `${fresh.length} clip(s) found in ${root}${quiet ? ' with no notice' : ''} — processing`);
 }
 const DECODE_TIMEOUT_MS = 120000;
 let decoderWindow = null;
@@ -2677,7 +2688,8 @@ ipcMain.handle('pairing:revoke', (_event, envName) => pairingControl.revoke(Stri
 async function startDeviceAudio() {
   if (!deviceAudioQueue) {
     deviceAudioQueue = new deviceAudio.DeviceAudioQueue(deviceAudioDeps());
-    DEVICE_INBOX_ROOTS.forEach(scanDeviceInbox);
+    DEVICE_INBOX_ROOTS.forEach((root) => scanDeviceInbox(root));
+    setInterval(() => DEVICE_INBOX_ROOTS.forEach((root) => scanDeviceInbox(root, { quiet: true })), DEVICE_INBOX_RESCAN_MS).unref?.();
   }
   let VortexiaClient;
   try {

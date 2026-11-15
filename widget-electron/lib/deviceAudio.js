@@ -148,9 +148,11 @@ class DeviceAudioQueue {
     this.idle = Promise.resolve();
   }
 
-  enqueue(clip) {
+  /** → true when queued; false when this sha256 is already queued or done
+   * (`quiet` skips the debug line, for the periodic rescan). */
+  enqueue(clip, { quiet = false } = {}) {
     if (this.seen.has(clip.sha256)) {
-      this.deps.log('debug', `device-audio: ${clip.sha256.slice(0, 12)} already queued — skipped`);
+      if (!quiet) this.deps.log('debug', `device-audio: ${clip.sha256.slice(0, 12)} already queued — skipped`);
       return false;
     }
     this.seen.add(clip.sha256);
@@ -168,8 +170,12 @@ class DeviceAudioQueue {
           await this._process(clip);
         } catch (err) {
           // Not delivered: the clip stays on disk for the next run's scan.
-          this.deps.log('error', `device-audio: ${clip.sha256.slice(0, 12)} failed, kept for retry: ${err && err.stack ? err.stack : err}`);
-          this.seen.delete(clip.sha256);
+          // Retried by a later scan, but not sooner than retryDelayMs: the
+          // inbox is rescanned every few seconds and each try re-transcribes.
+          const delay = this.deps.retryDelayMs ?? 60000;
+          this.deps.log('error', `device-audio: ${clip.sha256.slice(0, 12)} failed, kept for retry in ${Math.round(delay / 1000)}s: ${err && err.stack ? err.stack : err}`);
+          if (delay <= 0) this.seen.delete(clip.sha256);
+          else setTimeout(() => this.seen.delete(clip.sha256), delay).unref?.();
         }
       }
     } finally {

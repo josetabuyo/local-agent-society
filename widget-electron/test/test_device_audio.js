@@ -127,7 +127,7 @@ test('a failed delivery keeps the clip on disk and lets it be retried', async ()
   const root = inbox();
   const { file, notice } = clipFile(root);
   let attempts = 0;
-  const d = deps(root, { deliver: async () => (++attempts === 1 ? { ok: false, error: 'backend down' } : { ok: true }) });
+  const d = deps(root, { retryDelayMs: 0, deliver: async () => (++attempts === 1 ? { ok: false, error: 'backend down' } : { ok: true }) });
   const q = new D.DeviceAudioQueue(d);
   q.enqueue(D.parseNotice(notice).clip);
   await q.idle;
@@ -158,4 +158,24 @@ test('the renderer keeps the same non-speech rule as lib/deviceAudio.js', () => 
   const widget = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'widget.js'), 'utf8');
   const body = (src) => src.match(/function isNonSpeechText\(text\) \{[\s\S]*?\n\}/)[0];
   assert.equal(body(widget), body(fs.readFileSync(path.join(__dirname, '..', 'lib', 'deviceAudio.js'), 'utf8')));
+});
+
+test('main.js rescans the inbox on a timer: a notice that never arrives does not strand a clip', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(main, /setInterval\(\(\) => DEVICE_INBOX_ROOTS\.forEach\(\(root\) => scanDeviceInbox\(root, \{ quiet: true \}\)\), DEVICE_INBOX_RESCAN_MS\)/);
+  const root = inbox();
+  const { notice } = clipFile(root, 'rescan');
+  const q = new D.DeviceAudioQueue(deps(root));
+  assert.equal(q.enqueue(D.parseNotice(notice).clip), true);
+  assert.equal(q.enqueue(D.scanInbox(root)[0], { quiet: true }), false, 'the rescan finds it already queued');
+});
+
+test('a failed clip is not retried before retryDelayMs (each try re-transcribes)', async () => {
+  const root = inbox();
+  const { notice } = clipFile(root, 'slow-retry');
+  const d = deps(root, { retryDelayMs: 60000, deliver: async () => ({ ok: false, error: 'down' }) });
+  const q = new D.DeviceAudioQueue(d);
+  q.enqueue(D.parseNotice(notice).clip);
+  await q.idle;
+  assert.equal(q.enqueue(D.scanInbox(root)[0], { quiet: true }), false, 'held back');
 });
