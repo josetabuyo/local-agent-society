@@ -98,7 +98,9 @@ def test_a_whole_agent_is_archived_off_the_tree_and_comes_back(app, monkeypatch)
 def test_main_screen_flag_is_declared_and_carried_by_the_tree(app):
     _main, client, tmp = app
     assert client.patch("/agents/Old/config", json={"main_screen": "no"}).status_code == 422
-    assert client.patch("/agents/Old/config", json={"main_screen": False}).status_code == 200
+    res = client.patch("/agents/Old/config", json={"main_screen": False})
+    assert res.status_code == 200 and res.json()["main_screen"] is False, "the view says it (the widget's checkbox reads it)"
+    assert client.get("/agents/Alpha/config").json()["main_screen"] is True
     tree = {a["name"]: a for a in client.get("/device/society/tree").json()["agents"]}
     assert tree["Old"]["main_screen"] is False, "still in the tree: it shows inside its context"
     assert tree["Alpha"]["main_screen"] is True, "default: shown"

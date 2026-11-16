@@ -829,7 +829,7 @@ def _config_view(name: str) -> dict:
     file = _agent_config_file(name)
     config = read_agent_config(file) if file else {}
     return {"agent": name, "file": str(file) if file else None, "config": config, "sessions": sessions_config(config),
-            "security_mode": security_mode_of(config)}
+            "security_mode": security_mode_of(config), "main_screen": on_main_screen(config)}
 
 
 @app.get("/agents/{name}/config")
