@@ -152,6 +152,8 @@ contextBridge.exposeInMainWorld('las', {
   setSessionsConfig: (name, patch) => ipcRenderer.invoke('agent:config-sessions', name, patch),
   /** Write `security_mode` ('dangerous' | 'safe') to `name`'s .las-agent.json — the key `las agent security` sets. */
   setSecurityMode: (name, mode) => ipcRenderer.invoke('agent:set-security', name, mode),
+  /** main_screen in .las-agent.json: false = shown only inside its context, as a friend. */
+  setMainScreen: (name, shown) => ipcRenderer.invoke('agent:set-main-screen', name, shown),
 
   /** Ask every intelligent session of this agent to title itself (children
    * menu refresh). Resolves to {asked, skipped} or null; the titles arrive

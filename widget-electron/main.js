@@ -1782,6 +1782,26 @@ ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {
 
 // security_mode (docs/adr/0007 §4): dangerous (default) never asks, safe asks
 // in a popup before anything destructive. Same file, same key as `las agent security`.
+ipcMain.handle('agent:set-main-screen', async (_event, name, shown) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ main_screen: !!shown }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('main-screen', `${name}: set ${!!shown} failed: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('main-screen', `${name}: main_screen -> ${!!shown}`);
+    return json;
+  } catch (err) {
+    log.error('main-screen', `${name}: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
 ipcMain.handle('agent:set-security', async (_event, name, mode) => {
   if (mode !== 'dangerous' && mode !== 'safe') return null;
   try {

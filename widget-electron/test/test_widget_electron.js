@@ -2040,3 +2040,12 @@ test('a speak routed to a phone is synthesized and handed over, but not played o
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.match(main, /via: `device:\$\{clip\.from\}`/, "a phone's dictation is marked as coming from it");
 });
+
+test("settings: 'On the main screen' reads and writes main_screen in .las-agent.json", () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'widget.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(html, /<input id="mainScreen" type="checkbox" \/>/);
+  assert.match(js, /mainScreenEl\.checked = view\.main_screen !== false/);
+  assert.match(main, /body: JSON\.stringify\(\{ main_screen: !!shown \}\)/);
+});

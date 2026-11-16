@@ -38,6 +38,7 @@ const wakeEnabledEl = document.getElementById('wakeEnabled');
 const micLanguageEl = document.getElementById('micLanguage');
 const micTargetEl = document.getElementById('micTarget');
 const securityModeEl = document.getElementById('securityMode');
+const mainScreenEl = document.getElementById('mainScreen');
 const ccDefaultEl = document.getElementById('ccDefault');
 const tileShrinkMsEl = document.getElementById('tileShrinkMs');
 const tileTickMsEl = document.getElementById('tileTickMs');
@@ -641,6 +642,7 @@ function setSettingsOpen(open, fromDrawer = false) {
   }
   if (open) {
     loadSecurityMode();
+    loadMainScreen();
     refreshSessions().then(() => {
       syncMicTargetSelect();
       fitWindowToDrawer();
@@ -758,6 +760,12 @@ expandWhenHiddenEl.addEventListener('change', () => {
 speechBubblesEl.addEventListener('change', () => persist({ speechBubbles: speechBubblesEl.checked }));
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
 micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value }));
+mainScreenEl.addEventListener('change', async () => {
+  const wanted = mainScreenEl.checked;
+  const view = await window.las.setMainScreen(agentName, wanted);
+  if (!view) window.las.log('warn', 'main-screen', `could not save main_screen ${wanted} — is the backend up?`);
+  mainScreenEl.checked = view ? view.main_screen !== false : !wanted;
+});
 securityModeEl.addEventListener('change', async () => {
   const view = await window.las.setSecurityMode(agentName, securityModeEl.value);
   if (view && view.security_mode) securityMode = view.security_mode;
@@ -2588,6 +2596,15 @@ async function loadSecurityMode() {
   }
   if (securityModeEl) securityModeEl.value = securityMode;
   return securityMode;
+}
+
+async function loadMainScreen() {
+  try {
+    const view = await window.las.getAgentConfig(agentName);
+    if (view && mainScreenEl) mainScreenEl.checked = view.main_screen !== false;
+  } catch {
+    // keep what is shown
+  }
 }
 
 /** Run a destructive action through the security gate. */
