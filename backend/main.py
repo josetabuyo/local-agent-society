@@ -678,7 +678,9 @@ def tts_synthesize(req: TTSRequest):
         )
     try:
         kokoro = get_kokoro()
-        samples, sample_rate = kokoro.create(req.text, voice=kokoro_voice_style(kokoro, req.voice), speed=req.speed, lang=req.lang)
+        # Kokoro asserts 0.5 <= speed <= 2.0; a bad value speaks at normal rate.
+        speed = req.speed if 0.5 <= req.speed <= 2.0 else 1.0
+        samples, sample_rate = kokoro.create(req.text, voice=kokoro_voice_style(kokoro, req.voice), speed=speed, lang=req.lang)
     except Exception as e:
         logger.error(f"tts: synthesis failed (voice={req.voice!r} lang={req.lang!r}): {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -852,6 +854,8 @@ def patch_agent_config(name: str, patch: dict):
         raise HTTPException(status_code=422, detail="color must be #rrggbb")
     if MAIN_SCREEN_KEY in patch and not isinstance(patch[MAIN_SCREEN_KEY], bool):
         raise HTTPException(status_code=422, detail=f"{MAIN_SCREEN_KEY} must be true or false")
+    if "tts_speed" in patch and not (isinstance(patch["tts_speed"], (int, float)) and not isinstance(patch["tts_speed"], bool) and 0.5 <= patch["tts_speed"] <= 2.0):
+        raise HTTPException(status_code=422, detail="tts_speed must be a number from 0.5 to 2.0 (1 = normal)")
     if SECURITY_KEY in patch and patch[SECURITY_KEY] not in SECURITY_MODES:
         raise HTTPException(status_code=422, detail=f"{SECURITY_KEY} must be one of: {', '.join(SECURITY_MODES)}")
     sessions = patch.get("sessions")

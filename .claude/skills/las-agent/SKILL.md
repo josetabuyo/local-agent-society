@@ -131,6 +131,7 @@ Every agent speaks through Kokoro (synthesized by the backend, played by its wid
 
 - **`locale`** — its language (`es-*` → Spanish, `en-*` → English; no locale → English). The text you speak must be in this language. **Never mix languages**: a Spanish voice reading English is unusable.
 - **`tts_voice`** — its Kokoro voice id, e.g. `em_alex+am_onyx` (`+` = an equal-weight blend). Spanish ids start `ef_`/`em_` (and blends of them with English voices), English ones `af_`/`am_`/`bf_`/`bm_`.
+- **`tts_speed`** (optional) — its speaking rate, a number from 0.5 to 2 (1 = normal, lower is slower: e.g. `0.8` for an older, calmer voice). Kokoro has no pitch control; a lower-sounding voice comes from the blend chosen, not from this. Out of range reads as 1.
 
 `las voices list` shows every voice by language (♀/♂) and which agent on this machine speaks with each (`--lang es --gender male --free` narrows it); `las voices info ID` one voice. The catalogue (`widget-electron/lib/kokoroVoices.json`) is the same on every machine, so an id is something the human can hand to a friend. To change a voice: set `tts_voice`, then `las agent sync` and `las widget NAME` (or `/local-agent-voice`). An unknown id warns and falls back to the voice the agent's name hashes into.
 

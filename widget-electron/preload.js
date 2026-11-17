@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld('las', {
    * from ttsVoices) via the backend's /tts/synthesize; returns
    * {ok:true, wav: ArrayBuffer} or {ok:false, error}. */
   // `speech` ({id, agent, ts}) also hands the clip to the backend for a paired phone.
-  synthesizeSpeech: (text, voiceId, lang, speech) => ipcRenderer.invoke('tts:synthesize', text, voiceId, lang, speech || null),
+  synthesizeSpeech: (text, voiceId, lang, speech, speed) => ipcRenderer.invoke('tts:synthesize', text, voiceId, lang, speech || null, speed || 1),
 
   /** Speak-queue handshake: report one speak envelope's progress back to the
    * backend drainer (POST /queue/ack) so the NEXT agent's clip is held until

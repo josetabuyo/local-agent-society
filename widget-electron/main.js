@@ -2083,17 +2083,24 @@ const LEGACY_VOICE_LOCALES = Object.freeze({
 // `locale` (else what a legacy `voice` name implied, else en-US) and the
 // pinned Kokoro `tts_voice` (lib/kokoroVoices.js) — the renderer's speak()
 // uses it instead of hashing the agent name into the locale's pool.
+// `tts_speed`: the agent's speaking rate (Kokoro's `speed`, 1 = normal,
+// lower is slower). Kokoro accepts 0.5–2; anything else reads as 1.
+function ttsSpeedOf(config) {
+  const s = Number(config && config.tts_speed);
+  return Number.isFinite(s) && s >= 0.5 && s <= 2 ? s : 1;
+}
+
 async function fetchVoiceConfig(name) {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`);
-    if (!res.ok) return { locale: 'en-US', ttsVoice: null };
+    if (!res.ok) return { locale: 'en-US', ttsVoice: null, ttsSpeed: 1 };
     const view = await res.json();
     const config = (view && view.config) || {};
     const pinned = typeof config.tts_voice === 'string' && config.tts_voice.trim() ? config.tts_voice.trim() : null;
     const locale = (typeof config.locale === 'string' && config.locale) || LEGACY_VOICE_LOCALES[config.voice] || 'en-US';
-    return { locale, ttsVoice: pinned };
+    return { locale, ttsVoice: pinned, ttsSpeed: ttsSpeedOf(config) };
   } catch {
-    return { locale: 'en-US', ttsVoice: null };
+    return { locale: 'en-US', ttsVoice: null, ttsSpeed: 1 };
   }
 }
 
@@ -2337,11 +2344,11 @@ ipcMain.handle('audio:transcribe', async (event, pcmBuffer, languageHint, opts) 
 // espeak-ng phonemizer is a real native binary (espeakng-loader), not the
 // WASM build kokoro-js used — which is what made Spanish voices crash there
 // but work fine here (see lib/kokoroVoices.js for the full voice pool).
-async function synthesizeSpeech(text, voiceId, lang) {
+async function synthesizeSpeech(text, voiceId, lang, speed = 1) {
   const res = await fetch(`${REGISTRY_URL}/tts/synthesize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voice: voiceId, lang }),
+    body: JSON.stringify({ text, voice: voiceId, lang, speed }),
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
@@ -2395,10 +2402,10 @@ async function shareSpeechWithDevices(wav, text, speech) {
   }
 }
 
-ipcMain.handle('tts:synthesize', async (event, text, voiceId, lang, speech) => {
+ipcMain.handle('tts:synthesize', async (event, text, voiceId, lang, speech, speed) => {
   try {
     const startedAt = Date.now();
-    const wav = await synthesizeSpeech(String(text || ''), String(voiceId || 'af_heart'), String(lang || 'en-us'));
+    const wav = await synthesizeSpeech(String(text || ''), String(voiceId || 'af_heart'), String(lang || 'en-us'), ttsSpeedOf({ tts_speed: speed }));
     log.info('tts', `synthesized ${text.length} chars (voice=${voiceId}) in ${Date.now() - startedAt}ms`);
     shareSpeechWithDevices(wav, String(text || ''), speech);
     return { ok: true, wav: wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength) };

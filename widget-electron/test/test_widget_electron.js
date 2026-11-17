@@ -1553,13 +1553,13 @@ test('pickVoice resolves a real Kokoro voice id for an English-locale agent', ()
 test('preload.js exposes the Kokoro voice pool and synthesis bridge on window.las', () => {
   const src = readSrc('preload.js');
   assert.match(src, /ttsVoices:\s*KOKORO_VOICES/);
-  assert.match(src, /synthesizeSpeech:\s*\(text, voiceId, lang, speech\) => ipcRenderer\.invoke\('tts:synthesize', text, voiceId, lang, speech \|\| null\)/);
+  assert.match(src, /synthesizeSpeech:\s*\(text, voiceId, lang, speech, speed\) => ipcRenderer\.invoke\('tts:synthesize', text, voiceId, lang, speech \|\| null, speed \|\| 1\)/);
 });
 
 test('main.js exposes a tts:synthesize IPC handler that calls the backend, not in-process ONNX', () => {
   const src = readSrc('main.js');
   assert.match(src, /ipcMain\.handle\('tts:synthesize'/);
-  const body = extractFunctionBody(src, 'async function synthesizeSpeech(text, voiceId, lang) {');
+  const body = extractFunctionBody(src, 'async function synthesizeSpeech(text, voiceId, lang, speed = 1) {');
   assert.match(body, /\$\{REGISTRY_URL\}\/tts\/synthesize/, 'synthesis must go through the backend, not kokoro-js/onnxruntime-node in this process');
   assert.doesNotMatch(stripComments(readSrc('main.js')), /kokoro-js/, 'kokoro-js must not be loaded in the Electron process (packaging conflict with onnxruntime-node — see backend/main.py instead)');
 });
@@ -1574,7 +1574,7 @@ test("widget.js's speak() synthesizes via window.las.synthesizeSpeech and plays 
   const src = readSrc('renderer', 'widget.js');
   const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
   assert.match(body, /window\.las\.pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
-  assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang, speech\)/);
+  assert.match(body, /window\.las\.synthesizeSpeech\(text, voice\.name, voice\.kokoroLang, speech, ttsSpeed\)/);
   assert.match(body, /new Audio\(url\)/);
 });
 
@@ -1583,9 +1583,11 @@ test("widget.js's speak() honours a Kokoro voice pinned via tts_voice before fal
   assert.match(src, /let ttsVoice = null;/);
   const initBody = extractFunctionBody(src, 'async function init() {');
   assert.match(initBody, /if \(info && info\.ttsVoice\) ttsVoice = info\.ttsVoice;/);
+  assert.match(initBody, /if \(info && info\.ttsSpeed\) ttsSpeed = info\.ttsSpeed;/);
   const body = extractFunctionBody(src, 'async function speak(text, envelope) {');
   assert.match(body, /window\.las\.ttsVoices\.find\(\(v\) => v && v\.name === ttsVoice\)/);
   assert.match(body, /pinned \? \{ voice: pinned, warning: null \} : window\.las\.pickVoice\(agentName, locale, window\.las\.ttsHashPool \|\| window\.las\.ttsVoices\)/);
+  assert.match(body, /synthesizeSpeech\(text, voice\.name, voice\.kokoroLang, speech, ttsSpeed\)/);
   // An unknown id must not silently mute the agent — it warns and hashes as before.
   assert.match(body, /is not in the Kokoro pool/);
 });
@@ -1594,14 +1596,18 @@ test("main.js's agent:info takes locale and tts_voice from the agent's own .las-
   const src = readSrc('main.js');
   const legacy = src.slice(src.indexOf('const LEGACY_VOICE_LOCALES'), src.indexOf('});', src.indexOf('const LEGACY_VOICE_LOCALES')) + 3);
   const body = extractFunctionBody(src, 'async function fetchVoiceConfig(name) {');
+  const speedOf = extractFunctionBody(src, 'function ttsSpeedOf(config) {');
   const make = (config, ok = true) => new Function('fetch', 'REGISTRY_URL',
-    `${legacy}\nreturn async function fetchVoiceConfig(name) ${body};`)(
+    `${legacy}\nfunction ttsSpeedOf(config) ${speedOf}\nreturn async function fetchVoiceConfig(name) ${body};`)(
     async (url) => { assert.match(url, /\/agents\/Some%20One\/config$/); return { ok, json: async () => ({ config }) }; }, 'http://x');
-  assert.deepEqual(await make({ locale: 'es-MX', tts_voice: ' em_alex+am_onyx ' })('Some One'), { locale: 'es-MX', ttsVoice: 'em_alex+am_onyx' });
+  assert.deepEqual(await make({ locale: 'es-MX', tts_voice: ' em_alex+am_onyx ' })('Some One'), { locale: 'es-MX', ttsVoice: 'em_alex+am_onyx', ttsSpeed: 1 });
   // a file not yet normalized: the legacy macOS name still gives the language
-  assert.deepEqual(await make({ voice: 'Jorge' })('Some One'), { locale: 'es-ES', ttsVoice: null });
-  assert.deepEqual(await make({})('Some One'), { locale: 'en-US', ttsVoice: null });
-  assert.deepEqual(await make({}, false)('Some One'), { locale: 'en-US', ttsVoice: null });
+  assert.deepEqual(await make({ voice: 'Jorge' })('Some One'), { locale: 'es-ES', ttsVoice: null, ttsSpeed: 1 });
+  assert.deepEqual(await make({})('Some One'), { locale: 'en-US', ttsVoice: null, ttsSpeed: 1 });
+  assert.deepEqual(await make({}, false)('Some One'), { locale: 'en-US', ttsVoice: null, ttsSpeed: 1 });
+  // tts_speed: the agent's rate, within Kokoro's 0.5–2; anything else is normal speed
+  assert.equal((await make({ tts_speed: 0.8 })('Some One')).ttsSpeed, 0.8);
+  for (const bad of [0.2, 3, 'slow', null]) assert.equal((await make({ tts_speed: bad })('Some One')).ttsSpeed, 1);
   assert.match(src, /ipcMain\.handle\('agent:info', async \(_event, name\) => fetchVoiceConfig\(name\)\);/);
   assert.doesNotMatch(src, /\/voices\/\$\{encodeURIComponent\(voice\)\}/, 'no macOS voice-name lookup left');
 });

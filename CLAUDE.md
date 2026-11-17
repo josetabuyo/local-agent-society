@@ -43,6 +43,7 @@ Every agent speaks through Kokoro (synthesized by the backend, played by its wid
 
 - `las voices list` — every voice by language (♀/♂), and which agent here speaks with each; `--lang es --gender male --free` narrows it. The catalogue is the same on every machine: an id is something you can hand to a friend ("use `ef_dora+af_sky`").
 - To change a voice: set `tts_voice`, then `las agent sync` (or `las widget NAME`) so the widget picks it up.
+- Optional `"tts_speed": 0.8` sets the speaking rate (0.5–2, 1 = normal, lower is slower).
 - Spanish voices start `ef_`/`em_` (and their blends, `+` = equal-weight mix); English ones `af_`/`am_`/`bf_`/`bm_`.
 
 **Critical:** speak text in the agent's language (`locale`), never mixed — a Spanish voice reading English is unusable.

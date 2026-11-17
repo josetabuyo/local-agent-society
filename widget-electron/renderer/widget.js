@@ -207,6 +207,7 @@ let locale = 'en-US';
 // speak() — the only way to choose a voice's gender explicitly, since the
 // hash only guarantees a voice in the agent's language.
 let ttsVoice = null;
+let ttsSpeed = 1;   // the agent's `tts_speed` (1 = Kokoro's normal rate)
 
 /** '#rrggbb' + 0..1 alpha -> 'rgba(r, g, b, a)'. */
 function hexToRgba(hex, alpha) {
@@ -432,6 +433,7 @@ async function init() {
     const info = await window.las.getAgentInfo(agentName);
     if (info && info.locale) locale = info.locale;
     if (info && info.ttsVoice) ttsVoice = info.ttsVoice;
+    if (info && info.ttsSpeed) ttsSpeed = info.ttsSpeed;
   } catch (err) {
     console.warn('[widget] could not resolve agent locale, defaulting to en-US:', err);
   }
@@ -1189,7 +1191,7 @@ async function speak(text, envelope) {
   try {
     const route = (envelope && typeof envelope.route === 'string' && envelope.route) || 'mac';
     const speech = envelope && envelope.id ? { id: String(envelope.id), agent: agentName, ts: envelope.ts || Date.now(), route } : null;
-    result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang, speech);
+    result = await window.las.synthesizeSpeech(text, voice.name, voice.kokoroLang, speech, ttsSpeed);
   } catch (err) {
     console.warn('[widget] synthesizeSpeech IPC failed', err);
     ackSpeak(envelope, 'skipped', 'synthesis-ipc-failed');

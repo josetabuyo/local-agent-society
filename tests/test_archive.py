@@ -105,3 +105,12 @@ def test_main_screen_flag_is_declared_and_carried_by_the_tree(app):
     assert tree["Old"]["main_screen"] is False, "still in the tree: it shows inside its context"
     assert tree["Alpha"]["main_screen"] is True, "default: shown"
     assert json.loads((tmp / "old" / ".las-agent.json").read_text())["main_screen"] is False
+
+
+def test_tts_speed_is_validated_and_kept(app):
+    _main, client, tmp = app
+    for bad in ("slow", 0.2, 3, True):
+        assert client.patch("/agents/Old/config", json={"tts_speed": bad}).status_code == 422
+    res = client.patch("/agents/Old/config", json={"tts_speed": 0.8})
+    assert res.status_code == 200 and res.json()["config"]["tts_speed"] == 0.8
+    assert json.loads((tmp / "old" / ".las-agent.json").read_text())["tts_speed"] == 0.8
