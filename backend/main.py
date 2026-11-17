@@ -1050,6 +1050,11 @@ def _known_phones() -> list[str]:
     return sorted({r for r in routes.values() if isinstance(r, str) and r and r != "mac"})
 
 
+def _voice_output_view(name: str, config: dict) -> dict:
+    mode = _reply_output_of(config)
+    return {"mode": mode, "effective": _learned_route(name) if mode == "auto" else mode}
+
+
 @app.get("/agents/{name}/reply-output")
 @app.get("/device/agents/{name}/reply-output")
 def get_reply_output(name: str):
@@ -1643,6 +1648,9 @@ def _society_node(name: str, registry: dict, inactive: list, sessions_by_agent: 
         "inactive": name in inactive,
         # false: not on the phone's main screen — only inside its context (as a friend).
         "main_screen": on_main_screen(config),
+        # Where its voice comes out (reply_output): read along with the tree,
+        # so the phone needs no extra request per agent.
+        "voice_output": _voice_output_view(name, config),
         "sessions": _session_summaries(name, sessions, sessions_config(config)) if sessions else [],
         "friends": friends_of(config),
         "map": elements,

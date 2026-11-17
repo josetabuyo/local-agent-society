@@ -129,3 +129,5 @@ def test_reply_output_pins_where_the_voice_comes_out(app, monkeypatch):
     assert client.patch("/agents/Alpha/config", json={"reply_output": "auto"}).status_code == 200
     assert main._reply_route("Alpha") == "jose-iphone", "auto: back to the last used"
     assert client.get("/agents/Nobody/reply-output").status_code == 404
+    tree = {a["name"]: a for a in client.get("/device/society/tree").json()["agents"]}
+    assert tree["Alpha"]["voice_output"] == {"mode": "auto", "effective": "jose-iphone"}, "the tree carries it: no extra poll"
