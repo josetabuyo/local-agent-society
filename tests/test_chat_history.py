@@ -85,3 +85,11 @@ def test_endpoint_and_device_alias(app):
     assert [(m["text"], m.get("session")) for m in msgs] == [("hola", "claude-1"), ("dije", None)]
     assert client.get("/agents/Alpha/chat", params={"after": 5}).json()["messages"][0]["id"] == "b"
     assert client.get("/agents/Nobody/chat").status_code == 404
+
+
+def test_a_phone_input_keeps_its_via(tmp_path):
+    h = ch.ChatHistory(tmp_path)
+    h.record({"id": "p1", "from": "Alpha", "to": "Alpha", "source": "human", "text": "hola", "ts": 1, "via": "device:jose-iphone"})
+    h.record({"id": "m1", "from": "Alpha", "to": "Alpha", "source": "human", "text": "chau", "ts": 2})
+    got = {e["id"]: e for e in h.query("Alpha")}
+    assert got["p1"]["via"] == "device:jose-iphone" and "via" not in got["m1"]

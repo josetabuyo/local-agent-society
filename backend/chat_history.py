@@ -64,6 +64,10 @@ def _entry(envelope: dict, session: str | None) -> dict:
         "kind": envelope.get("kind") or "message",
         "source": envelope.get("source") or "agent",
     }
+    # Where a human input came from ("device:<env>" = dictated or typed on a
+    # phone), so a surface can tell the phone's turns from the Mac's.
+    if isinstance(envelope.get("via"), str) and envelope["via"]:
+        e["via"] = envelope["via"]
     sess = envelope.get("session") or session
     if sess:
         e["session"] = sess
