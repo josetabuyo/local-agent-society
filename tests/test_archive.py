@@ -114,3 +114,18 @@ def test_tts_speed_is_validated_and_kept(app):
     res = client.patch("/agents/Old/config", json={"tts_speed": 0.8})
     assert res.status_code == 200 and res.json()["config"]["tts_speed"] == 0.8
     assert json.loads((tmp / "old" / ".las-agent.json").read_text())["tts_speed"] == 0.8
+
+
+def test_reply_output_pins_where_the_voice_comes_out(app, monkeypatch):
+    main, client, tmp = app
+    monkeypatch.setattr(main, "REPLY_ROUTES_FILE", tmp / "routes.json")
+    (tmp / "routes.json").write_text(json.dumps({"Alpha": "jose-iphone"}))
+    view = client.get("/agents/Alpha/reply-output").json()
+    assert view == {"agent": "Alpha", "mode": "auto", "learned": "jose-iphone", "effective": "jose-iphone", "phones": ["jose-iphone"]}
+    assert client.patch("/agents/Alpha/config", json={"reply_output": "bad value!"}).status_code == 422
+    assert client.patch("/agents/Alpha/config", json={"reply_output": "mac"}).status_code == 200
+    assert main._reply_route("Alpha") == "mac", "pinned wins over what was learned"
+    assert client.get("/device/agents/Alpha/reply-output").json()["effective"] == "mac"
+    assert client.patch("/agents/Alpha/config", json={"reply_output": "auto"}).status_code == 200
+    assert main._reply_route("Alpha") == "jose-iphone", "auto: back to the last used"
+    assert client.get("/agents/Nobody/reply-output").status_code == 404

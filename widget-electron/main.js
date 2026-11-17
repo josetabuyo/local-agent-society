@@ -1782,6 +1782,35 @@ ipcMain.handle('agent:config-sessions', async (_event, name, patch) => {
 
 // security_mode (docs/adr/0007 §4): dangerous (default) never asks, safe asks
 // in a popup before anything destructive. Same file, same key as `las agent security`.
+ipcMain.handle('agent:reply-output', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/reply-output`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle('agent:set-reply-output', async (_event, name, mode) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reply_output: String(mode || 'auto') }),
+    });
+    if (!res.ok) {
+      log.error('reply-output', `${name}: set ${mode} failed: HTTP ${res.status}`);
+      return null;
+    }
+    log.info('reply-output', `${name}: reply_output -> ${mode}`);
+    const view = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/reply-output`);
+    return view.ok ? await view.json() : null;
+  } catch (err) {
+    log.error('reply-output', `${name}: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
 ipcMain.handle('agent:set-main-screen', async (_event, name, shown) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/config`, {

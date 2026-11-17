@@ -2074,3 +2074,14 @@ test('main.js archives a whole agent from its ⤓, and ↩ from the map brings i
   assert.match(map, /if \(entry\.type === 'agent'\) await window\.las\.unarchiveAgent\(entry\.label\)/);
   assert.match(map, /if \(entry\.type === 'agent'\) row\.append\(restore\);/, 'an archived agent has no ✕ forget');
 });
+
+test('settings: Voice output (reply_output) — Auto names where it goes now, Mac or a phone pin it', () => {
+  assert.match(readSrc('renderer', 'index.html'), /<select id="replyOutput"><\/select>/);
+  const w = readSrc('renderer', 'widget.js');
+  assert.match(w, /Auto — last used \(now: \$\{outputName\(view\.learned\)\}\)/);
+  assert.match(w, /window\.las\.setReplyOutput\(agentName, replyOutputEl\.value\)/);
+  assert.match(w, /loadReplyOutput\(\);/);
+  const m = readSrc('main.js');
+  assert.match(m, /JSON\.stringify\(\{ reply_output: String\(mode \|\| 'auto'\) \}\)/);
+  assert.match(readSrc('preload.js'), /getReplyOutput:[\s\S]*setReplyOutput:/);
+});

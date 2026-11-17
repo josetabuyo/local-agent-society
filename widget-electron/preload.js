@@ -154,6 +154,9 @@ contextBridge.exposeInMainWorld('las', {
   setSecurityMode: (name, mode) => ipcRenderer.invoke('agent:set-security', name, mode),
   /** main_screen in .las-agent.json: false = shown only inside its context, as a friend. */
   setMainScreen: (name, shown) => ipcRenderer.invoke('agent:set-main-screen', name, shown),
+  /** Where the agent's voice comes out: {mode, learned, effective, phones} (backend /agents/{name}/reply-output). */
+  getReplyOutput: (name) => ipcRenderer.invoke('agent:reply-output', name),
+  setReplyOutput: (name, mode) => ipcRenderer.invoke('agent:set-reply-output', name, mode),
 
   /** Ask every intelligent session of this agent to title itself (children
    * menu refresh). Resolves to {asked, skipped} or null; the titles arrive

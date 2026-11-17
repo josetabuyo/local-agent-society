@@ -852,6 +852,8 @@ def patch_agent_config(name: str, patch: dict):
         raise HTTPException(status_code=422, detail="rename with `las agent rename`, not a config patch")
     if "color" in patch and not _is_hex_color(patch["color"]):
         raise HTTPException(status_code=422, detail="color must be #rrggbb")
+    if REPLY_OUTPUT_KEY in patch and not (isinstance(patch[REPLY_OUTPUT_KEY], str) and _REPLY_OUTPUT_RE.match(patch[REPLY_OUTPUT_KEY])):
+        raise HTTPException(status_code=422, detail=f"{REPLY_OUTPUT_KEY} must be auto, mac or a phone's envName")
     if MAIN_SCREEN_KEY in patch and not isinstance(patch[MAIN_SCREEN_KEY], bool):
         raise HTTPException(status_code=422, detail=f"{MAIN_SCREEN_KEY} must be true or false")
     if "tts_speed" in patch and not (isinstance(patch["tts_speed"], (int, float)) and not isinstance(patch["tts_speed"], bool) and 0.5 <= patch["tts_speed"] <= 2.0):
@@ -1016,9 +1018,49 @@ def _note_reply_route(envelope: dict) -> None:
             save_json(REPLY_ROUTES_FILE, routes)
 
 
-def _reply_route(name: str) -> str:
+def _learned_route(name: str) -> str:
     with _reply_routes_lock:
         return load_json(REPLY_ROUTES_FILE, {}).get(name, "mac")
+
+
+# `reply_output` in .las-agent.json pins where the agent's voice comes out:
+# "auto" (default: the medium of the last human input, above), "mac", or a
+# phone's envName. A pinned value wins over what was learned.
+REPLY_OUTPUT_KEY = "reply_output"
+_REPLY_OUTPUT_RE = re.compile(r"^[A-Za-z0-9._@:-]{1,64}$")
+
+
+def _reply_output_of(config: dict) -> str:
+    v = config.get(REPLY_OUTPUT_KEY) if isinstance(config, dict) else None
+    return v if isinstance(v, str) and _REPLY_OUTPUT_RE.match(v) else "auto"
+
+
+def _reply_route(name: str) -> str:
+    try:
+        mode = _reply_output_of(_agent_config(name))
+    except Exception:
+        mode = "auto"
+    return _learned_route(name) if mode == "auto" else mode
+
+
+def _known_phones() -> list[str]:
+    """Phones that ever spoke to an agent here (their envNames) — the choices besides the Mac."""
+    with _reply_routes_lock:
+        routes = load_json(REPLY_ROUTES_FILE, {})
+    return sorted({r for r in routes.values() if isinstance(r, str) and r and r != "mac"})
+
+
+@app.get("/agents/{name}/reply-output")
+@app.get("/device/agents/{name}/reply-output")
+def get_reply_output(name: str):
+    """Where `name`'s voice comes out: the setting (`mode`), what auto learned, the effective route, and the choices."""
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    mode = _reply_output_of(_agent_config(name))
+    phones = _known_phones()
+    if mode not in ("auto", "mac") and mode not in phones:
+        phones.append(mode)
+    return {"agent": name, "mode": mode, "learned": _learned_route(name), "effective": _reply_route(name), "phones": phones}
 
 
 def _on_chat_message(topic: str, payload: bytes) -> None:

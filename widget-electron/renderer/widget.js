@@ -39,6 +39,7 @@ const micLanguageEl = document.getElementById('micLanguage');
 const micTargetEl = document.getElementById('micTarget');
 const securityModeEl = document.getElementById('securityMode');
 const mainScreenEl = document.getElementById('mainScreen');
+const replyOutputEl = document.getElementById('replyOutput');
 const ccDefaultEl = document.getElementById('ccDefault');
 const tileShrinkMsEl = document.getElementById('tileShrinkMs');
 const tileTickMsEl = document.getElementById('tileTickMs');
@@ -645,6 +646,7 @@ function setSettingsOpen(open, fromDrawer = false) {
   if (open) {
     loadSecurityMode();
     loadMainScreen();
+    loadReplyOutput();
     refreshSessions().then(() => {
       syncMicTargetSelect();
       fitWindowToDrawer();
@@ -762,6 +764,13 @@ expandWhenHiddenEl.addEventListener('change', () => {
 speechBubblesEl.addEventListener('change', () => persist({ speechBubbles: speechBubblesEl.checked }));
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
 micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value }));
+replyOutputEl.addEventListener('change', async () => {
+  const view = await window.las.setReplyOutput(agentName, replyOutputEl.value);
+  if (!view) window.las.log('warn', 'reply-output', `could not save reply_output ${replyOutputEl.value} — is the backend up?`);
+  if (view) renderReplyOutput(view);
+  else loadReplyOutput();
+});
+
 mainScreenEl.addEventListener('change', async () => {
   const wanted = mainScreenEl.checked;
   const view = await window.las.setMainScreen(agentName, wanted);
@@ -2599,6 +2608,33 @@ async function loadSecurityMode() {
   }
   if (securityModeEl) securityModeEl.value = securityMode;
   return securityMode;
+}
+
+// Voice output (reply_output): Auto names where it goes right now, so the
+// person sees where the sound is coming out; the Mac or a phone pin it.
+function outputName(route) {
+  return route === 'mac' ? 'this Mac' : `phone (${route})`;
+}
+
+function renderReplyOutput(view) {
+  if (!replyOutputEl || !view) return;
+  const opts = [['auto', `Auto — last used (now: ${outputName(view.learned)})`], ['mac', 'This Mac']]
+    .concat((view.phones || []).map((p) => [p, `Phone — ${p}`]));
+  replyOutputEl.replaceChildren(...opts.map(([value, label]) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    return o;
+  }));
+  replyOutputEl.value = view.mode || 'auto';
+}
+
+async function loadReplyOutput() {
+  try {
+    renderReplyOutput(await window.las.getReplyOutput(agentName));
+  } catch {
+    // keep what is shown
+  }
 }
 
 async function loadMainScreen() {

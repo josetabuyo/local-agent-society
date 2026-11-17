@@ -468,8 +468,12 @@ What a session needs to know:
   phone records, the Mac transcribes); a long one comes as a single message.
 - **Your spoken answer follows the human.** If their last input came from the
   phone, your `las speak` plays on the phone and not on the Mac; if it came from
-  the widget's mic or the terminal, it plays on the Mac. Speak as always — the
+  the widget's mic or ⌨, it plays on the Mac (typing straight into your terminal
+  does not pass through LAS, so it changes nothing). Speak as always — the
   backend routes it (`data/reply-routes.json`). Don't send audio yourself.
+  The human can pin it instead: widget ⚙ → "Voice output" (`reply_output` in
+  `.las-agent.json`: `auto` = last used, `mac`, or a phone's envName;
+  `GET /agents/{name}/reply-output` says where it goes now).
 - **The chat is the record.** The phone shows each agent's history
   (`GET /agents/{name}/chat`): mic dictations, your spoken reports, messages to
   and from other agents. So the closing report matters on the phone too.
