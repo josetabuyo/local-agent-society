@@ -2115,6 +2115,53 @@ ipcMain.handle('agent:deactivate', async (event, name) => {
   return deactivateAgentWidget(name, win && win.isPopup ? windows.get(name) : win);
 });
 
+// The widget's own ⤓ button: the whole agent goes to the archive (backend
+// tree.archived — it also marks it inactive, so the bulk open skips it) and
+// its widget closes. Nothing of the agent is touched; the map's 🗄 lists it
+// and ↩ brings it back with its widget.
+ipcMain.handle('agent:archive-agent', async (event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/archived`, { method: 'POST' });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      log.error('archive', `archive agent ${name} failed: HTTP ${res.status} ${json.detail || ''}`);
+      return null;
+    }
+    log.info('archive', `${name}: archived the whole agent`);
+    const sender = BrowserWindow.fromWebContents(event.sender);
+    const win = windows.get(name) || (sender && !sender.isPopup ? sender : null);
+    if (win && !win.isDestroyed()) win.destroy();
+    return json;
+  } catch (err) {
+    log.error('archive', `archive agent ${name} failed: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
+/** Every archived agent: [{name, archivedAt}]. */
+ipcMain.handle('agent:archived-agents', async () => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/archived`);
+    return res.ok ? ((await res.json()).archived || []) : [];
+  } catch {
+    return [];
+  }
+});
+
+/** ↩ on an archived agent: off the archive, and its widget opens again. */
+ipcMain.handle('agent:unarchive-agent', async (_event, name) => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/archived`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) return null;
+    log.info('archive', `${name}: back from the archive`);
+    openWidget(name);
+    return { ok: true };
+  } catch (err) {
+    log.error('archive', `unarchive ${name} failed: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
 /** Mark `name` inactive on the backend and destroy its widget window (`win`, or the one open for `name`). */
 async function deactivateAgentWidget(name, win = windows.get(name)) {
   try {

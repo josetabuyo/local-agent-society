@@ -156,16 +156,19 @@
 
   // ── the archive: what this agent put away (🗄 in the tools pill) ────────────
   let archive = [];
+  let archivedAgents = [];
 
   async function refreshArchive() {
     const res = await window.las.getArchive(agentName).catch(() => null);
-    const next = (res && res.archive) || [];
+    const agents = await window.las.getArchivedAgents().catch(() => []);
+    const next = [...((res && res.archive) || []), ...(agents || []).map((a) => ({ type: 'agent', id: `agent:${a.name}`, label: a.name }))];
     if (JSON.stringify(next) === JSON.stringify(archive)) return false;
     archive = next;
     return true;
   }
 
   function archiveDetail(entry) {
+    if (entry.type === 'agent') return 'archived agent — its widget is closed';
     if (entry.type === 'friend') return entry.registered ? 'friend' : 'friend · not registered';
     if (entry.type === 'repo') return entry.github || entry.abs_path || 'repo';
     return entry.url || 'url';
@@ -174,14 +177,16 @@
   function archiveRow(entry) {
     const row = el('div', 'open-row society-row archive-row');
     const label = el('span', 'open-label society-label');
-    const icon = { friend: '\u{1F464}', repo: '\u{1F4C1}', url: '\u{1F517}' }[entry.type] || '•';
+    const icon = { agent: '\u{1F916}', friend: '\u{1F464}', repo: '\u{1F4C1}', url: '\u{1F517}' }[entry.type] || '•';
     label.append(el('span', 'archive-name', `${icon} ${entry.label}`), el('span', 'society-detail', archiveDetail(entry)));
     row.appendChild(label);
     const restore = el('button', 'open-move', '↩');
     restore.type = 'button';
-    restore.title = entry.type === 'friend' ? `Bring ${entry.label} back among the friends` : 'Put it back on the map';
+    restore.title = entry.type === 'agent' ? `Bring ${entry.label} back — its widget opens again`
+      : entry.type === 'friend' ? `Bring ${entry.label} back among the friends` : 'Put it back on the map';
     restore.addEventListener('click', async () => {
-      await window.las.restoreArchiveEntry(agentName, entry.id);
+      if (entry.type === 'agent') await window.las.unarchiveAgent(entry.label);
+      else await window.las.restoreArchiveEntry(agentName, entry.id);
       await refreshArchive();
       render();
       refresh();
@@ -198,7 +203,9 @@
       await refreshArchive();
       render();
     }));
-    row.append(restore, forget);
+    // An archived agent is never forgotten from here: it is a whole agent, not an entry.
+    if (entry.type === 'agent') row.append(restore);
+    else row.append(restore, forget);
     return row;
   }
 

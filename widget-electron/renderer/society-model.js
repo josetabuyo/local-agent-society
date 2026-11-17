@@ -42,7 +42,7 @@
   /** Actions shared by every kind. */
   const ACTIONS = ['exit', 'keyboard', 'mic'];
   const ACTION_ICONS = {
-    exit: '\u{1F6AA}', settings: '⚙', open: '⧉', speaker: '\u{1F50A}', muted: '\u{1F507}',
+    exit: '✕', settings: '⚙', open: '⧉', speaker: '\u{1F50A}', muted: '\u{1F507}',
     keyboard: '⌨', mic: '\u{1F3A4}', find: '⌖', log: '\u{1F4C4}', archive: '\u{1F5C4}',
   };
 

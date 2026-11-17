@@ -782,13 +782,14 @@ wakeEnabledEl.addEventListener('change', () => {
   window.las.setWakeEnabled(agentName, wakeEnabledEl.checked);
 });
 
-// Door button: mark inactive + close this widget. See main.js's
-// agent:deactivate comment — never touches the Claude Code session itself.
+// ⤓ (the old door): the whole agent goes to the archive and this widget
+// closes — see main.js's agent:archive-agent. Never touches its sessions;
+// the map's 🗄 lists it and ↩ brings it back.
 doorEl.addEventListener('click', async () => {
   try {
-    await window.las.deactivateAgent(agentName);
+    await window.las.archiveAgent(agentName);
   } catch (err) {
-    console.warn('[widget] deactivate: request failed:', err);
+    console.warn('[widget] archive: request failed:', err);
   }
 });
 

@@ -245,6 +245,10 @@ contextBridge.exposeInMainWorld('las', {
   /** Door button: mark this agent inactive on the backend and close this
    * widget window. See main.js's agent:deactivate comment. */
   deactivateAgent: (name) => ipcRenderer.invoke('agent:deactivate', name),
+  /** ⤓: the whole agent to the archive, its widget closes (main.js agent:archive-agent). */
+  archiveAgent: (name) => ipcRenderer.invoke('agent:archive-agent', name),
+  getArchivedAgents: () => ipcRenderer.invoke('agent:archived-agents'),
+  unarchiveAgent: (name) => ipcRenderer.invoke('agent:unarchive-agent', name),
 
   /** "Wake up via vortexia" settings checkbox — backend-synced (not
    * electron-store), same flag `las agent focus`'s wake fallback reads. */

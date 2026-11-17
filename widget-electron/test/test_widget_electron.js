@@ -1245,10 +1245,12 @@ test('index.html has a door button and a wake-enabled settings checkbox', () => 
   assert.match(src, /id="wakeEnabled"/);
 });
 
-test('widget.js wires the door button to deactivateAgent and the wake checkbox to setWakeEnabled', () => {
+test('widget.js wires the ⤓ (old door) button to archiveAgent and the wake checkbox to setWakeEnabled', () => {
   const src = readSrc('renderer', 'widget.js');
   assert.match(src, /doorEl\.addEventListener\('click'/);
-  assert.match(src, /window\.las\.deactivateAgent\(agentName\)/);
+  assert.match(src, /window\.las\.archiveAgent\(agentName\)/);
+  assert.doesNotMatch(src, /window\.las\.deactivateAgent\(agentName\)/, 'the button archives now, it no longer just closes');
+  assert.match(readSrc('renderer', 'index.html'), /id="door"[^>]*>&#10515;</, 'an arrow down into the archive, not a door');
   assert.match(src, /wakeEnabledEl\.addEventListener\('change'/);
   assert.match(src, /window\.las\.setWakeEnabled\(agentName,\s*wakeEnabledEl\.checked\)/);
 });
@@ -2054,4 +2056,21 @@ test("settings: 'On the main screen' reads and writes main_screen in .las-agent.
   assert.match(html, /<input id="mainScreen" type="checkbox" \/>/);
   assert.match(js, /mainScreenEl\.checked = view\.main_screen !== false/);
   assert.match(main, /body: JSON\.stringify\(\{ main_screen: !!shown \}\)/);
+});
+
+
+test('main.js archives a whole agent from its ⤓, and ↩ from the map brings it back with its widget', () => {
+  const src = readSrc('main.js');
+  const archive = src.slice(src.indexOf("ipcMain.handle('agent:archive-agent'"), src.indexOf("ipcMain.handle('agent:archived-agents'"));
+  assert.match(archive, /\/agents\/\$\{encodeURIComponent\(name\)\}\/archived`, \{ method: 'POST' \}/);
+  assert.match(archive, /win\.destroy\(\)/, 'its widget closes');
+  const back = src.slice(src.indexOf("ipcMain.handle('agent:unarchive-agent'"), src.indexOf("ipcMain.handle('agent:unarchive-agent'") + 600);
+  assert.match(back, /method: 'DELETE'/);
+  assert.match(back, /openWidget\(name\)/, 'and the widget opens again');
+  const pre = readSrc('preload.js');
+  for (const k of ['archiveAgent', 'getArchivedAgents', 'unarchiveAgent']) assert.match(pre, new RegExp(`${k}:`));
+  const map = readSrc('renderer', 'map.js');
+  assert.match(map, /window\.las\.getArchivedAgents\(\)/, 'the map archive lists archived agents');
+  assert.match(map, /if \(entry\.type === 'agent'\) await window\.las\.unarchiveAgent\(entry\.label\)/);
+  assert.match(map, /if \(entry\.type === 'agent'\) row\.append\(restore\);/, 'an archived agent has no ✕ forget');
 });

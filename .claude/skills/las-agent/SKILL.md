@@ -389,7 +389,9 @@ hand, one step from coming back. Two levels:
   (the phone's panel, `/society/tree`) into `tree.archived`; its subordinates
   hang from the nearest live ancestor; its widget is marked inactive. Nothing of
   the agent or its folder is deleted. `las agent unarchive NAME` brings it back
-  (`las widget NAME` reopens its widget).
+  (`las widget NAME` reopens its widget). In the widget, the ⤓ button (top-left,
+  where the 🚪 used to be) does the same for its own agent, and the map's 🗄
+  lists archived agents with ↩ (back, widget reopened) — no ✕ for them.
 
 **Not on the main screen** is lighter than archiving: `las agent main-screen
 hide --agent NAME` (`"main_screen": false`) keeps the agent fully alive but off
