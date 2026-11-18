@@ -158,7 +158,7 @@
 .archive-row .archive-name { font-weight: 600; margin-right: 8px; }
 
 /* ── the mic (map.js placeMic): a 🎤 badge on the corner of the mini widget it
- * talks to, dragged onto another one to move it; its home in the tools pill. */
+ * talks to, dragged onto another one to move it. */
 .mic-badge {
   position: absolute;
   right: 1px;
@@ -193,7 +193,3 @@
   pointer-events: none;
 }
 .mic-drop-ok { outline: 2px solid rgba(200, 40, 40, 0.95); outline-offset: 1px; }
-.mic-home { cursor: grab; touch-action: none; }
-/* Away: some tile holds the mic — the home is dim; at home it is lit. */
-.mic-home.away { opacity: 0.45; }
-.mic-home:not(.away) { background: rgba(200, 40, 40, 0.85); opacity: 1; }

@@ -15,8 +15,10 @@
  *
  * The 🎤 badge sits on the corner of the mini widget the agent's mic talks to
  * (its `sessions.target`, or `sessions.mic_to` when it is a friend). Drag it
- * onto another session or friend to move the mic there; the 🎤 in the tools
- * pill is its home: click it, and the mic is this agent's again.
+ * onto any other mini widget that can take a dictation — a terminal, a
+ * command, a friend — to move the mic there. There is always exactly one
+ * holder (every session when it talks to all): the target, else the
+ * last-used session, else the first tile that can take it.
  */
 (function () {
   const M = window.LasMap;
@@ -274,8 +276,9 @@
     // Sessions come most-recently-used first: a runtime name means the first of that runtime.
     const picked = mic.target === 'default' ? null
       : sessions.find((i) => i.sid === mic.target) || sessions.find((i) => i.runtime === mic.target);
-    // Not connected (or default): the backend falls back to the last-used session.
-    const holder = picked || sessions.find((i) => i.isDefault);
+    // Not connected (or default): the backend falls back to the last-used session;
+    // none marked: the first tile that can take the mic, so it is always somewhere.
+    const holder = picked || sessions.find((i) => i.isDefault) || items.find(takesMic);
     return holder ? [holder.key] : [];
   }
 
@@ -286,24 +289,19 @@
     return `${agentName} · ${mic.target}`;
   }
 
-  /** Put the 🎤 badge on its tile(s) (or row(s)); the home button lights up when no tile shows it. */
+  /** Put the 🎤 badge on its tile(s) (or row(s)). */
   function placeMic() {
     const host = $('map');
     for (const old of host.querySelectorAll('.mic-badge')) old.remove();
     const keys = view.archive ? [] : micKeys();
-    let shown = 0;
     for (const key of keys) {
       const target = [...host.querySelectorAll('[data-key]')].find((e) => e.dataset.key === key);
       if (!target) continue;
       const badge = el('span', 'mic-badge', '🎤');
-      badge.title = `The mic talks here — drag it onto another terminal or friend to move it`;
       startMicDrag(badge);
+      badge.title = `The mic talks to ${micWhere()} — drag it onto another terminal, command or friend to move it`;
       target.appendChild(badge);
-      shown += 1;
     }
-    const home = $('micHome');
-    home.classList.toggle('away', shown > 0);
-    home.title = `Mic: ${micWhere()}.\nDrag 🎤 onto a terminal or a friend to send the mic there; click to bring it back to ${agentName}`;
   }
 
   async function moveMic(patch) {
@@ -326,8 +324,8 @@
     return host ? items.find((i) => i.key === host.dataset.key) || null : null;
   }
 
-  /** Press on a 🎤 (a badge, or the home button) and drag it: it follows the pointer, a tile that takes it lights up. */
-  function startMicDrag(source, onClick) {
+  /** Press on a tile's 🎤 badge and drag it: it follows the pointer, a tile that takes it lights up. */
+  function startMicDrag(source) {
     source.addEventListener('dblclick', (e) => e.stopPropagation());
     source.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
@@ -362,10 +360,7 @@
         document.removeEventListener('pointerup', up, true);
         light(null);
         source.classList.remove('mic-lifted');
-        if (!ghost) {
-          if (onClick) onClick();
-          return;
-        }
+        if (!ghost) return;
         ghost.remove();
         const item = itemAt(ev.clientX, ev.clientY);
         if (takesMic(item)) dropMicOn(item);
@@ -374,7 +369,7 @@
       document.addEventListener('pointerup', up, true);
     });
   }
-  startMicDrag($('micHome'), () => moveMic({ target: 'default', mic_to: '' }));
+
 
   $('layoutSeg').addEventListener('click', async (e) => {
     const b = e.target.closest('button');

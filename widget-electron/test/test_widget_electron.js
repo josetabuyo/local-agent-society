@@ -2100,7 +2100,8 @@ test('map: the 🎤 badge sits on the tile the mic talks to; dropping it moves s
   assert.match(drop, /moveMic\(\{\s*mic_to:\s*item\.agent\s*\}\)/);
   assert.match(drop, /moveMic\(\{\s*target:[^}]*mic_to:\s*''\s*\}\)/);
   assert.match(map, /window\.las\.setSessionsConfig\(agentName,\s*patch\)/);
-  assert.match(map, /startMicDrag\(\$\('micHome'\),\s*\(\)\s*=>\s*moveMic\(\{\s*target:\s*'default',\s*mic_to:\s*''\s*\}\)\)/, 'clicking the home brings the mic back');
+  assert.match(keys, /items\.find\(takesMic\)/, 'nothing marked: the first tile that can take it holds the mic');
+  assert.doesNotMatch(readSrc('renderer', 'map.html'), /micHome/, 'the mic is picked up from a tile, never from a corner button');
   const takes = extractFunctionBody(map, 'function takesMic(item)');
   assert.match(takes, /registered === false/, 'an unregistered friend cannot take it');
   // The widget's own mic and keyboard follow mic_to.
