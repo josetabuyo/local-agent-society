@@ -156,3 +156,44 @@
 .map-tools button.active { background: var(--map-tint); box-shadow: inset 0 0 0 1px var(--map-border); }
 .segmented.hidden { visibility: hidden; }
 .archive-row .archive-name { font-weight: 600; margin-right: 8px; }
+
+/* ── the mic (map.js placeMic): a 🎤 badge on the corner of the mini widget it
+ * talks to, dragged onto another one to move it; its home in the tools pill. */
+.mic-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(200, 40, 40, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  cursor: grab;
+  touch-action: none;
+}
+.map-row { position: relative; }
+.map-row .mic-badge, .society-row .mic-badge { position: static; flex: none; margin-left: 4px; }
+.mic-badge.mic-lifted { opacity: 0.35; }
+.mic-ghost {
+  position: fixed;
+  z-index: 100;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: rgba(200, 40, 40, 0.95);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 22px;
+  text-align: center;
+  pointer-events: none;
+}
+.mic-drop-ok { outline: 2px solid rgba(200, 40, 40, 0.95); outline-offset: 1px; }
+.mic-home { cursor: grab; touch-action: none; }
+/* Away: some tile holds the mic — the home is dim; at home it is lit. */
+.mic-home.away { opacity: 0.45; }
+.mic-home:not(.away) { background: rgba(200, 40, 40, 0.85); opacity: 1; }

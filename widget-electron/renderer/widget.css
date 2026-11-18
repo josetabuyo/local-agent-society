@@ -1079,3 +1079,8 @@ html, body {
   cursor: pointer;
 }
 .las-confirm-ok { background: rgba(200, 40, 40, 0.75) !important; color: #fff !important; font-weight: 700; }
+
+/* ⚙ → All widgets → Archived agents (widget.js loadArchivedAgents). */
+.settings-note { opacity: 0.7; font-size: 11px; }
+.archived-agents { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 4px; }
+.archived-agents:empty { display: none; }

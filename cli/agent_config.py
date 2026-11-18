@@ -12,6 +12,7 @@ router, is the agent's own business, so it is declared here, in its file:
     "sessions": {
       "target": "default" | "all" | "<runtime>" | "<sid>",
       "cc_default": false,
+      "mic_to": "",
       "runtimes": {
         "shell": {"intelligent": false, "accepts": ["command"], "scope": "..."},
         ...
@@ -26,6 +27,11 @@ router, is the agent's own business, so it is declared here, in its file:
   session, also hand the default (usually the intelligent one) a
   for-the-record copy (`kind: "cc"`), so it keeps track of what the human
   told the shell.
+- `mic_to` — the widget mic (and its keyboard) only: "" = this agent, routed
+  by `target` above; a friend's name = every dictation goes to that friend,
+  whose own `target` picks its terminal. Plain sends from other agents never
+  follow it — it moves the human's microphone, not the agent's inbox. Set by
+  dropping the map's 🎤 badge on a friend's mini widget.
 - `runtimes` — one descriptor per runtime kind: whether it understands
   natural language, which message kinds it accepts, and a one-line scope a
   router can match on — the same idea as the agent's own scope ladder
@@ -61,7 +67,7 @@ DEFAULT_RUNTIMES = {
 
 
 def default_sessions_config() -> dict:
-    return {"target": TARGET_DEFAULT, "cc_default": False, "runtimes": copy.deepcopy(DEFAULT_RUNTIMES)}
+    return {"target": TARGET_DEFAULT, "cc_default": False, "mic_to": "", "runtimes": copy.deepcopy(DEFAULT_RUNTIMES)}
 
 
 def _dict(value) -> dict:
@@ -78,6 +84,8 @@ def sessions_config(config: dict | None) -> dict:
     if isinstance(declared.get("target"), str) and declared["target"]:
         merged["target"] = declared["target"]
     merged["cc_default"] = bool(declared.get("cc_default", False))
+    if isinstance(declared.get("mic_to"), str):
+        merged["mic_to"] = declared["mic_to"].strip()
     for runtime, descriptor in _dict(declared.get("runtimes")).items():
         if isinstance(descriptor, dict):
             merged["runtimes"][runtime] = {**merged["runtimes"].get(runtime, {}), **descriptor}

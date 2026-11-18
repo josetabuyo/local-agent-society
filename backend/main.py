@@ -863,6 +863,8 @@ def patch_agent_config(name: str, patch: dict):
     sessions = patch.get("sessions")
     if sessions is not None and (not isinstance(sessions, dict) or ("target" in sessions and not (isinstance(sessions["target"], str) and sessions["target"]))):
         raise HTTPException(status_code=422, detail="sessions.target must be a non-empty string: default, all, a runtime or a session id")
+    if isinstance(sessions, dict) and "mic_to" in sessions and not isinstance(sessions["mic_to"], str):
+        raise HTTPException(status_code=422, detail="sessions.mic_to must be a string: \"\" (this agent) or a friend's name")
     with _sessions_lock:
         try:
             current = read_agent_config(file, strict=True)
@@ -1466,7 +1468,8 @@ def _sessions_view(name: str, sessions: dict) -> dict:
     policy = sessions_config(_agent_config(name))
     ordered = sorted(sessions.values(), key=lambda s: s.get("lastActiveAt", 0), reverse=True)
     rows = [{**s, **descriptor_for(policy, s.get("runtime", "")), "default": s["sid"] == default} for s in ordered]
-    return {"agent": name, "default": default, "target": policy["target"], "cc_default": policy["cc_default"], "sessions": rows}
+    return {"agent": name, "default": default, "target": policy["target"], "cc_default": policy["cc_default"],
+            "mic_to": policy.get("mic_to", ""), "sessions": rows}
 
 
 @app.get("/agents/{name}/sessions")

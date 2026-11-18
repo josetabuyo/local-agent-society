@@ -9,7 +9,14 @@
  * Every tile also has a ✕: a terminal or command closes, a friend's widget
  * closes, a repo or URL leaves the map — straight away in dangerous mode, after
  * a popup in safe mode (security_mode, `las agent security`). Elements are added
- * with `las map add`. Canvas/List is the only display choice.
+ * with `las map add`. Canvas/List is the only display choice; Archive, next to
+ * them, lists what this agent put away (the society's archived agents live
+ * in ⚙ → All widgets).
+ *
+ * The 🎤 badge sits on the corner of the mini widget the agent's mic talks to
+ * (its `sessions.target`, or `sessions.mic_to` when it is a friend). Drag it
+ * onto another session or friend to move the mic there; the 🎤 in the tools
+ * pill is its home: click it, and the mic is this agent's again.
  */
 (function () {
   const M = window.LasMap;
@@ -59,6 +66,8 @@
   const positions = store.get(POS_KEY, {});
   const saveView = () => store.set(VIEW_KEY, view);
   let items = [];
+  // Where the mic is: {target, mic_to} from the agent's sessions view.
+  let mic = { target: 'default', mic_to: '' };
 
   // ── data ────────────────────────────────────────────────────────────────
   async function refresh() {
@@ -80,9 +89,12 @@
       elements: (map && map.elements) || [],
       colorOf: (n) => (n === agentName ? ownColor : colors[n]),
     });
+    const nextMic = sessions && typeof sessions.target === 'string'
+      ? { target: sessions.target, mic_to: sessions.mic_to || '' } : mic;
     // Redraw only when something changed: a redraw mid-drag would drop the tile.
-    if (JSON.stringify(next) === JSON.stringify(items)) return;
+    if (JSON.stringify(next) === JSON.stringify(items) && JSON.stringify(nextMic) === JSON.stringify(mic)) return;
     items = next;
+    mic = nextMic;
     render();
   }
 
@@ -158,17 +170,16 @@
   let archive = [];
   let archivedAgents = [];
 
+  /** This agent's own archive only — archived agents (the society's) are in ⚙ → All widgets. */
   async function refreshArchive() {
     const res = await window.las.getArchive(agentName).catch(() => null);
-    const agents = await window.las.getArchivedAgents().catch(() => []);
-    const next = [...((res && res.archive) || []), ...(agents || []).map((a) => ({ type: 'agent', id: `agent:${a.name}`, label: a.name }))];
+    const next = (res && res.archive) || [];
     if (JSON.stringify(next) === JSON.stringify(archive)) return false;
     archive = next;
     return true;
   }
 
   function archiveDetail(entry) {
-    if (entry.type === 'agent') return 'archived agent — its widget is closed';
     if (entry.type === 'friend') return entry.registered ? 'friend' : 'friend · not registered';
     if (entry.type === 'repo') return entry.github || entry.abs_path || 'repo';
     return entry.url || 'url';
@@ -177,16 +188,14 @@
   function archiveRow(entry) {
     const row = el('div', 'open-row society-row archive-row');
     const label = el('span', 'open-label society-label');
-    const icon = { agent: '\u{1F916}', friend: '\u{1F464}', repo: '\u{1F4C1}', url: '\u{1F517}' }[entry.type] || '•';
+    const icon = { friend: '\u{1F464}', repo: '\u{1F4C1}', url: '\u{1F517}' }[entry.type] || '•';
     label.append(el('span', 'archive-name', `${icon} ${entry.label}`), el('span', 'society-detail', archiveDetail(entry)));
     row.appendChild(label);
     const restore = el('button', 'open-move', '↩');
     restore.type = 'button';
-    restore.title = entry.type === 'agent' ? `Bring ${entry.label} back — its widget opens again`
-      : entry.type === 'friend' ? `Bring ${entry.label} back among the friends` : 'Put it back on the map';
+    restore.title = entry.type === 'friend' ? `Bring ${entry.label} back among the friends` : 'Put it back on the map';
     restore.addEventListener('click', async () => {
-      if (entry.type === 'agent') await window.las.unarchiveAgent(entry.label);
-      else await window.las.restoreArchiveEntry(agentName, entry.id);
+      await window.las.restoreArchiveEntry(agentName, entry.id);
       await refreshArchive();
       render();
       refresh();
@@ -203,9 +212,7 @@
       await refreshArchive();
       render();
     }));
-    // An archived agent is never forgotten from here: it is a whole agent, not an entry.
-    if (entry.type === 'agent') row.append(restore);
-    else row.append(restore, forget);
+    row.append(restore, forget);
     return row;
   }
 
@@ -231,9 +238,11 @@
     host.className = `map-body layout-${view.archive ? 'list' : view.layout}`;
     const box = el('div', 'map-board');
     host.append(box);
-    $('archiveBtn').classList.toggle('active', !!view.archive);
-    $('layoutSeg').classList.toggle('hidden', !!view.archive);
+    for (const b of $('layoutSeg').querySelectorAll('button')) {
+      b.classList.toggle('active', view.archive ? b.dataset.value === 'archive' : b.dataset.value === view.layout);
+    }
     if (view.archive) {
+      placeMic();
       // The archive is a list, for now: what was put away, ↩ back, ✕ for good.
       for (const entry of archive) box.append(archiveRow(entry));
       if (!archive.length) box.append(el('div', 'society-empty map-list-empty', 'The archive is empty — 🗄 on a friend, repo or link puts it here'));
@@ -246,23 +255,137 @@
     } else {
       V.renderPanel(box, items, positions, handlers, { empty });
     }
-    for (const b of $('layoutSeg').querySelectorAll('button')) b.classList.toggle('active', b.dataset.value === view.layout);
+    placeMic();
   }
 
-  $('layoutSeg').addEventListener('click', (e) => {
+  // ── the mic: a 🎤 badge on the mini widget it talks to, dragged to move it ──
+  const MIC_TAKERS = new Set(['terminal', 'command', 'friend']);
+
+  /** Can the mic be dropped on this item? A session, or a friend that can be reached. */
+  function takesMic(item) {
+    return !!item && MIC_TAKERS.has(item.kind) && !(item.kind === 'friend' && item.registered === false);
+  }
+
+  /** The keys of the tiles that hold the mic now (several when it talks to all sessions). */
+  function micKeys() {
+    if (mic.mic_to) return items.filter((i) => i.kind === 'friend' && i.agent === mic.mic_to).map((i) => i.key);
+    const sessions = items.filter((i) => i.kind === 'terminal' || i.kind === 'command');
+    if (mic.target === 'all') return sessions.map((i) => i.key);
+    // Sessions come most-recently-used first: a runtime name means the first of that runtime.
+    const picked = mic.target === 'default' ? null
+      : sessions.find((i) => i.sid === mic.target) || sessions.find((i) => i.runtime === mic.target);
+    // Not connected (or default): the backend falls back to the last-used session.
+    const holder = picked || sessions.find((i) => i.isDefault);
+    return holder ? [holder.key] : [];
+  }
+
+  function micWhere() {
+    if (mic.mic_to) return `${mic.mic_to} (its own target picks the terminal)`;
+    if (mic.target === 'default') return `${agentName}'s last-used session`;
+    if (mic.target === 'all') return `every session of ${agentName}`;
+    return `${agentName} · ${mic.target}`;
+  }
+
+  /** Put the 🎤 badge on its tile(s) (or row(s)); the home button lights up when no tile shows it. */
+  function placeMic() {
+    const host = $('map');
+    for (const old of host.querySelectorAll('.mic-badge')) old.remove();
+    const keys = view.archive ? [] : micKeys();
+    let shown = 0;
+    for (const key of keys) {
+      const target = [...host.querySelectorAll('[data-key]')].find((e) => e.dataset.key === key);
+      if (!target) continue;
+      const badge = el('span', 'mic-badge', '🎤');
+      badge.title = `The mic talks here — drag it onto another terminal or friend to move it`;
+      startMicDrag(badge);
+      target.appendChild(badge);
+      shown += 1;
+    }
+    const home = $('micHome');
+    home.classList.toggle('away', shown > 0);
+    home.title = `Mic: ${micWhere()}.\nDrag 🎤 onto a terminal or a friend to send the mic there; click to bring it back to ${agentName}`;
+  }
+
+  async function moveMic(patch) {
+    const res = await window.las.setSessionsConfig(agentName, patch);
+    if (res && res.sessions) mic = { target: res.sessions.target, mic_to: res.sessions.mic_to || '' };
+    render();
+  }
+
+  /** The mic dropped on `item`: a friend → that friend; a session → this agent, that session. */
+  function dropMicOn(item) {
+    if (item.kind === 'friend') return moveMic({ mic_to: item.agent });
+    // One session of its runtime: aim at the runtime (survives that terminal reopening); several: that very one.
+    const sameRuntime = items.filter((i) => (i.kind === 'terminal' || i.kind === 'command') && i.runtime === item.runtime);
+    return moveMic({ target: sameRuntime.length === 1 ? item.runtime : item.sid, mic_to: '' });
+  }
+
+  function itemAt(x, y) {
+    const hit = document.elementFromPoint(x, y);
+    const host = hit && hit.closest('#map [data-key]');
+    return host ? items.find((i) => i.key === host.dataset.key) || null : null;
+  }
+
+  /** Press on a 🎤 (a badge, or the home button) and drag it: it follows the pointer, a tile that takes it lights up. */
+  function startMicDrag(source, onClick) {
+    source.addEventListener('dblclick', (e) => e.stopPropagation());
+    source.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      const start = { x: e.clientX, y: e.clientY };
+      let ghost = null;
+      let lit = null;
+      const light = (node) => {
+        if (lit === node) return;
+        if (lit) lit.classList.remove('mic-drop-ok');
+        lit = node;
+        if (lit) lit.classList.add('mic-drop-ok');
+      };
+      const move = (ev) => {
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 3) return;
+          ghost = el('div', 'mic-ghost', '🎤');
+          document.body.appendChild(ghost);
+          source.classList.add('mic-lifted');
+        }
+        ghost.style.left = `${ev.clientX}px`;
+        ghost.style.top = `${ev.clientY}px`;
+        ghost.style.display = 'none';
+        const item = itemAt(ev.clientX, ev.clientY);
+        ghost.style.display = '';
+        const node = item && takesMic(item) ? [...$('map').querySelectorAll('[data-key]')].find((n) => n.dataset.key === item.key) : null;
+        light(node || null);
+      };
+      const up = (ev) => {
+        document.removeEventListener('pointermove', move, true);
+        document.removeEventListener('pointerup', up, true);
+        light(null);
+        source.classList.remove('mic-lifted');
+        if (!ghost) {
+          if (onClick) onClick();
+          return;
+        }
+        ghost.remove();
+        const item = itemAt(ev.clientX, ev.clientY);
+        if (takesMic(item)) dropMicOn(item);
+      };
+      document.addEventListener('pointermove', move, true);
+      document.addEventListener('pointerup', up, true);
+    });
+  }
+  startMicDrag($('micHome'), () => moveMic({ target: 'default', mic_to: '' }));
+
+  $('layoutSeg').addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    view.layout = b.dataset.value;
-    saveView();
-    render();
-  });
-  $('closeBtn').addEventListener('click', () => window.close());
-  $('archiveBtn').addEventListener('click', async () => {
-    view.archive = !view.archive;
+    view.archive = b.dataset.value === 'archive';
+    if (!view.archive) view.layout = b.dataset.value;
     saveView();
     if (view.archive) await refreshArchive();
     render();
   });
+  $('closeBtn').addEventListener('click', () => window.close());
 
   /**
    * 🙏 — ask every Claude/Codex session what it is working on (backend

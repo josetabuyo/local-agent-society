@@ -647,6 +647,7 @@ function setSettingsOpen(open, fromDrawer = false) {
     loadSecurityMode();
     loadMainScreen();
     loadReplyOutput();
+    loadArchivedAgents();
     refreshSessions().then(() => {
       syncMicTargetSelect();
       fitWindowToDrawer();
@@ -672,6 +673,38 @@ async function persist(patch) {
   prefs = await window.las.setPrefs(agentName, patch);
   applyPrefsToDom();
   if (prefs.mute) stopCurrentSpeech();
+}
+
+// ── "All widgets" → Archived agents: the society's archive (las agent archive) ──
+// Whole agents put away; ↩ brings one back (off the archive, its widget opens
+// again). Nothing here forgets an agent — it is a whole agent, not an entry.
+// An agent's own archive (friends, repos, links) lives in its map: Archive.
+const archivedAgentsEl = document.getElementById('archivedAgents');
+const archivedAgentsCountEl = document.getElementById('archivedAgentsCount');
+
+async function loadArchivedAgents() {
+  const agents = (await window.las.getArchivedAgents().catch(() => [])) || [];
+  archivedAgentsCountEl.textContent = agents.length ? String(agents.length) : 'none';
+  archivedAgentsEl.replaceChildren(...agents.map((a) => {
+    const row = document.createElement('div');
+    row.className = 'open-row archived-agent-row';
+    const label = document.createElement('span');
+    label.className = 'open-label';
+    label.textContent = `\u{1F916} ${a.name}`;
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'open-move';
+    back.textContent = '↩';
+    back.title = `Bring ${a.name} back into the society — its widget opens again`;
+    back.addEventListener('click', async () => {
+      await window.las.unarchiveAgent(a.name);
+      await loadArchivedAgents();
+      fitWindowToDrawer();
+    });
+    row.append(label, back);
+    return row;
+  }));
+  fitWindowToDrawer();
 }
 
 // ── "All widgets" rows: the tile reconciler's heartbeat and shrink delay ──
@@ -763,7 +796,7 @@ expandWhenHiddenEl.addEventListener('change', () => {
 });
 speechBubblesEl.addEventListener('change', () => persist({ speechBubbles: speechBubblesEl.checked }));
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
-micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value }));
+micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value, mic_to: '' }));
 replyOutputEl.addEventListener('change', async () => {
   const view = await window.las.setReplyOutput(agentName, replyOutputEl.value);
   if (!view) window.las.log('warn', 'reply-output', `could not save reply_output ${replyOutputEl.value} — is the backend up?`);
@@ -1958,7 +1991,20 @@ function stopLiveTranscription() {
  */
 let micDestination = null;
 
-function sendDictation(destination, text) {
+/**
+ * The face mic's (and keyboard's) aim when nothing chose one: this agent —
+ * or, when the map's 🎤 badge was dropped on a friend, that friend
+ * (`sessions.mic_to`, re-read here so a drop in the map window counts at once).
+ */
+async function defaultDestination() {
+  await refreshSessions();
+  updateChildrenButton();
+  const friend = sessionsPolicy.mic_to;
+  return friend ? { to: friend, label: friend } : null;
+}
+
+async function sendDictation(destination, text) {
+  if (!destination) destination = await defaultDestination();
   if (!destination) return window.las.sendToSelf(agentName, text);
   window.las.log('info', 'mic', `dictation to ${destination.label}`);
   return window.las.sendHuman(destination.to, text, destination.session ? { session: destination.session } : null);
@@ -2201,7 +2247,8 @@ let childrenMenuOpen = false;
 let childrenLongPressTimer = null;
 let childrenLongPressFired = false;
 let knownSessions = [];
-let sessionsPolicy = { target: 'default', cc_default: false };
+// mic_to: "" = the mic talks to this agent (target picks the session); a friend's name = to that friend.
+let sessionsPolicy = { target: 'default', cc_default: false, mic_to: '' };
 
 function sessionLabel(s) {
   const brain = s.intelligent === false ? ' · commands only' : '';
@@ -2274,9 +2321,12 @@ function syncMicTargetSelect() {
 
 function updateChildrenButton() {
   const target = sessionsPolicy.target || 'default';
-  childrenEl.classList.toggle('active', target !== 'default');
+  const friend = sessionsPolicy.mic_to;
+  childrenEl.classList.toggle('active', target !== 'default' || !!friend);
   const cc = sessionsPolicy.cc_default ? ', cc to the last-used session' : '';
-  childrenEl.title = `Children: the mic talks to ${targetLabel(target)}${cc} — click or hold to choose`;
+  childrenEl.title = friend
+    ? `The mic talks to ${friend} (its own target picks the terminal) — click or hold to choose`
+    : `Children: the mic talks to ${targetLabel(target)}${cc} — click or hold to choose`;
 }
 
 /** Refresh the connected sessions AND the agent's target/cc choice (same backend view). */
@@ -2285,7 +2335,7 @@ async function refreshSessions() {
     const view = await window.las.getAgentSessions(agentName);
     knownSessions = Array.isArray(view && view.sessions) ? view.sessions : [];
     // target: null = the backend could not be asked; keep the last known choice.
-    if (view && typeof view.target === 'string') sessionsPolicy = { target: view.target, cc_default: !!view.cc_default };
+    if (view && typeof view.target === 'string') sessionsPolicy = { target: view.target, cc_default: !!view.cc_default, mic_to: view.mic_to || '' };
   } catch {
     knownSessions = [];
   }
@@ -2296,7 +2346,7 @@ async function refreshSessions() {
 async function setSessionsConfig(patch) {
   const view = await window.las.setSessionsConfig(agentName, patch);
   if (view && view.sessions && typeof view.sessions.target === 'string') {
-    sessionsPolicy = { target: view.sessions.target, cc_default: !!view.sessions.cc_default };
+    sessionsPolicy = { target: view.sessions.target, cc_default: !!view.sessions.cc_default, mic_to: view.sessions.mic_to || '' };
   } else {
     window.las.log('warn', 'children', `could not save sessions config ${JSON.stringify(patch)} — is the backend up?`);
   }
@@ -2524,7 +2574,7 @@ function renderSessionRows(body) {
   }
   for (const row of rows) {
     const el = document.createElement('div');
-    const isCurrent = rowMatches(row, current);
+    const isCurrent = !sessionsPolicy.mic_to && rowMatches(row, current);
     el.className = 'open-row' + (isCurrent ? ' default' : '');
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -2532,7 +2582,7 @@ function renderSessionRows(body) {
     btn.textContent = row.label;
     btn.title = (row.scope ? `${row.scope} — ` : '') + (isCurrent ? 'the mic talks here now' : 'send the mic here');
     btn.addEventListener('click', async () => {
-      await setSessionsConfig({ target: row.value });
+      await setSessionsConfig({ target: row.value, mic_to: '' });
       closeChildrenMenu();
     });
     el.appendChild(btn);

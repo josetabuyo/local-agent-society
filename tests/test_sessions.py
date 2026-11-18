@@ -146,6 +146,23 @@ def test_config_view_fills_sessions_defaults_and_patch_writes_the_file(app, tmp_
     assert client.patch("/agents/Robo/config", json={"name": "Other"}).status_code == 422
 
 
+def test_mic_to_moves_only_the_mic_never_a_plain_send(app, tmp_path):
+    """sessions.mic_to (the map's 🎤 dropped on a friend) is read by the widget; the backend only stores and shows it."""
+    main, client = app
+    _write_config(tmp_path, target="default")
+    assert client.get("/agents/Robo/sessions").json()["mic_to"] == ""
+    view = client.patch("/agents/Robo/config", json={"sessions": {"mic_to": "Vortexia"}}).json()
+    assert view["sessions"]["mic_to"] == "Vortexia" and view["sessions"]["target"] == "default"
+    assert client.get("/agents/Robo/sessions").json()["mic_to"] == "Vortexia"
+    assert client.patch("/agents/Robo/config", json={"sessions": {"mic_to": 3}}).status_code == 422
+    _register(client, "claude-1", "claude")
+    main.published.clear()
+    _send(client)
+    assert len(_inbox_publishes(main)) == 1, "a plain send to Robo still lands in Robo's own mailbox"
+    view = client.patch("/agents/Robo/config", json={"sessions": {"target": "claude", "mic_to": ""}}).json()
+    assert view["sessions"]["mic_to"] == "" and view["sessions"]["target"] == "claude"
+
+
 def test_sessions_view_carries_each_runtimes_descriptor_and_the_agents_target(app, tmp_path):
     main, client = app
     _write_config(tmp_path, target="all", cc_default=True, runtimes={"shell": {"scope": "deploys only"}})

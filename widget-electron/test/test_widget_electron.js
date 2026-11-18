@@ -1674,7 +1674,7 @@ test('the children button: click opens the map window; hold or right-click lists
   assert.match(readSrc('main.js'), /ipcMain\.handle\('map:open', \(_event, name\) => openMapWindow\(name\)\)/);
   assert.match(extractFunctionBody(src, 'function renderChildrenMenu()'), /renderSessionRows\(body\)/);
   const render = extractFunctionBody(src, 'function renderSessionRows(body)');
-  assert.match(render, /setSessionsConfig\(\{\s*target:\s*row\.value\s*\}\)/);
+  assert.match(render, /setSessionsConfig\(\{\s*target:\s*row\.value,\s*mic_to:\s*''\s*\}\)/, 'choosing a session brings the mic home from a friend');
   assert.match(render, /targetRows\(\)/);
   const rows = extractFunctionBody(src, 'function targetRows()');
   assert.match(rows, /value: 'default'/);
@@ -1701,7 +1701,7 @@ test('the settings panel offers the same choice (Dictation goes to + Copy last-u
   assert.match(html, /id="childrenMenu"/);
   assert.doesNotMatch(html, /id="micMenu"/);
   const src = readSrc('renderer', 'widget.js');
-  assert.match(src, /micTargetEl\.addEventListener\('change',\s*\(\)\s*=>\s*setSessionsConfig\(\{\s*target:\s*micTargetEl\.value\s*\}\)\)/);
+  assert.match(src, /micTargetEl\.addEventListener\('change',\s*\(\)\s*=>\s*setSessionsConfig\(\{\s*target:\s*micTargetEl\.value,\s*mic_to:\s*''\s*\}\)\)/);
   assert.match(src, /ccDefaultEl\.addEventListener\('change',\s*\(\)\s*=>\s*setSessionsConfig\(\{\s*cc_default:\s*ccDefaultEl\.checked\s*\}\)\)/);
 });
 
@@ -2069,10 +2069,46 @@ test('main.js archives a whole agent from its ⤓, and ↩ from the map brings i
   assert.match(back, /openWidget\(name\)/, 'and the widget opens again');
   const pre = readSrc('preload.js');
   for (const k of ['archiveAgent', 'getArchivedAgents', 'unarchiveAgent']) assert.match(pre, new RegExp(`${k}:`));
+  // The society's archive lives in ⚙ → All widgets (no ✕ forget there); the map's Archive is the agent's own.
   const map = readSrc('renderer', 'map.js');
-  assert.match(map, /window\.las\.getArchivedAgents\(\)/, 'the map archive lists archived agents');
-  assert.match(map, /if \(entry\.type === 'agent'\) await window\.las\.unarchiveAgent\(entry\.label\)/);
-  assert.match(map, /if \(entry\.type === 'agent'\) row\.append\(restore\);/, 'an archived agent has no ✕ forget');
+  assert.doesNotMatch(map, /getArchivedAgents/, "the map's Archive lists only this agent's own archive");
+  const widget = readSrc('renderer', 'widget.js');
+  const load = extractFunctionBody(widget, 'async function loadArchivedAgents()');
+  assert.match(load, /window\.las\.getArchivedAgents\(\)/);
+  assert.match(load, /window\.las\.unarchiveAgent\(a\.name\)/);
+  assert.doesNotMatch(load, /forget|✕/, 'an archived agent is never forgotten from here');
+  const html = readSrc('renderer', 'index.html');
+  assert.ok(html.indexOf('id="archivedAgents"') > html.indexOf('All widgets'), 'Archived agents sits under All widgets');
+});
+
+test('map: Archive is a third choice next to Canvas/List, not a button in the tools pill', () => {
+  const html = readSrc('renderer', 'map.html');
+  const seg = html.slice(html.indexOf('id="layoutSeg"'), html.indexOf('</div>', html.indexOf('id="layoutSeg"')));
+  assert.match(seg, /data-value="canvas"/);
+  assert.match(seg, /data-value="list"/);
+  assert.match(seg, /id="archiveBtn"[^>]*data-value="archive"[^>]*>Archive</);
+  const tools = html.slice(html.indexOf('id="toolsPill"'), html.indexOf('</div>', html.indexOf('id="toolsPill"')));
+  assert.doesNotMatch(tools, /archiveBtn|🗄/);
+});
+
+test('map: the 🎤 badge sits on the tile the mic talks to; dropping it moves sessions.target or sessions.mic_to', () => {
+  const map = readSrc('renderer', 'map.js');
+  const keys = extractFunctionBody(map, 'function micKeys()');
+  assert.match(keys, /mic\.mic_to/, 'a friend holds it when mic_to names it');
+  assert.match(keys, /isDefault/, 'an unconnected or default target falls back to the last-used session');
+  const drop = extractFunctionBody(map, 'function dropMicOn(item)');
+  assert.match(drop, /moveMic\(\{\s*mic_to:\s*item\.agent\s*\}\)/);
+  assert.match(drop, /moveMic\(\{\s*target:[^}]*mic_to:\s*''\s*\}\)/);
+  assert.match(map, /window\.las\.setSessionsConfig\(agentName,\s*patch\)/);
+  assert.match(map, /startMicDrag\(\$\('micHome'\),\s*\(\)\s*=>\s*moveMic\(\{\s*target:\s*'default',\s*mic_to:\s*''\s*\}\)\)/, 'clicking the home brings the mic back');
+  const takes = extractFunctionBody(map, 'function takesMic(item)');
+  assert.match(takes, /registered === false/, 'an unregistered friend cannot take it');
+  // The widget's own mic and keyboard follow mic_to.
+  const widget = readSrc('renderer', 'widget.js');
+  const dest = extractFunctionBody(widget, 'async function defaultDestination()');
+  assert.match(dest, /await refreshSessions\(\)/, 're-read, so a drop in the map window counts at once');
+  assert.match(dest, /sessionsPolicy\.mic_to/);
+  assert.match(extractFunctionBody(widget, 'async function sendDictation(destination, text)'), /await defaultDestination\(\)/);
 });
 
 test('settings: Voice output (reply_output) — Auto names where it goes now, Mac or a phone pin it', () => {

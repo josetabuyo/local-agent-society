@@ -368,8 +368,13 @@ its button bar:
 - 🚪 close it.
 
 The ✕ in a tile's corner closes it too, and on a repo/URL takes it off the map.
-Canvas/List sits at the board's top right. Holding 👥, or a right-click on it,
-opens the drawer's list, where the mic's target and friend links are chosen.
+Canvas/List/Archive sits at the board's top right. A 🎤 badge sits on the
+corner of the tile the mic talks to: drag it onto another session or friend
+to move the mic there (`sessions.mic_to` = a friend, whose own target then
+picks the terminal; a session sets `sessions.target`). The 🎤 in the tools
+pill is the mic's home: click it and the mic is the agent's own again.
+Holding 👥, or a right-click on it, opens the drawer's list, where the mic's
+target and friend links are also chosen.
 Endpoints: `GET/PUT/DELETE /agents/{name}/friends[/{friend}]`,
 `GET/POST/DELETE /agents/{name}/map`.
 
@@ -380,8 +385,8 @@ hand, one step from coming back. Two levels:
 
 - **An element of an agent's map** — a friend, a repo, a URL. 🗄 in its tile's
   button bar moves it to that agent's archive (`archive` in its `.las-agent.json`;
-  a friend leaves `friends`, an element leaves `map`). 🗄 in the map's tools pill
-  (top left, next to 🙏) lists the archive: ↩ puts it back, ✕ forgets it **for
+  a friend leaves `friends`, an element leaves `map`). Archive, next to
+  Canvas/List at the map's top right, lists the archive: ↩ puts it back, ✕ forgets it **for
   good** — always after a warning popup, whatever the security mode. Forgetting
   a friend only unlinks it: the agent itself, its folder and its repo are never
   touched. Terminals are not archived (a terminal is closed).
@@ -390,8 +395,9 @@ hand, one step from coming back. Two levels:
   hang from the nearest live ancestor; its widget is marked inactive. Nothing of
   the agent or its folder is deleted. `las agent unarchive NAME` brings it back
   (`las widget NAME` reopens its widget). In the widget, the ⤓ button (top-left,
-  where the 🚪 used to be) does the same for its own agent, and the map's 🗄
-  lists archived agents with ↩ (back, widget reopened) — no ✕ for them.
+  where the 🚪 used to be) does the same for its own agent, and ⚙ → All
+  widgets → Archived agents lists them with ↩ (back, widget reopened) — no ✕
+  for them.
 
 **Not on the main screen** is lighter than archiving: `las agent main-screen
 hide --agent NAME` (`"main_screen": false`) keeps the agent fully alive but off

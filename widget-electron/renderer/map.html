@@ -26,11 +26,13 @@
       <!-- Board actions, top left: a pill like Canvas/List, room for more buttons. -->
       <div class="segmented map-tools" id="toolsPill">
         <button id="describeBtn" type="button" title="Ask every terminal what it is working on — its description shows on its mini widget">🙏</button>
-        <button id="archiveBtn" type="button" title="Archive — what this agent put away: ↩ brings it back, ✕ forgets it for good">🗄</button>
+        <!-- The mic's home: drag it onto a mini widget (like the 🎤 badge on the tile that has it); click brings it back to this agent. -->
+        <button id="micHome" class="mic-home" type="button">🎤</button>
       </div>
       <div class="segmented map-layout" id="layoutSeg" title="Layout">
         <button type="button" data-value="canvas">Canvas</button>
         <button type="button" data-value="list">List</button>
+        <button id="archiveBtn" type="button" data-value="archive" title="Archive — what this agent put away (friends, repos, links): ↩ brings it back, ✕ forgets it for good">Archive</button>
       </div>
     </div>
   </div>
