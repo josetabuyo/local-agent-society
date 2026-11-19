@@ -368,6 +368,16 @@ its button bar:
 - 🚪 close it.
 
 The ✕ in a tile's corner closes it too, and on a repo/URL takes it off the map.
+On a friend the ✕ always asks, in a popup: close its widget, archive it in this
+agent (its Archive, ↩ back), remove it from friends (when it is off the main
+screen and nobody else's friend it goes to the society's archive too, or it
+would show nowhere), or delete it (unregistered; its folder stays).
+
+`las map global` (from any folder, agent or not) opens the **global panel**:
+every agent of the Mac as mini widgets, parents before subordinates, ⚠ on the
+ones shown nowhere; its Archive is the society's archived agents (↩ back, ✕
+delete) and its ⚙ holds the settings every widget shares (heartbeat, shrink
+delay, updates, phones). A widget's ⚙ → All widgets only links to it.
 Canvas/List/Archive sits at the board's top right. A 🎤 badge sits on the
 corner of the tile the mic talks to — always exactly one (the target, else
 the last-used session, else the first tile that takes dictation): drag it

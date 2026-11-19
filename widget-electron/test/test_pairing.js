@@ -87,7 +87,8 @@ test('main.js routes the pairing topics before device-audio and ships the Phones
   assert.ok(pkg.build.files.includes('pairing-preload.js'));
   assert.ok(pkg.dependencies.qrcode);
   for (const f of ['renderer/pairing.html', 'renderer/pairing.js', 'pairing-preload.js']) assert.ok(fs.existsSync(path.join(root, f)), f);
-  assert.match(fs.readFileSync(path.join(root, 'renderer', 'index.html'), 'utf8'), /id="pairingOpen"/);
+  // Phones are app-wide: the global panel's ⚙ (`las map global`), not each widget.
+  assert.match(fs.readFileSync(path.join(root, 'renderer', 'global.html'), 'utf8'), /id="pairingOpen"/);
 });
 
 test('the QR carries a trimmed URI: no relays, at most two LAN addresses, IPs first', () => {

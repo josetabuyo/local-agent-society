@@ -269,6 +269,11 @@ function handleProtocolUrl(rawUrl) {
     reloadWidgets(name || null);
     return;
   }
+  // `las map global` — every agent of the Mac; no agent behind it.
+  if (action === 'global') {
+    openGlobalMapWindow();
+    return;
+  }
   if (!name) return;
 
   if (action === 'map') {
@@ -1933,6 +1938,63 @@ function openMapWindow(name) {
 
 ipcMain.handle('map:open', (_event, name) => openMapWindow(name));
 
+// ── the global panel (`las map global`): every agent of the Mac, the society's
+// archive and the settings shared by every widget — one window, no agent behind it.
+let globalMapWindow = null;
+
+function openGlobalMapWindow() {
+  if (globalMapWindow && !globalMapWindow.isDestroyed()) globalMapWindow.destroy();
+  const win = new BrowserWindow({
+    width: 640,
+    height: 480,
+    minWidth: 300,
+    minHeight: 220,
+    title: 'All agents',
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: true,
+    webPreferences: { preload: WIDGET_SOURCES.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
+  });
+  win.isMap = true;
+  win.isGlobalMap = true;
+  globalMapWindow = win;
+  win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'global.html'));
+  win.webContents.on('console-message', (_event, _level, message) => console.log('[global-map]', message));
+  win.on('closed', () => { if (globalMapWindow === win) globalMapWindow = null; });
+  log.info('map', 'global: open');
+}
+
+ipcMain.handle('map:open-global', () => openGlobalMapWindow());
+
+/** The whole society as one tree (GET /society/tree): {env, agents: [nested nodes], archived: [...]}, or null. */
+ipcMain.handle('society:tree', async () => {
+  try {
+    const res = await fetch(`${REGISTRY_URL}/society/tree`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+});
+
+/** ✕ → Delete: close the agent's widget and unregister it. Its folder and files are not touched. */
+ipcMain.handle('agent:delete', async (_event, name) => {
+  try {
+    const win = windows.get(name);
+    if (win && !win.isDestroyed()) win.destroy();
+    const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) {
+      log.error('agents', `delete ${name} failed: HTTP ${res.status}`);
+      return null;
+    }
+    log.info('agents', `${name}: unregistered (its folder stays)`);
+    return { ok: true };
+  } catch (err) {
+    log.error('agents', `delete ${name} failed: ${err && err.message ? err.message : err}`);
+    return null;
+  }
+});
+
 ipcMain.handle('agent:map', async (_event, name) => {
   try {
     const res = await fetch(`${REGISTRY_URL}/agents/${encodeURIComponent(name)}/map`);
@@ -2158,7 +2220,8 @@ ipcMain.handle('agent:archive-agent', async (event, name) => {
     }
     log.info('archive', `${name}: archived the whole agent`);
     const sender = BrowserWindow.fromWebContents(event.sender);
-    const win = windows.get(name) || (sender && !sender.isPopup ? sender : null);
+    // The agent's own widget; or the sender when it is that widget's popup-less self — never a map window.
+    const win = windows.get(name) || (sender && !sender.isPopup && !sender.isMap ? sender : null);
     if (win && !win.isDestroyed()) win.destroy();
     return json;
   } catch (err) {

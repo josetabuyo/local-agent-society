@@ -131,3 +131,12 @@ def test_reply_output_pins_where_the_voice_comes_out(app, monkeypatch):
     assert client.get("/agents/Nobody/reply-output").status_code == 404
     tree = {a["name"]: a for a in client.get("/device/society/tree").json()["agents"]}
     assert tree["Alpha"]["voice_output"] == {"mode": "auto", "effective": "jose-iphone"}, "the tree carries it: no extra poll"
+
+
+def test_deleting_an_archived_agent_takes_it_off_the_archive_too(app, monkeypatch):
+    main, client, tmp = app
+    monkeypatch.setattr(main, "ARCHIVED_AGENTS_FILE", tmp / "archived-agents.json")
+    assert client.post("/agents/Alpha/archived").status_code == 200
+    assert client.delete("/agents/Alpha").status_code == 200
+    assert client.get("/agents/archived").json()["archived"] == []
+    assert (tmp / "alpha" / ".las-agent.json").exists(), "its folder is not touched"

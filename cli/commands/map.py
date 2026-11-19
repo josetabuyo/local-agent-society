@@ -44,6 +44,7 @@ def map_group(ctx, name):
     \b
       las map                                   # open the map window of the agent in the cwd
       las map open Pulpo                        # someone else's
+      las map global                            # every agent of this Mac — from any folder
       las map list                              # the added elements, in the terminal
       las map add repo .                        # this git folder
       las map add repo ~/Development/pulpo --label Pulpo
@@ -72,6 +73,14 @@ def _open(name: str) -> None:
 def map_open(ctx, name):
     """Open the map window (closes and reopens it on the current Space)."""
     _open(resolve_agent_name(name or (ctx.obj or {}).get("agent")))
+
+
+@map_group.command("global")
+def map_global():
+    """Open the global panel: every agent of this Mac, the society's archive and the
+    settings shared by every widget. Works from any folder, agent or not."""
+    subprocess.run(["open", "localagentsociety://society?action=global"], check=False)
+    click.echo("Global panel opened — every agent of this Mac.")
 
 
 @map_group.command("list")

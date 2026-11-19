@@ -161,6 +161,15 @@ not planned: probably never.
 
 José, 2026-11-10: in `dangerous`, deletions ask and nothing else does. Creating and adding never ask.
 
+## The ✕ on an agent and the global panel (José, 2026-11-19)
+
+Closing a friend on a map never deletes it by surprise: its ✕ opens a popup
+with the choices — close its widget, archive it in this agent, remove it from
+friends, delete it. Removing a friend that is off the main screen and linked
+by nobody else also archives it in the society, so no agent is left shown
+nowhere. `las map global` opens one panel with every agent of the Mac, the
+society's archive and the app-wide settings; each widget's ⚙ only links to it.
+
 ## Open questions (José)
 
 None right now.

@@ -300,13 +300,13 @@
   }
 
   /** Ask `question` in a popup; resolves true (Accept) or false (Cancel, Esc, a click outside). */
-  function confirmPopup(question, { okLabel = 'Accept', cancelLabel = 'Cancel' } = {}) {
+  function confirmPopup(question, { okLabel = 'Accept', cancelLabel = 'Cancel', title = '\u{1F6E1}\uFE0F Safe mode' } = {}) {
     closeConfirm();
     return new Promise((resolve) => {
       const veil = el('div', 'las-confirm-veil');
       const box = el('div', 'las-confirm');
       box.setAttribute('role', 'alertdialog');
-      box.append(el('div', 'las-confirm-title', '\u{1F6E1}\uFE0F Safe mode'), el('div', 'las-confirm-text', question));
+      box.append(el('div', 'las-confirm-title', title), el('div', 'las-confirm-text', question));
       const row = el('div', 'las-confirm-buttons');
       const cancel = el('button', 'las-confirm-cancel', cancelLabel);
       const ok = el('button', 'las-confirm-ok', okLabel);
@@ -335,5 +335,67 @@
     return action();
   }
 
-  root.LasSocietyViews = { chip, miniWidget, listRow, renderPanel, closeTilePopup, confirmPopup, guarded };
+  /**
+   * Offer `choices` ([{id, label, detail, danger?}], society-model closeChoices)
+   * in a popup; resolves the chosen id, or null (Cancel, Esc, a click outside).
+   */
+  function choicePopup(title, choices) {
+    closeConfirm();
+    return new Promise((resolve) => {
+      const veil = el('div', 'las-confirm-veil');
+      const box = el('div', 'las-confirm las-choice');
+      box.setAttribute('role', 'dialog');
+      box.appendChild(el('div', 'las-confirm-title', title));
+      const done = (answer) => { closeConfirm(); resolve(answer); };
+      for (const c of choices) {
+        const b = el('button', `las-choice-option${c.danger ? ' danger' : ''}`);
+        b.type = 'button';
+        b.append(el('span', 'las-choice-label', c.label), el('span', 'las-choice-detail', c.detail || ''));
+        b.addEventListener('click', () => done(c.id));
+        box.appendChild(b);
+      }
+      const row = el('div', 'las-confirm-buttons');
+      const cancel = el('button', 'las-confirm-cancel', 'Cancel');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => done(null));
+      row.appendChild(cancel);
+      box.appendChild(row);
+      veil.appendChild(box);
+      veil.addEventListener('pointerdown', (e) => { if (e.target === veil) done(null); });
+      veil.onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); done(null); } };
+      document.addEventListener('keydown', veil.onKey, true);
+      confirmEl = veil;
+      document.body.appendChild(veil);
+      cancel.focus();
+    });
+  }
+
+  /**
+   * The ✕ on a friend (owner = the agent whose panel it is) or on an agent of
+   * the global panel (owner = null): ask what to do, then do it. Deleting
+   * always asks once more. Resolves the choice that ran, or null.
+   */
+  async function closeAgentTile(item, owner) {
+    const las = root.las;
+    const M = root.LasSociety;
+    const tree = await las.getSocietyTree().catch(() => null);
+    const choice = await choicePopup(`✕ ${item.agent}`, M.closeChoices(item, owner, tree));
+    if (!choice) return null;
+    if (choice === 'close') await las.closeAgentWidget(item.agent);
+    else if (choice === 'archive') await las.archiveEntry(owner, `friend:${item.agent}`);
+    else if (choice === 'unfriend') await las.linkFriend(owner, item.agent, false);
+    else if (choice === 'unfriend-archive') {
+      await las.linkFriend(owner, item.agent, false);
+      await las.archiveAgent(item.agent);
+    } else if (choice === 'archive-agent') await las.archiveAgent(item.agent);
+    else if (choice === 'delete') {
+      const sure = await confirmPopup(`Delete ${item.agent}? It is unregistered from LAS on this Mac${owner ? ` and unlinked from ${owner}` : ''}. Its folder, files and repo are not touched.`, { okLabel: 'Delete', title: '\u{1F5D1} Delete' });
+      if (!sure) return null;
+      if (owner) await las.linkFriend(owner, item.agent, false);
+      await las.deleteAgent(item.agent);
+    }
+    return choice;
+  }
+
+  root.LasSocietyViews = { chip, miniWidget, listRow, renderPanel, closeTilePopup, confirmPopup, choicePopup, closeAgentTile, guarded };
 })(self);

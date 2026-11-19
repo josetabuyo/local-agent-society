@@ -107,30 +107,12 @@
           <option value="auto">Auto-detect</option>
         </select>
       </div>
-      <!-- Shared by every widget (main.js tile reconciler), not per agent. -->
+      <!-- Shared by every widget: not edited here — the global panel (`las map global`) holds them. -->
       <div class="settings-row settings-group">All widgets</div>
-      <div class="settings-row">
-        <label for="tileShrinkMs" title="How long a widget stays big after its Space is back on screen">Shrink delay (ms)</label>
-        <input id="tileShrinkMs" type="number" min="0" max="30000" step="100" />
+      <div class="settings-row" title="Every agent of this Mac, the society's archive, and the settings shared by every widget (heartbeat, updates, phones) — also `las map global`">
+        <label for="globalPanelOpen">Global panel</label>
+        <button id="globalPanelOpen" type="button">Open ↗</button>
       </div>
-      <div class="settings-row">
-        <label for="tileTickMs" title="How often every widget checks which Space it is on">Heartbeat (ms)</label>
-        <input id="tileTickMs" type="number" min="100" max="10000" step="100" />
-      </div>
-      <div class="settings-row">
-        <label for="updateCheck" id="updateChecked" title="Every widget asks once a minute; the backend fetches GitHub every 15 min">Updates</label>
-        <button id="updateCheck" type="button">Check now</button>
-      </div>
-      <div class="settings-row">
-        <label for="pairingOpen" title="Phones paired with this Mac: pair a new one with a QR, accept a request, revoke">Phones</label>
-        <button id="pairingOpen" type="button">Pair / manage…</button>
-      </div>
-      <!-- The society's archive (las agent archive): whole agents put away, ↩ brings one back. -->
-      <div class="settings-row">
-        <label title="Agents taken out of the society (las agent archive) — nothing of them is deleted; ↩ brings one back and reopens its widget">Archived agents</label>
-        <span id="archivedAgentsCount" class="settings-note"></span>
-      </div>
-      <div id="archivedAgents" class="archived-agents"></div>
     </div>
 
     <!-- Drawers: settings above, the Open menu and the children menu below —

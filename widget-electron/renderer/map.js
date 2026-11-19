@@ -6,9 +6,12 @@
  * board (no grouping), and the same button bar on double-click or hold
  * (🚪 ⚙ ⧉ 🔊 ⌨ 🎤 ⌖ 📄, per kind — society-model.js ACTIONS_BY_KIND). 🎤 and ⌨
  * run on the agent's own widget, which owns the recorder and the keyboard.
- * Every tile also has a ✕: a terminal or command closes, a friend's widget
- * closes, a repo or URL leaves the map — straight away in dangerous mode, after
- * a popup in safe mode (security_mode, `las agent security`). Elements are added
+ * Every tile also has a ✕: a terminal or command closes, a repo or URL leaves
+ * the map — straight away in dangerous mode, after a popup in safe mode
+ * (security_mode, `las agent security`). A friend's ✕ always asks what to do:
+ * close its widget, archive it here, unfriend it (to the society's archive
+ * too when it would show nowhere else), or delete it (society-views.js
+ * closeAgentTile). Elements are added
  * with `las map add`. Canvas/List is the only display choice; Archive, next to
  * them, lists what this agent put away (the society's archived agents live
  * in ⚙ → All widgets).
@@ -117,15 +120,15 @@
   }
 
   function closeTitle(item) {
-    if (item.kind === 'friend') return item.remote ? `${item.agent}'s widget lives on ${item.remote}` : `Close ${item.agent}'s widget`;
+    if (item.kind === 'friend') return `Close ${item.agent}'s widget, archive it, unfriend it or delete it…`;
     if (item.kind === 'repo' || item.kind === 'url') return 'Take it off the map';
     return item.kind === 'command' ? 'Stop this command' : 'Close this terminal';
   }
 
   async function onClose(item) {
     if (item.kind === 'friend') {
-      if (item.remote || item.widgetClosed) return;
-      await guard(`Close ${item.agent}'s widget?`, () => window.las.closeAgentWidget(item.agent));
+      // A choice, not a confirmation: the popup asks whatever the security mode.
+      await V.closeAgentTile(item, agentName);
     } else if (item.kind === 'repo' || item.kind === 'url') {
       await guard(`Take “${item.label}” off the map?`, () => window.las.removeMapElement(agentName, item.elementId));
     } else {

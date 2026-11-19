@@ -176,6 +176,12 @@ contextBridge.exposeInMainWorld('las', {
   /** The elements added to `name`'s map (`las map add`, GET /agents/{name}/map): {agent, elements:[...]} or null. */
   /** Open `name`'s map window (the 👥 click) — the same window `las map` opens. */
   openMap: (name) => ipcRenderer.invoke('map:open', name),
+  /** Open the global panel (`las map global`): every agent of the Mac, the society's archive, the shared settings. */
+  openGlobalMap: () => ipcRenderer.invoke('map:open-global'),
+  /** The whole society (GET /society/tree): {env, agents: [nested nodes], archived: [...]}, or null. */
+  getSocietyTree: () => ipcRenderer.invoke('society:tree'),
+  /** ✕ → Delete: unregister `name` from LAS (its widget closes; its folder and files stay). */
+  deleteAgent: (name) => ipcRenderer.invoke('agent:delete', name),
   getMap: (name) => ipcRenderer.invoke('agent:map', name),
   /** Remove one element (id `repo:<path>` / `url:<url>`) from `name`'s map — a map tile's ✕. */
   removeMapElement: (name, id) => ipcRenderer.invoke('agent:map-remove', name, id),

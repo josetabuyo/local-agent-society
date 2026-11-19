@@ -55,7 +55,8 @@ test('every item offers its actions; describeAction says what they mean and when
   assert.equal(M.describeAction(term, 'exit').confirm, true, 'closing a terminal takes a second click');
   assert.match(M.describeAction(term, 'mic').title, /claude session/);
   assert.equal(M.describeAction(friend, 'mic').enabled, true);
-  assert.equal(M.describeAction(friend, 'exit').enabled, false, 'its widget is already closed');
+  assert.equal(M.describeAction(friend, 'exit').enabled, true, 'the ✕ always offers its popup');
+  assert.ok(!M.closeChoices(friend, 'Me', null).some((c) => c.id === 'close'), 'its widget is already closed: no "close" choice');
   assert.equal(M.describeAction(ghost, 'mic').enabled, false, 'an unregistered friend cannot be dictated to');
 });
 
@@ -113,7 +114,39 @@ test('a friend on another machine (Name@env) can be dictated to but its widget c
   const [item] = M.buildItems({ agentName: 'RelayRobotics', friends: [{ name: 'coach@uy-mac', registered: true, remote: 'uy-mac', sessions: null, mutual: null }] });
   assert.equal(item.detail, 'on uy-mac · vortex-relay');
   assert.equal(M.describeAction(item, 'mic').enabled, true);
-  assert.equal(M.describeAction(item, 'exit').enabled, false);
+  const choices = M.closeChoices(item, 'RelayRobotics', null).map((c) => c.id);
+  assert.deepEqual(choices, ['archive', 'unfriend'], 'its widget and its registration live over there');
+});
+
+test('the ✕ popup on a friend: close, archive here, unfriend (to the society archive when it would show nowhere), delete', () => {
+  const tree = { agents: [
+    { name: 'Me', friends: ['Kid', 'Pal'], children: [] },
+    { name: 'Kid', main_screen: false, friends: [], children: [] },
+    { name: 'Pal', main_screen: false, friends: [], children: [] },
+    { name: 'Other', friends: ['Pal'], children: [] },
+  ], archived: [] };
+  const [kid, pal] = M.buildItems({ agentName: 'Me', friends: [{ name: 'Kid' }, { name: 'Pal' }] });
+  assert.deepEqual(M.closeChoices(kid, 'Me', tree).map((c) => c.id), ['close', 'archive', 'unfriend-archive', 'delete']);
+  assert.ok(M.closeChoices(kid, 'Me', tree).find((c) => c.id === 'delete').danger);
+  assert.equal(M.closeChoices(pal, 'Me', tree)[2].id, 'unfriend', 'Other still links Pal: it stays visible there');
+  assert.equal(M.closeChoices(kid, 'Me', null)[2].id, 'unfriend', 'no tree: never archives on a guess');
+});
+
+test('the global panel: every agent of the tree, parents first, the ones shown nowhere flagged', () => {
+  const tree = { env: 'ba-mac', agents: [
+    { name: 'Relay', friends: [], sessions: [{}, {}], children: [{ name: 'coach', main_screen: false, friends: [], children: [] }] },
+    { name: 'Solo', short_description: 'alone', main_screen: false, friends: [], children: [] },
+    { name: 'Pal', main_screen: false, friends: [], children: [] },
+    { name: 'Host', friends: ['Pal'], children: [] },
+  ], archived: [] };
+  const items = M.buildGlobalItems(tree);
+  assert.deepEqual(items.map((i) => i.agent), ['Relay', 'coach', 'Solo', 'Pal', 'Host']);
+  assert.ok(items.every((i) => i.global && i.kind === 'friend'));
+  assert.equal(items[0].detail, '2 sessions');
+  assert.equal(items[1].parent, 'Relay');
+  assert.deepEqual(items.filter((i) => i.hidden).map((i) => i.agent), ['coach', 'Solo'], 'Pal is still Host\'s friend');
+  assert.deepEqual(M.actionsFor(items[0]), ['exit', 'settings', 'open', 'map', 'speaker', 'archive']);
+  assert.deepEqual(M.closeChoices(items[0], null, tree).map((c) => c.id), ['close', 'archive-agent', 'delete']);
 });
 
 test('a friend tile offers that friend\'s whole button bar, minus 👥 children, in the widget\'s order', () => {

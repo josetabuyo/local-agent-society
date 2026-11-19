@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>All agents</title>
+<!-- The global panel (`las map global`): the map window's face (widget.css +
+     map.css) holding every agent of this Mac, the society's archive and the
+     settings shared by every widget (global.js). -->
+<link rel="stylesheet" href="widget.css" />
+<link rel="stylesheet" href="map.css" />
+</head>
+<body>
+  <div id="face" class="map-face global-face">
+    <header class="map-header">
+      <div class="map-title">
+        <span class="map-name">All agents</span>
+        <span id="summary" class="map-summary"></span>
+      </div>
+      <div class="header-actions">
+        <button id="closeBtn" class="facebtn" type="button" title="Close the global panel">✕</button>
+      </div>
+    </header>
+    <div class="map-stage">
+      <main id="map" class="map-body"></main>
+      <div class="segmented map-tools" id="toolsPill">
+        <button id="settingsBtn" type="button" title="Settings shared by every widget">⚙</button>
+      </div>
+      <div class="segmented map-layout" id="layoutSeg" title="Layout">
+        <button type="button" data-value="canvas">Canvas</button>
+        <button type="button" data-value="list">List</button>
+        <button type="button" data-value="archive" title="Archive — agents taken out of the society: ↩ brings one back, ✕ deletes it">Archive</button>
+      </div>
+      <!-- ⚙: what used to be "All widgets" in every widget's settings. -->
+      <div id="globalSettings" class="global-settings hidden">
+        <div class="settings-row">
+          <label for="tileShrinkMs" title="How long a widget stays big after its Space is back on screen">Shrink delay (ms)</label>
+          <input id="tileShrinkMs" type="number" min="0" max="30000" step="100" />
+        </div>
+        <div class="settings-row">
+          <label for="tileTickMs" title="How often every widget checks which Space it is on">Heartbeat (ms)</label>
+          <input id="tileTickMs" type="number" min="100" max="10000" step="100" />
+        </div>
+        <div class="settings-row">
+          <label for="updateCheck" id="updateChecked" title="Every widget asks once a minute; the backend fetches GitHub every 15 min">Updates</label>
+          <button id="updateCheck" type="button">Check now</button>
+        </div>
+        <div class="settings-row">
+          <label for="pairingOpen" title="Phones paired with this Mac: pair a new one with a QR, accept a request, revoke">Phones</label>
+          <button id="pairingOpen" type="button">Pair / manage…</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="society-model.js"></script>
+  <script src="society-views.js"></script>
+  <script src="global.js"></script>
+</body>
+</html>

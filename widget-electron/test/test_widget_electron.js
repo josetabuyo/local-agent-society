@@ -1891,7 +1891,7 @@ test('update notice: main polls the backend and pushes the status to every widge
 test('update notice: the gear gets a dot and the panel a row only while an update is available', () => {
   const html = readSrc('renderer/index.html');
   assert.match(html, /id="updateRow" class="settings-row update-row hidden"/);
-  assert.match(html, /id="updateCheck"/);
+  assert.match(readSrc('renderer/global.html'), /id="updateCheck"/, 'Check now lives in the global panel');
   const js = readSrc('renderer/widget.js');
   assert.match(js, /gearEl\.classList\.toggle\('has-update', available\)/);
   assert.match(js, /updateRowEl\.classList\.toggle\('hidden', !available\)/);
@@ -2069,16 +2069,43 @@ test('main.js archives a whole agent from its ⤓, and ↩ from the map brings i
   assert.match(back, /openWidget\(name\)/, 'and the widget opens again');
   const pre = readSrc('preload.js');
   for (const k of ['archiveAgent', 'getArchivedAgents', 'unarchiveAgent']) assert.match(pre, new RegExp(`${k}:`));
-  // The society's archive lives in ⚙ → All widgets (no ✕ forget there); the map's Archive is the agent's own.
+  // A map window that asked (the global panel) is never the window destroyed.
+  assert.match(archive, /!sender\.isPopup && !sender\.isMap/);
+  // The society's archive lives in the global panel; the map's Archive is the agent's own.
   const map = readSrc('renderer', 'map.js');
   assert.doesNotMatch(map, /getArchivedAgents/, "the map's Archive lists only this agent's own archive");
-  const widget = readSrc('renderer', 'widget.js');
-  const load = extractFunctionBody(widget, 'async function loadArchivedAgents()');
-  assert.match(load, /window\.las\.getArchivedAgents\(\)/);
-  assert.match(load, /window\.las\.unarchiveAgent\(a\.name\)/);
-  assert.doesNotMatch(load, /forget|✕/, 'an archived agent is never forgotten from here');
+  const global = readSrc('renderer', 'global.js');
+  assert.match(global, /tree && tree\.archived/);
+  assert.match(global, /window\.las\.unarchiveAgent\(a\.name\)/);
+  assert.match(global, /window\.las\.deleteAgent\(a\.name\)/);
+  assert.doesNotMatch(readSrc('renderer', 'index.html'), /id="archivedAgents"/);
+});
+
+test('las map global opens the global panel from any folder; each widget only links to it', () => {
+  const src = readSrc('main.js');
+  const route = src.slice(src.indexOf("if (action === 'global')"), src.indexOf('if (!name) return;'));
+  assert.match(route, /openGlobalMapWindow\(\)/, 'routed before the agent name is required');
+  assert.match(src, /win\.loadFile\(path\.join\(WIDGET_SOURCES\.rendererDir, 'global\.html'\)\)/);
+  const cli = fs.readFileSync(path.join(__dirname, '..', '..', 'cli', 'commands', 'map.py'), 'utf8');
+  assert.match(cli, /localagentsociety:\/\/society\?action=global/);
   const html = readSrc('renderer', 'index.html');
-  assert.ok(html.indexOf('id="archivedAgents"') > html.indexOf('All widgets'), 'Archived agents sits under All widgets');
+  assert.match(html, /id="globalPanelOpen"/);
+  for (const id of ['tileShrinkMs', 'tileTickMs', 'updateCheck', 'pairingOpen']) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}"`), `${id} is not edited from a widget`);
+    assert.match(readSrc('renderer', 'global.html'), new RegExp(`id="${id}"`));
+  }
+  assert.match(readSrc('renderer', 'widget.js'), /window\.las\.openGlobalMap\(\)/);
+  const pre = readSrc('preload.js');
+  for (const k of ['openGlobalMap', 'getSocietyTree', 'deleteAgent']) assert.match(pre, new RegExp(`${k}:`));
+});
+
+test('a friend\'s ✕ asks what to do — in the map and in the widget panel alike', () => {
+  assert.match(readSrc('renderer', 'map.js'), /V\.closeAgentTile\(item, agentName\)/);
+  assert.match(readSrc('renderer', 'widget.js'), /closeAgentTile\(item, agentName\)/);
+  const views = readSrc('renderer', 'society-views.js');
+  const flow = extractFunctionBody(views, 'async function closeAgentTile(item, owner) {');
+  assert.match(flow, /choice === 'unfriend-archive'[\s\S]*linkFriend\(owner, item\.agent, false\)[\s\S]*archiveAgent\(item\.agent\)/);
+  assert.match(flow, /choice === 'delete'[\s\S]*confirmPopup/, 'deleting asks once more');
 });
 
 test('map: Archive is a third choice next to Canvas/List, not a button in the tools pill', () => {

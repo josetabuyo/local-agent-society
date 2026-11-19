@@ -1080,7 +1080,24 @@ html, body {
 }
 .las-confirm-ok { background: rgba(200, 40, 40, 0.75) !important; color: #fff !important; font-weight: 700; }
 
-/* ⚙ → All widgets → Archived agents (widget.js loadArchivedAgents). */
-.settings-note { opacity: 0.7; font-size: 11px; }
-.archived-agents { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 4px; }
-.archived-agents:empty { display: none; }
+/* The ✕ popup on a friend / an agent (society-views.js choicePopup): one button per choice. */
+.las-choice { gap: 6px; }
+.las-choice-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1.5px solid rgba(20, 20, 20, 0.35);
+  background: rgba(0, 0, 0, 0.1);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.las-choice-option:hover { background: rgba(0, 0, 0, 0.2); }
+.las-choice-label { font-weight: 700; }
+.las-choice-detail { font-size: 11px; opacity: 0.75; line-height: 1.3; }
+.las-choice-option.danger .las-choice-label { color: #b00000; }
+

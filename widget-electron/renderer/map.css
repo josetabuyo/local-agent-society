@@ -193,3 +193,29 @@
   pointer-events: none;
 }
 .mic-drop-ok { outline: 2px solid rgba(200, 40, 40, 0.95); outline-offset: 1px; }
+
+/* ── the global panel (global.html) ─────────────────────────────────────── */
+/* ⚙: the shared settings, a card over the board's top left, under the tools pill. */
+.global-settings {
+  position: absolute;
+  top: 34px;
+  left: 6px;
+  z-index: 20;
+  min-width: 250px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: var(--widget-bg);
+  border: 1px solid var(--map-border);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  -webkit-app-region: no-drag;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.global-settings.hidden { display: none; }
+.global-settings .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.global-settings input[type="number"] { width: 72px; }
+#settingsBtn.has-update::after { content: '•'; color: #ff9f0a; margin-left: 2px; }
+/* An agent shown nowhere else (off the main screen, nobody's friend). */
+.agent-hidden { outline: 2px dashed rgba(255, 159, 10, 0.95); outline-offset: 2px; }

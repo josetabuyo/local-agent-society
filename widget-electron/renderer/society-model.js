@@ -10,6 +10,7 @@
  *   terminal — a connected session with a terminal (claude, codex, shell)
  *   command  — a detached session (`las <command…>`, docs/adr/0006)
  *   friend   — a las-friend: an agent listed in this agent's `friends`
+ *              (with `global: true`: one agent of the Mac on the global panel)
  *
  * Loaded twice: as a plain <script> in the renderer (window.LasSociety) and
  * with require() from the node tests.
@@ -39,14 +40,17 @@
     repo: ['exit', 'open', 'archive'],
     url: ['exit', 'open', 'archive'],
   };
+  /** One agent on the global panel (`las map global`): its own widget's bar, its map, the society's archive. */
+  const GLOBAL_ACTIONS = ['exit', 'settings', 'open', 'map', 'speaker', 'archive'];
   /** Actions shared by every kind. */
   const ACTIONS = ['exit', 'keyboard', 'mic'];
   const ACTION_ICONS = {
     exit: '✕', settings: '⚙', open: '⧉', speaker: '\u{1F50A}', muted: '\u{1F507}',
-    keyboard: '⌨', mic: '\u{1F3A4}', find: '⌖', log: '\u{1F4C4}', archive: '\u{1F5C4}',
+    keyboard: '⌨', mic: '\u{1F3A4}', find: '⌖', log: '\u{1F4C4}', archive: '\u{1F5C4}', map: '\u{1F5FA}',
   };
 
   function actionsFor(item) {
+    if (item && item.global) return GLOBAL_ACTIONS;
     return ACTIONS_BY_KIND[item && item.kind] || ACTIONS;
   }
 
@@ -136,6 +140,8 @@
       if (friend) return { title: `Type a message to ${item.agent}`, enabled: item.registered };
       return { title: `Type to this ${item.runtime} session only`, enabled: true };
     }
+    if (action === 'map') return { title: `Open ${item.agent}'s map`, enabled: true };
+    if (action === 'archive' && item.global) return { title: `Archive ${item.agent} — off the society, its widget closes (Archive here brings it back)`, enabled: true };
     if (action === 'archive') return { title: 'Put it in the archive — off the map, still at hand (🗄 on the map lists it)', enabled: true };
     if (action === 'find') return { title: 'Find this terminal — bring it to the front', enabled: true };
     if (action === 'log') return { title: "Open this background process's log", enabled: !!(item.detached && item.detached.log) };
@@ -144,15 +150,82 @@
       return { title: `Dictate to this ${item.runtime} session only`, enabled: true };
     }
     if (action === 'exit') {
-      if (item.kind === 'friend') {
-        if (item.remote) return { title: `${item.agent}'s widget lives on ${item.remote} — it can't be closed from here`, enabled: false };
-        return item.widgetClosed
-          ? { title: `${item.agent}'s widget is already closed`, enabled: false }
-          : { title: `Close ${item.agent}'s widget (it stays here, in the panel)`, enabled: item.registered };
-      }
+      // A popup offers the choices (closeChoices): close its widget, archive, unfriend, delete.
+      if (item.global) return { title: `Close ${item.agent}'s widget, archive it or delete it…`, enabled: true };
+      if (item.kind === 'friend') return { title: `Close ${item.agent}'s widget, archive it, unfriend it or delete it…`, enabled: true };
       return { title: item.kind === 'command' ? 'Stop this command' : 'Close this terminal', enabled: true, confirm: true };
     }
     return { title: action, enabled: false };
+  }
+
+  // ── the global panel and the ✕ popup ─────────────────────────────────────
+  /** Every node of a /society/tree, depth first, each with its `parent` name (or null). */
+  function flattenTree(tree) {
+    const out = [];
+    const walk = (node, parent) => {
+      out.push({ node, parent });
+      for (const child of node.children || []) walk(child, node.name);
+    };
+    for (const root of (tree && tree.agents) || []) walk(root, null);
+    return out;
+  }
+
+  /** The agents of `tree` other than `except` whose `friends` list `name`. */
+  function linkedBy(tree, name, except = null) {
+    return flattenTree(tree).map((r) => r.node).filter((n) => n.name !== except && (n.friends || []).includes(name)).map((n) => n.name);
+  }
+
+  /** Shown nowhere: off the main screen and nobody's friend — it can only be found on the global panel. */
+  function isHidden(tree, node) {
+    return node.main_screen === false && linkedBy(tree, node.name).length === 0;
+  }
+
+  /** The global panel: every agent of the Mac as a mini widget, parents before their subordinates. */
+  function buildGlobalItems(tree) {
+    return flattenTree(tree).map(({ node, parent }) => {
+      const sessions = Array.isArray(node.sessions) ? node.sessions.length : 0;
+      const hidden = isHidden(tree, node);
+      const where = hidden ? '⚠ shown nowhere — off the main screen, nobody\'s friend'
+        : node.short_description || (parent ? `in ${parent}` : `${sessions} session${sessions === 1 ? '' : 's'}`);
+      return {
+        key: `agent:${node.name}`, kind: 'friend', global: true, agent: node.name, label: node.name, detail: where,
+        parent, hidden, mainScreen: node.main_screen !== false, color: node.color || DEFAULT_COLOR,
+        registered: true, remote: null, mutual: false, widgetClosed: !!node.inactive, muted: false, sessions,
+      };
+    });
+  }
+
+  /**
+   * What the ✕ on a friend (or an agent of the global panel) can do, for the
+   * popup: [{id, label, detail, danger?}]. `owner` is the agent whose panel
+   * it is (null on the global panel); `tree` (/society/tree, may be null)
+   * says whether unfriending would leave it shown nowhere.
+   */
+  function closeChoices(item, owner, tree) {
+    const local = item.registered && !item.remote;
+    const choices = [];
+    if (local && !item.widgetClosed) {
+      choices.push({ id: 'close', label: 'Close its widget', detail: owner ? `${item.agent} stays in ${owner}'s panel` : 'nothing else changes' });
+    }
+    if (owner) {
+      choices.push({ id: 'archive', label: `Archive it in ${owner}`, detail: `off this panel, kept in ${owner}'s Archive — ↩ brings it back` });
+      const node = tree && local ? flattenTree(tree).map((r) => r.node).find((n) => n.name === item.agent) : null;
+      const orphan = !!node && node.main_screen === false && linkedBy(tree, item.agent, owner).length === 0;
+      choices.push({
+        id: orphan ? 'unfriend-archive' : 'unfriend',
+        label: 'Remove from friends',
+        detail: orphan
+          ? `${item.agent} is off the main screen and nobody else's friend — it goes to the society's archive too, or it would show nowhere`
+          : `only ${owner}'s link goes; ${item.agent} stays in the society`,
+      });
+    } else {
+      choices.push({ id: 'archive-agent', label: 'Archive the agent', detail: 'off the society, its widget closes — ↩ in Archive brings it back' });
+    }
+    if (local) {
+      choices.push({ id: 'delete', label: `Delete ${item.agent}`, danger: true,
+        detail: 'unregisters it from LAS on this Mac — its folder and files stay; a session opened there registers it again' });
+    }
+    return choices;
   }
 
   /** WCAG relative luminance of '#rrggbb', 0..1. */
@@ -227,5 +300,6 @@
     return Math.max(min, bottom);
   }
 
-  return { DEFAULT_COLOR, KIND_ICONS, ACTIONS, ACTIONS_BY_KIND, ACTION_ICONS, actionsFor, actionIcon, TILE, GAP, buildItems, agentItem, describeAction, chipColors, luminance, layout, clamp, panelHeight };
+  return { DEFAULT_COLOR, KIND_ICONS, ACTIONS, ACTIONS_BY_KIND, GLOBAL_ACTIONS, ACTION_ICONS, actionsFor,
+    flattenTree, linkedBy, isHidden, buildGlobalItems, closeChoices, actionIcon, TILE, GAP, buildItems, agentItem, describeAction, chipColors, luminance, layout, clamp, panelHeight };
 });

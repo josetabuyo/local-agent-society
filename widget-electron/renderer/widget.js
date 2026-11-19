@@ -41,8 +41,6 @@ const securityModeEl = document.getElementById('securityMode');
 const mainScreenEl = document.getElementById('mainScreen');
 const replyOutputEl = document.getElementById('replyOutput');
 const ccDefaultEl = document.getElementById('ccDefault');
-const tileShrinkMsEl = document.getElementById('tileShrinkMs');
-const tileTickMsEl = document.getElementById('tileTickMs');
 const doorEl = document.getElementById('door');
 
 document.title = agentName;
@@ -425,7 +423,6 @@ async function init() {
   applyPrefsToDom();
   // Not requestAnimationFrame: the popup is created hidden, and a hidden window never runs one.
   if (isPopup) setTimeout(reportPopupReady, 0);
-  initTileSettings();
   reportVisibility();   // tells main whether this agent may grow (expandWhenHidden)
   // The mic's target is the agent's own choice (its .las-agent.json), not a
   // window pref — see the children button section.
@@ -647,7 +644,6 @@ function setSettingsOpen(open, fromDrawer = false) {
     loadSecurityMode();
     loadMainScreen();
     loadReplyOutput();
-    loadArchivedAgents();
     refreshSessions().then(() => {
       syncMicTargetSelect();
       fitWindowToDrawer();
@@ -675,72 +671,13 @@ async function persist(patch) {
   if (prefs.mute) stopCurrentSpeech();
 }
 
-// ── "All widgets" → Archived agents: the society's archive (las agent archive) ──
-// Whole agents put away; ↩ brings one back (off the archive, its widget opens
-// again). Nothing here forgets an agent — it is a whole agent, not an entry.
-// An agent's own archive (friends, repos, links) lives in its map: Archive.
-const archivedAgentsEl = document.getElementById('archivedAgents');
-const archivedAgentsCountEl = document.getElementById('archivedAgentsCount');
-
-async function loadArchivedAgents() {
-  const agents = (await window.las.getArchivedAgents().catch(() => [])) || [];
-  archivedAgentsCountEl.textContent = agents.length ? String(agents.length) : 'none';
-  archivedAgentsEl.replaceChildren(...agents.map((a) => {
-    const row = document.createElement('div');
-    row.className = 'open-row archived-agent-row';
-    const label = document.createElement('span');
-    label.className = 'open-label';
-    label.textContent = `\u{1F916} ${a.name}`;
-    const back = document.createElement('button');
-    back.type = 'button';
-    back.className = 'open-move';
-    back.textContent = '↩';
-    back.title = `Bring ${a.name} back into the society — its widget opens again`;
-    back.addEventListener('click', async () => {
-      await window.las.unarchiveAgent(a.name);
-      await loadArchivedAgents();
-      fitWindowToDrawer();
-    });
-    row.append(label, back);
-    return row;
-  }));
-  fitWindowToDrawer();
-}
-
-// ── "All widgets" rows: the tile reconciler's heartbeat and shrink delay ──
-// Not a pref of this agent: one value per app instance, decided in main
-// (see main.js "tile reconciler"), shown identically in every widget's panel.
-function applyTileSettingsToDom(settings) {
-  if (!settings) return;
-  tileShrinkMsEl.value = String(settings.collapseSettleMs);
-  tileTickMsEl.value = String(settings.tickMs);
-}
-
-async function initTileSettings() {
-  try {
-    const s = await window.las.getTileSettings();
-    if (s && s.limits) {
-      [tileShrinkMsEl.min, tileShrinkMsEl.max] = s.limits.collapseSettleMs.map(String);
-      [tileTickMsEl.min, tileTickMsEl.max] = s.limits.tickMs.map(String);
-      tileShrinkMsEl.placeholder = String(s.defaults.collapseSettleMs);
-      tileTickMsEl.placeholder = String(s.defaults.tickMs);
-    }
-    applyTileSettingsToDom(s);
-  } catch (err) {
-    console.warn('[widget] could not read tile settings:', err);
-  }
-}
-
-// 'change' (not 'input'): a value is sent once the field is left or Enter is
-// pressed, never on every keystroke while a number is being typed. Main
-// clamps and answers with what it actually applied.
-tileShrinkMsEl.addEventListener('change', async () => {
-  applyTileSettingsToDom(await window.las.setTileSettings({ collapseSettleMs: tileShrinkMsEl.value }));
+// ── "All widgets": a shortcut to the global panel (`las map global`) ──
+// The settings every widget shares (heartbeat, shrink delay, updates,
+// phones) and the society's archive live there, not in each widget.
+document.getElementById('globalPanelOpen').addEventListener('click', () => {
+  setSettingsOpen(false);
+  window.las.openGlobalMap();
 });
-tileTickMsEl.addEventListener('change', async () => {
-  applyTileSettingsToDom(await window.las.setTileSettings({ tickMs: tileTickMsEl.value }));
-});
-window.las.onTileSettings(applyTileSettingsToDom);
 
 // ── Update notice: a dot on the gear and a row atop the panel ─────────────
 // main.js polls the backend (backend/updates.py) and pushes every change, so
@@ -748,8 +685,6 @@ window.las.onTileSettings(applyTileSettingsToDom);
 const updateRowEl = document.getElementById('updateRow');
 const updateTextEl = document.getElementById('updateText');
 const updateCopyEl = document.getElementById('updateCopy');
-const updateCheckEl = document.getElementById('updateCheck');
-const updateCheckedEl = document.getElementById('updateChecked');
 
 function applyUpdateStatus(status) {
   const available = !!(status && status.available);
@@ -760,28 +695,12 @@ function applyUpdateStatus(status) {
     updateTextEl.textContent = `Update available (${status.behind} new)`;
     updateRowEl.title = (status.commits || []).map((c) => `${c.sha} ${c.subject}`).join('\n');
   }
-  const when = status && status.checked_at ? status.checked_at.slice(11, 16) : null;
-  updateCheckedEl.textContent = !status ? 'Updates'
-    : status.error ? 'Updates · check failed'
-    : available ? `Updates · ${when}` : `Up to date · ${when}`;
-  if (status && status.error) updateCheckedEl.title = status.error;
 }
 
 updateCopyEl.addEventListener('click', async () => {
   await window.las.copyUpdateCommand();
   updateCopyEl.textContent = 'Copied — run it';
   setTimeout(() => { updateCopyEl.textContent = 'Copy las update'; }, 2500);
-});
-document.getElementById('pairingOpen').addEventListener('click', () => window.las.openPairing());
-updateCheckEl.addEventListener('click', async () => {
-  updateCheckEl.disabled = true;
-  updateCheckEl.textContent = 'Checking…';
-  try {
-    applyUpdateStatus(await window.las.checkUpdate());
-  } finally {
-    updateCheckEl.disabled = false;
-    updateCheckEl.textContent = 'Check now';
-  }
 });
 window.las.onUpdateStatus(applyUpdateStatus);
 window.las.getUpdateStatus().then(applyUpdateStatus).catch(() => {});
@@ -2443,7 +2362,8 @@ const societyHandlers = {
     if (action === 'mic') return societyMic(item);
     if (action === 'keyboard') return societyKeyboard(item);
     if (action === 'exit') {
-      if (item.kind === 'friend') return guard(`Close ${item.agent}'s widget?`, () => closeFriendWidget(item));
+      // A friend's ✕ asks what to do: close its widget, archive, unfriend, delete (society-views.js).
+      if (item.kind === 'friend') return window.LasSocietyViews.closeAgentTile(item, agentName).then(() => reloadChildrenMenu());
       return guard(item.kind === 'command' ? `Stop the command “${item.detail}”?` : `Close this ${item.runtime} terminal?`, async () => {
         await window.las.closeSession(agentName, item.sid);
         await reloadChildrenMenu();
@@ -2516,12 +2436,6 @@ async function toggleFriendMute(item) {
   const next = await window.las.setPrefs(item.agent, { mute: !item.muted });
   friendMuted.set(item.agent, !!(next && next.mute));
   if (childrenMenuOpen) renderChildrenMenu();
-}
-
-async function closeFriendWidget(item) {
-  const res = await window.las.closeAgentWidget(item.agent);
-  if (!res || res.ok === false) window.las.log('warn', 'friends', `could not close ${item.agent}'s widget: ${res && res.error}`);
-  await reloadChildrenMenu();
 }
 
 function renderFriendRows(body) {

@@ -729,6 +729,12 @@ def unregister_agent(name: str):
             raise HTTPException(status_code=404, detail="Agent not found")
         del registry[name]
         save_json(REGISTRY_FILE, registry)
+    # Off the society's archive too: a deleted agent is not "put away".
+    with _archived_agents_lock:
+        rows = load_json(ARCHIVED_AGENTS_FILE, [])
+        kept = [a for a in rows if not (isinstance(a, dict) and a.get("name") == name)]
+        if len(kept) != len(rows):
+            save_json(ARCHIVED_AGENTS_FILE, kept)
     return {"ok": True}
 
 
