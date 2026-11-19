@@ -70,7 +70,7 @@ test('a clip is transcribed, delivered to its target, acked to the phone and onl
   q.enqueue(D.parseNotice(notice).clip);
   await q.idle;
   assert.deepEqual(d.calls.delivered, [{ target: { agent: 'Alpha', session: 'claude-1-aa' }, text: 'hola mundo' }]);
-  assert.deepEqual(d.calls.replies, [{ to: 'jose-iphone', payload: { type: 'device-audio-result', sha256, ok: true, chars: 10, target: { agent: 'Alpha', session: 'claude-1-aa' } } }]);
+  assert.deepEqual(d.calls.replies, [{ to: 'jose-iphone', payload: { type: 'device-audio-result', sha256, ok: true, chars: 10, text: 'hola mundo', target: { agent: 'Alpha', session: 'claude-1-aa' } } }]);
   assert.equal(fs.existsSync(file), false);
   assert.equal(fs.existsSync(file.replace(/\.m4a$/, '.json')), false, 'the sidecar goes with it');
 });

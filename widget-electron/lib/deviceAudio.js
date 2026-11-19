@@ -143,7 +143,8 @@ function scanInbox(root, onSkip = () => {}) {
  *   decode(buffer, mime)            → Promise<Float32Array> (mono 16 kHz)
  *   transcribe(pcm, agent)          → Promise<string>
  *   deliver(clip, text)             → Promise<{ok, error?}>
- *   reply(to, payload)              → Promise<void>   (error/ack to the device)
+ *   reply(to, payload)              → Promise<void>   (error/ack to the device; an ok one
+ *                                     carries the transcript `text`, so the phone can show it at once)
  *   log(level, message)
  */
 class DeviceAudioQueue {
@@ -223,7 +224,7 @@ class DeviceAudioQueue {
     if (!text || isNonSpeechText(text)) return fail(text ? 'only music/noise, no speech' : 'nothing heard');
     const res = await deps.deliver(clip, text);
     if (!res || !res.ok) throw new Error(`delivery failed: ${res && res.error}`);
-    await deps.reply(clip.from, { type: 'device-audio-result', sha256: clip.sha256, ok: true, chars: text.length, target: clip.target });
+    await deps.reply(clip.from, { type: 'device-audio-result', sha256: clip.sha256, ok: true, chars: text.length, text, target: clip.target });
     removeClip(clip, deps);
   }
 }
@@ -290,7 +291,7 @@ DeviceAudioQueue.prototype._finishRecording = async function _finishRecording(re
   this.finished.add(recordingId);
   deps.log('info', `device-audio: recording ${recordingId} → ${first.target.agent}: ${parts.length} segment(s), ${text.length} chars`);
   for (const { clip, text: t } of parts) {
-    await deps.reply(clip.from, { type: 'device-audio-result', sha256: clip.sha256, ok: true, chars: t.length, recordingId, target: clip.target });
+    await deps.reply(clip.from, { type: 'device-audio-result', sha256: clip.sha256, ok: true, chars: t.length, text: t, recordingId, target: clip.target });
     removeClip(clip, deps);
   }
 };
