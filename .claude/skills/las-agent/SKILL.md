@@ -369,10 +369,11 @@ its button bar:
 
 The ✕ in a tile's corner closes it too, and on a repo/URL takes it off the map.
 Canvas/List/Archive sits at the board's top right. A 🎤 badge sits on the
-corner of the tile the mic talks to: drag it onto another session or friend
-to move the mic there (`sessions.mic_to` = a friend, whose own target then
-picks the terminal; a session sets `sessions.target`). The 🎤 in the tools
-pill is the mic's home: click it and the mic is the agent's own again.
+corner of the tile the mic talks to — always exactly one (the target, else
+the last-used session, else the first tile that takes dictation): drag it
+onto another session, command or friend to move the mic there
+(`sessions.mic_to` = a friend, whose own target then picks the terminal; a
+session sets `sessions.target` and clears `mic_to`).
 Holding 👥, or a right-click on it, opens the drawer's list, where the mic's
 target and friend links are also chosen.
 Endpoints: `GET/PUT/DELETE /agents/{name}/friends[/{friend}]`,

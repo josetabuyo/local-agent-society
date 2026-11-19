@@ -181,3 +181,14 @@ test('channelLaunchProblem reads the spawning Claude command line', () => {
   assert.equal(channelLaunchProblem('/Users/x/.local/bin/claude'), 'no-flag');
   assert.equal(channelLaunchProblem(''), null); // unknown parent: the probe decides
 });
+
+test('a session whose channel can never arm is told so in the instructions, with the poll fallback', async () => {
+  const { instructionsFor } = await import('../src/sinks/claude-channel.js');
+  assert.doesNotMatch(instructionsFor('Robo'), /LIVE DELIVERY IS OFF/);
+  for (const problem of ['background', 'no-flag']) {
+    const text = instructionsFor('Robo', problem);
+    assert.match(text, /LIVE DELIVERY IS OFF/);
+    assert.match(text, /las agent poll --timeout 2/);
+    assert.match(text, /las claude --resume/);
+  }
+});

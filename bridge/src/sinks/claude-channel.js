@@ -51,7 +51,21 @@ const LAUNCH_HINT = {
   'no-flag': 'this Claude was started without the channel flag (bare `claude`, not `las claude`)',
 };
 
-export function instructionsFor(agent) {
+/** What a session whose channel can never arm must do instead — said in the
+ * server instructions, which reach the model in every session (a background
+ * one continued after a compaction included) where `las bridge status` may
+ * never be run again. */
+function offlineInstructions(agent, launchProblem) {
+  if (!LAUNCH_HINT[launchProblem]) return '';
+  return (
+    ` LIVE DELIVERY IS OFF IN THIS SESSION: ${LAUNCH_HINT[launchProblem]}, so no channel event (probe or message) will ever arrive. ` +
+    `Messages for "${agent}" wait in its mailbox instead: run \`las agent poll --timeout 2\` at the start of the session and again before ` +
+    'each closing report, and act on what it prints exactly as on a channel event. Tell the user once, in one line, that live delivery ' +
+    'is off here and that `las claude --resume` in a terminal brings this conversation back connected.'
+  );
+}
+
+export function instructionsFor(agent, launchProblem = null) {
   return (
     `This is the Local Agent Society channel for the agent "${agent}". ` +
     'Messages from the widget mic (dictation), from other agents, and from external processes arrive as ' +
@@ -63,7 +77,8 @@ export function instructionsFor(agent) {
     'An event with kind="cc" is a for-the-record copy of something that went to another session of this agent (its shell, its Codex): ' +
     'take note of it, do not act on it, do not reply, no closing report. ' +
     'An event with kind="title-request" asks this session to name what it is working on: run the `las agent title` command its text gives, ' +
-    'with a title of about 34 characters, and nothing else — no reply, no closing report, no TTS.'
+    'with a title of about 34 characters, and nothing else — no reply, no closing report, no TTS.' +
+    offlineInstructions(agent, launchProblem)
   );
 }
 
@@ -89,7 +104,7 @@ export class ClaudeChannelSink {
 
     this.server = new Server(
       { name: SERVER_NAME, version },
-      { capabilities: { experimental: { 'claude/channel': {} }, tools: {} }, instructions: instructionsFor(agent) },
+      { capabilities: { experimental: { 'claude/channel': {} }, tools: {} }, instructions: instructionsFor(agent, launchProblem) },
     );
     this.server.oninitialized = () => this._onInitialized();
     this.server.onclose = () => {
