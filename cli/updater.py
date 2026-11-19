@@ -257,6 +257,20 @@ def _fail(log_path: Path) -> int:
     return 1
 
 
+def off_main_warning() -> str | None:
+    """Why a pull may say "Already up to date" while main moved on: this copy is on
+    another branch, or behind origin/main. None when it follows main."""
+    git("fetch", "--quiet", "origin", "main")
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    behind = git("rev-list", "--count", "HEAD..origin/main")
+    if branch == "main" and behind in ("", "0"):
+        return None
+    where = f"on branch {branch}" if branch != "main" else "on main"
+    lag = f", {behind} commit(s) behind origin/main" if behind not in ("", "0") else ""
+    return (f"This copy is {where}{lag} — `las update` pulls that branch, not main. "
+            f"Fix: cd {REPO} && git switch main && git pull --no-rebase origin main && las update")
+
+
 def phase_pull(log_path: Path, log) -> int:
     print()
     print(f"  {bold('Updating Local Agent Society')} {dim(f'v{version()} · {head()[:7]}')}")
@@ -268,6 +282,9 @@ def phase_pull(log_path: Path, log) -> int:
         log.close()
         return _fail(log_path)
     log.close()
+    warning = off_main_warning()
+    if warning:
+        print(yellow(f"  ⚠ {warning}"))
     # Hand over to the copy of this file that was just pulled.
     new_self = REPO / "cli" / "updater.py"
     sys.stdout.flush()  # exec drops anything still buffered (stdout is a pipe under `las update`)

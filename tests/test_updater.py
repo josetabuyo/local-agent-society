@@ -55,3 +55,16 @@ def test_color_follows_claude_code_and_force_vars_but_no_color_wins(monkeypatch)
     assert color_with(CLAUDECODE="1", NO_COLOR="1") is False
     assert color_with(FORCE_COLOR="0") is False
     importlib.reload(updater)
+
+
+def test_a_copy_off_main_is_told_why_its_pull_brings_nothing(monkeypatch):
+    def fake(branch, behind):
+        answers = {"rev-parse": branch, "rev-list": behind, "fetch": ""}
+        monkeypatch.setattr(updater, "git", lambda *a: answers[a[0]])
+    fake("main", "0")
+    assert updater.off_main_warning() is None
+    fake("feature/x", "40")
+    msg = updater.off_main_warning()
+    assert "on branch feature/x, 40 commit(s) behind origin/main" in msg and "git switch main" in msg
+    fake("main", "3")
+    assert "on main, 3 commit(s) behind" in updater.off_main_warning()
