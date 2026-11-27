@@ -18,8 +18,11 @@
  */
 const supported = process.platform === 'darwin';
 
-/** The tint is the agent color at this fraction of its opacity pref (0.78 → 0.31). */
-const TINT_OF_OPACITY = 0.4;
+/** The tint is the agent color at this alpha; the opacity pref scales the whole
+ * glass instead (see attach): less opacity = more of the sharp desktop through
+ * it, as if the glass moved closer to what is behind. */
+const TINT_ALPHA = 0.45;
+const MIN_GLASS_ALPHA = 0.08;
 const DEFAULT_RADIUS = 15;
 const NSViewWidthSizable = 2;
 const NSViewHeightSizable = 16;
@@ -54,6 +57,8 @@ function init() {
       long: proto('void las_msgSend_long(void*, void*, long)'),
       ulong: proto('void las_msgSend_ulong(void*, void*, unsigned long)'),
       ptr: proto('void las_msgSend_ptr(void*, void*, void*)'),
+      bool: proto('void las_msgSend_bool(void*, void*, bool)'),
+      responds: proto('bool las_msgSend_responds(void*, void*, void*)'),
       addSubview: proto('void las_msgSend_addSubview(void*, void*, void*, long, void*)'),
       color: proto('void* las_msgSend_color(void*, void*, double, double, double, double)'),
     };
@@ -88,13 +93,30 @@ function parseHex(color) {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
-function tintColor(color, opacity) {
+function tintColor(color) {
   const [r, g, b] = parseHex(color);
-  const a = Math.max(0, Math.min(1, (Number(opacity) || 0.72) * TINT_OF_OPACITY));
-  return api.send.color(api.colorClass, api.sel('colorWithSRGBRed:green:blue:alpha:'), r, g, b, a);
+  return api.send.color(api.colorClass, api.sel('colorWithSRGBRed:green:blue:alpha:'), r, g, b, TINT_ALPHA);
+}
+function glassAlpha(opacity) {
+  const o = Number(opacity);
+  return Math.max(MIN_GLASS_ALPHA, Math.min(1, Number.isFinite(o) ? o : 0.72));
 }
 
-/** @type {WeakMap<import('electron').BrowserWindow, bigint>} window → its glass view */
+/**
+ * AppKit mutes the tint of a glass view whose window is not key (the way it
+ * grays inactive windows) — a widget is almost never key, so its color
+ * would be gone most of the time. The view's private flag behind that is
+ * reset by AppKit on every key-state change, so attach() re-applies it on
+ * the window's focus/blur/show (the only moments the key state moves).
+ */
+function keepTint(glass) {
+  const { sel, send } = api;
+  const setter = sel('set_tintOpacityReduced:');
+  if (!send.responds(glass, sel('respondsToSelector:'), setter)) return;
+  send.bool(glass, setter, false);
+}
+
+/** @type {WeakMap<import('electron').BrowserWindow, {glass: bigint, onKey: () => void}>} window → its glass view */
 const attached = new WeakMap();
 
 /**
@@ -118,29 +140,39 @@ function attach(win, { color, opacity, radius = DEFAULT_RADIUS } = {}) {
   glass = send.initRect(glass, sel('initWithFrame:'), bounds);
   send.double(glass, sel('setCornerRadius:'), radius);
   send.long(glass, sel('setStyle:'), NSGlassEffectViewStyleRegular);
-  send.ptr(glass, sel('setTintColor:'), tintColor(color, opacity));
+  send.ptr(glass, sel('setTintColor:'), tintColor(color));
+  send.double(glass, sel('setAlphaValue:'), glassAlpha(opacity));
   send.ulong(glass, sel('setAutoresizingMask:'), NSViewWidthSizable | NSViewHeightSizable);
   send.addSubview(content, sel('addSubview:positioned:relativeTo:'), glass, NSWindowBelow, null);
   send.obj(glass, sel('release')); // the superview owns it now (see detach)
-  attached.set(win, glass);
+  const onKey = () => {
+    if (win.isDestroyed() || !attached.has(win)) return;
+    keepTint(glass);
+  };
+  for (const ev of ['show', 'focus', 'blur']) win.on(ev, onKey);
+  attached.set(win, { glass, onKey });
   win.once('closed', () => attached.delete(win));
+  keepTint(glass);
   return true;
 }
 
 /** Re-tint an attached window (the agent's color or opacity pref changed). */
 function setTint(win, color, opacity) {
-  const glass = attached.get(win);
-  if (!glass || !api || win.isDestroyed()) return;
-  api.send.ptr(glass, api.sel('setTintColor:'), tintColor(color, opacity));
+  const entry = attached.get(win);
+  if (!entry || !api || win.isDestroyed()) return;
+  api.send.ptr(entry.glass, api.sel('setTintColor:'), tintColor(color));
+  api.send.double(entry.glass, api.sel('setAlphaValue:'), glassAlpha(opacity));
+  keepTint(entry.glass);
 }
 
 /** Take the glass away again (the look was switched off). */
 function detach(win) {
-  const glass = attached.get(win);
-  if (!glass || !api) return;
+  const entry = attached.get(win);
+  if (!entry || !api) return;
   attached.delete(win);
   if (win.isDestroyed()) return;
-  api.send.obj(glass, api.sel('removeFromSuperview')); // the superview's retain was the last one
+  for (const ev of ['show', 'focus', 'blur']) win.removeListener(ev, entry.onKey);
+  api.send.obj(entry.glass, api.sel('removeFromSuperview')); // the superview's retain was the last one
 }
 
-module.exports = { available, status, attach, detach, setTint, parseHex, TINT_OF_OPACITY };
+module.exports = { available, status, attach, detach, setTint, parseHex, glassAlpha, TINT_ALPHA };

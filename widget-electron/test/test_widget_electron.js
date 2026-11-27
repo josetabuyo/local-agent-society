@@ -2240,6 +2240,17 @@ test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibran
   assert.doesNotMatch(lib, /objc_msgSend\(.*\.\.\./, 'fixed prototypes only (arm64 variadic ABI differs)');
   assert.match(lib, /send\.obj\(glass, sel\('release'\)\)/);
   assert.match(lib, /removeFromSuperview/);
+  // AppKit mutes an un-key window's glass tint; the private flag is re-applied
+  // on every key-state move (show/focus/blur), guarded by respondsToSelector.
+  assert.match(lib, /for \(const ev of \['show', 'focus', 'blur'\]\) win\.on\(ev, onKey\);/);
+  assert.match(lib, /respondsToSelector:'\), setter\)\) return;\n\s*send\.bool\(glass, setter, false\);/);
+  assert.match(lib, /for \(const ev of \['show', 'focus', 'blur'\]\) win\.removeListener\(ev, entry\.onKey\);/, 'detach unhooks');
+  // The opacity pref is the glass alpha (less = more sharp desktop through it); the tint alpha is fixed.
+  const glassLib = require('../lib/glass');
+  assert.equal(glassLib.glassAlpha(0.78), 0.78);
+  assert.equal(glassLib.glassAlpha(0), 0.08, 'never fully gone');
+  assert.equal(glassLib.glassAlpha('x'), 0.72, 'default pref');
+  assert.match(lib, /send\.double\(glass, sel\('setAlphaValue:'\), glassAlpha\(opacity\)\);/);
   // Shipped: lib/** is in the electron-builder whitelist.
   assert.ok(require('../package.json').build.files.includes('lib/**/*'));
 });
