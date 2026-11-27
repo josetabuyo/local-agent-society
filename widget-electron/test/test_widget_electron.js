@@ -2155,6 +2155,10 @@ test('🔇 on a speech bubble stops that agent\'s current message, without mutin
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'bubble.html'), 'utf8');
   assert.match(html, /id="hush"/);
   assert.match(html, /act\('hush'\)/);
+  // UX: 🔊 while it speaks; pressed, it shows 🔇 with a red ring (state, not the action).
+  assert.match(html, /id="hush"[^>]*>🔊</);
+  assert.match(html, /act\('hush'\);\s*hush\.textContent = '🔇';\s*hush\.classList\.add\('hushed'\)/);
+  assert.match(html, /\.circle\.hushed[^{]*\{[^}]*#d33/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'bubbles.js'), 'utf8'), /case 'hush':/);
   const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
   assert.match(main, /kind === 'hush'[\s\S]{0,300}webContents\.send\('speech:stop'\)/);

@@ -79,6 +79,8 @@
       padding: 0;
     }
     .circle:hover { background: rgba(255, 255, 255, 0.6); }
+    /* 🔊 shows the message is being spoken; pressed, it turns 🔇 in red: silenced. */
+    .circle.hushed, body.dark .circle.hushed { border-color: #d33; background: rgba(221, 51, 51, 0.18); cursor: default; }
     .body {
       padding: 4px 12px 10px;
       line-height: 1.35;
@@ -134,7 +136,7 @@
     <div class="head">
       <span class="name" id="name"></span>
       <div class="circles">
-        <button class="circle" id="hush" title="Silence this message — the agent stops speaking it (it stays in the chat)">🔇</button>
+        <button class="circle" id="hush" title="Silence this message — the agent stops speaking it (it stays in the chat)">🔊</button>
         <button class="circle" id="voice" title="Answer by voice: go to the agent and start a dictation">🎤</button>
         <button class="circle" id="textBtn" title="Answer by text, right here">⌨</button>
         <button class="circle" id="dismiss" title="Dismiss (Esc)">✕</button>
@@ -193,7 +195,15 @@
     card.addEventListener('mouseleave', () => act('pin', { on: replying }));
 
     document.getElementById('dismiss').addEventListener('click', (e) => { e.stopPropagation(); act('dismiss'); });
-    document.getElementById('hush').addEventListener('click', (e) => { e.stopPropagation(); act('hush'); });
+    const hush = document.getElementById('hush');
+    hush.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (hush.classList.contains('hushed')) return;
+      act('hush');
+      hush.textContent = '🔇';
+      hush.classList.add('hushed');
+      hush.title = 'Silenced — this message is no longer spoken (it stays in the chat)';
+    });
     document.getElementById('text').addEventListener('click', () => act('open'));
     // Voice: the agent's widget records and transcribes from its own Space;
     // this bubble is the face of that dictation (bubble:mic from main).
