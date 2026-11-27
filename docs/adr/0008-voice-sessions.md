@@ -22,11 +22,21 @@ connect a detached session (ADR 0006) of the agent here, runtime `claude` /
 default — the mic talks to it now. Its command is `las voice-turn RUNTIME CONV`:
 every message runs ONE non-interactive turn of the same conversation `CONV`:
 
-- **Claude**: `claude -p --session-id CONV` the first time, `--resume CONV`
-  after (the transcript file under `<config>/projects/*/CONV.jsonl` tells which),
-  `--permission-mode bypassPermissions` — nobody is there to approve.
-- **Codex**: `codex exec --json --yolo`; the `thread.started` id is kept in
-  `~/.las/voice/CONV.thread` and later turns run `codex exec resume THREAD`.
+The runtime's own conversation id lives in `~/.las/voice/CONV.thread`, the
+same way for both: no file → a new conversation (Claude gets a fresh
+`--session-id`, Codex names its thread in the first `thread.started` event)
+and the id is written; a file → `claude -p --resume ID` / `codex exec resume
+ID`. Claude runs with `--permission-mode bypassPermissions`, Codex with
+`--yolo` — nobody is there to approve.
+
+- **Resume** an existing conversation, closed or started in a terminal:
+  `las claude --headless --resume ID` (`-r`, `--resume` alone or `-c` = this
+  folder's latest), `las codex --headless resume ID|--last`; the endpoint takes
+  `{"resume": "ID" | "--last"}`. It only pre-writes the `.thread` file. Don't
+  resume a conversation that is still open in a terminal: both would write it.
+- **Clear**: dictate "nueva conversación" / "/clear" (also "borrar la
+  conversación", "new conversation") — the file is deleted, nothing runs, the
+  answer is "Listo, conversación nueva.", and the next turn starts afresh.
 
 Both get the same appended instructions (Claude `--append-system-prompt`, Codex
 `-c developer_instructions=`): voice only, answer in the agent's language in a
@@ -40,13 +50,15 @@ silent.
 (`cli/turn_hook.py`) stay out — the answer already is the closing report.
 
 **Entry points**: the CLI above; `POST /agents/{name}/sessions/voice
-{"runtime"}` (runs `las <runtime> --headless --no-widget` in the agent's
-folder through the login shell) for the widget's 👥 drawer (🎙 Claude / 🎙
-Codex), the phone and other agents. ✕ in 👥 closes it, 📄 opens its log.
+{"runtime", "resume"?}` (runs `las <runtime> --headless --no-widget` in the
+agent's folder through the login shell) for the widget — 🎙 Claude / 🎙 Codex
+in the 👥 drawer, and in the ⧉ button's hold menu next to Terminal and Folder
+(reorderable: one can be the plain-click default) —, the phone and other agents. ✕ in 👥 closes it, 📄 opens its log.
 
 ## Consequences
 
 - A turn is silent until it finishes; long tasks mean a long wait for the answer.
-- One conversation per voice session; closing it ends the conversation (it can
-  still be opened in a terminal: `las claude --resume CONV`, `las codex resume THREAD`).
+- Closing a voice session keeps its conversation: reopen it headless with
+  `--resume`, or in a terminal with `las claude --resume ID` / `las codex resume ID`
+  (the id is in the session's log line and in `~/.las/voice/`).
 - Not supervised across reboots (same as ADR 0006).

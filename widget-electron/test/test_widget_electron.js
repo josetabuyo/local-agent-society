@@ -471,9 +471,17 @@ test('command palette is gone: no saved-command store, overlays or bridge method
   }
 });
 
-test('DEFAULT_PREFS.openOrder defaults to terminal first, then folder', () => {
+test('DEFAULT_PREFS.openOrder defaults to terminal first, then folder, then the voice sessions', () => {
   const body = extractFunctionBody(readSrc('main.js'), 'const DEFAULT_PREFS = {');
-  assert.match(body, /openOrder:\s*\['terminal',\s*'folder'\]/);
+  assert.match(body, /openOrder:\s*\['terminal',\s*'folder',\s*'claude-voice',\s*'codex-voice'\]/);
+});
+
+test('open menu: claude-voice / codex-voice open a voice session (no terminal) through the backend', () => {
+  const src = readSrc('main.js');
+  assert.match(src, /OPEN_ACTIONS = \['terminal', 'folder', 'claude-voice', 'codex-voice'\]/);
+  const body = extractFunctionBody(src, "ipcMain.handle('agent:open', async (_event, name, action) => {");
+  assert.match(body, /OPEN_VOICE_RUNTIMES\[action\][\s\S]{0,200}\/sessions\/voice/);
+  assert.match(readSrc('renderer', 'widget.js'), /DEFAULT_OPEN_ORDER = \['terminal', 'folder', 'claude-voice', 'codex-voice'\]/);
 });
 
 test('agent:open resolves the folder from the backend registry (never a typed cwd) and dispatches terminal / folder', () => {

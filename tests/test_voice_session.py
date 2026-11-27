@@ -23,25 +23,75 @@ def recorder(result):
 
 
 def test_claude_first_turn_creates_the_conversation_and_later_turns_resume_it(tmp_path, monkeypatch):
-    cfg = tmp_path / "cfg"
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(cfg))
+    monkeypatch.setattr(v, "VOICE_DIR", tmp_path / "voice")
     run, calls = recorder(Done("Listo, hecho."))
     out = v.run_turn("claude", "c0nv", "arreglá el test", name="Robo", locale="es-MX", cwd=str(tmp_path), run=run)
     argv, kw = calls[-1]
     assert out == "Listo, hecho."
-    assert argv[argv.index("--session-id") + 1] == "c0nv" and argv[-1] == "arreglá el test"
+    first = argv[argv.index("--session-id") + 1]
+    assert v.current_id("c0nv") == first and argv[-1] == "arreglá el test"
     assert "--resume" not in argv and argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
     assert "Spanish" in argv[argv.index("--append-system-prompt") + 1]
     assert kw["env"][v.VOICE_ENV] == "1" and kw["cwd"] == str(tmp_path)
-    (cfg / "projects" / "-x").mkdir(parents=True)
-    (cfg / "projects" / "-x" / "c0nv.jsonl").write_text("{}\n")
     v.run_turn("claude", "c0nv", "y ahora?", name="Robo", locale="es-MX", cwd=str(tmp_path), run=run)
     argv, _ = calls[-1]
-    assert argv[argv.index("--resume") + 1] == "c0nv" and "--session-id" not in argv
+    assert argv[argv.index("--resume") + 1] == first and "--session-id" not in argv
+
+
+def test_a_failed_first_claude_turn_forgets_the_id_it_never_recorded(tmp_path, monkeypatch):
+    monkeypatch.setattr(v, "VOICE_DIR", tmp_path / "voice")
+    run, _ = recorder(Done("", 1, "not logged in"))
+    v.run_turn("claude", "c5", "hola", name="R", locale="es-MX", cwd=str(tmp_path), run=run)
+    assert v.current_id("c5") == ""
+
+
+def test_dictating_clear_starts_a_new_conversation_without_running_anything(tmp_path, monkeypatch):
+    monkeypatch.setattr(v, "VOICE_DIR", tmp_path / "voice")
+    v.set_id("c6", "old-id")
+    run, calls = recorder(Done("x"))
+    for said in ("/clear", "Nueva conversación.", "barra clear", "borrar la conversación", "CLEAR"):
+        v.set_id("c6", "old-id")
+        assert v.run_turn("claude", "c6", said, name="R", locale="es-MX", cwd=str(tmp_path), run=run) == "Listo, conversación nueva."
+        assert v.current_id("c6") == ""
+    assert calls == []
+    assert not v.CLEAR_RE.match("limpiá la conversación con el cliente y mandale un mail")
+
+
+def test_resume_points_a_new_voice_session_at_an_existing_conversation(tmp_path, monkeypatch):
+    monkeypatch.setattr(v, "VOICE_DIR", tmp_path / "voice")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    run, calls = recorder(Done("ok"))
+    v.prepare_resume("claude", "c7", "abc-123", "/w")
+    v.run_turn("claude", "c7", "seguimos", name="R", locale="es-MX", cwd="/w", run=run)
+    assert calls[-1][0][calls[-1][0].index("--resume") + 1] == "abc-123"
+    # --last: the folder's newest transcript, resolved at start
+    proj = v.claude_project_dir("/Users/me/my_app", tmp_path / "cfg")
+    proj.mkdir(parents=True)
+    import os, time
+    (proj / "older.jsonl").write_text("{}")
+    os.utime(proj / "older.jsonl", (time.time() - 100, time.time() - 100))
+    (proj / "newer.jsonl").write_text("{}")
+    assert proj.name == "-Users-me-my-app"
+    assert v.prepare_resume("claude", "c8", v.LAST, "/Users/me/my_app") == "newer"
+    import pytest
+    with pytest.raises(ValueError):
+        v.prepare_resume("claude", "c9", v.LAST, "/nowhere")
+    # Codex resolves --last itself
+    v.prepare_resume("codex", "c10", v.LAST, "/w")
+    assert v.codex_argv("c10", "hola", "i", "/w")[:4] == ["codex", "exec", "resume", "--last"]
+
+
+def test_resume_spellings():
+    r = v.resume_from_args
+    assert r([]) is None and r(["--resume", "abc"]) == "abc" and r(["--resume"]) == v.LAST
+    assert r(["-c"]) == v.LAST and r(["--resume", "--last"]) == v.LAST and r(["--resume=xyz"]) == "xyz"
+    assert r(["resume", "th1"], "codex") == "th1" and r(["resume", "--last"], "codex") == v.LAST
+    assert r(["-c", "model=o3"], "codex") is None, "-c is Codex's config flag, not continue"
 
 
 def test_claude_account_uses_its_own_config_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(v.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(v, "VOICE_DIR", tmp_path / "voice")
     run, calls = recorder(Done("ok"))
     v.run_turn("claude", "c1", "hi", name="Robo", locale="en-US", cwd=str(tmp_path), account="relay", run=run)
     assert calls[-1][1]["env"]["CLAUDE_CONFIG_DIR"] == str(tmp_path / ".claude-relay")
@@ -62,12 +112,13 @@ def test_codex_keeps_the_thread_it_was_given_and_resumes_it(tmp_path, monkeypatc
     argv, _ = calls[-1]
     assert argv[:4] == ["codex", "exec", "-C", "/w"] and argv[-1] == "hola" and "--yolo" in argv
     assert any(a.startswith("developer_instructions=") for a in argv)
-    assert v.codex_thread_file("c2").read_text() == "th-1"
+    assert v.current_id("c2") == "th-1"
     v.run_turn("codex", "c2", "seguí", name="Robo", locale="es-MX", cwd="/w", run=run)
     assert calls[-1][0][:4] == ["codex", "exec", "resume", "th-1"]
 
 
-def test_a_failed_turn_is_said_not_swallowed(tmp_path):
+def test_a_failed_turn_is_said_not_swallowed(tmp_path, monkeypatch):
+    monkeypatch.setattr(v, "VOICE_DIR", tmp_path / "voice")
     run, _ = recorder(Done("", 1, "boom\nfatal: not logged in"))
     out = v.run_turn("codex", "c3", "x", name="R", locale="es-MX", cwd=str(tmp_path), run=run)
     assert out.startswith("No pude completar") and "not logged in" in out

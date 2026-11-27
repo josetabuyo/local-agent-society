@@ -616,6 +616,12 @@ class ClaudeGroup(click.Group):
     def list_commands(self, ctx):
         return sorted(self.commands)
 
+    def parse_args(self, ctx, args):
+        # `--headless --resume ID`: by the time the group's callback runs Click has
+        # moved `--resume ID` into the would-be subcommand; keep the raw line.
+        ctx.meta["las_raw_args"] = list(args)
+        return super().parse_args(ctx, args)
+
 
 @click.group("claude", cls=ClaudeGroup, invoke_without_command=True, context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
@@ -631,8 +637,10 @@ def claude_cmd(ctx, no_widget, account, pty, headless):
     """
     ctx.obj = {"no_widget": no_widget, "account": account, "pty": pty}
     if headless:
-        start_voice_session("claude", account=account, widget=not no_widget)
-        return
+        from cli.voice_session import resume_from_args
+        start_voice_session("claude", account=account, widget=not no_widget,
+                            resume=resume_from_args(ctx.meta.get("las_raw_args", [])))
+        ctx.exit(0)
     if ctx.invoked_subcommand is None:
         _launch_claude(list(ctx.args), no_widget, account, pty)
     else:
@@ -696,7 +704,8 @@ def claude_relay_cmd(no_widget, pty, headless, claude_args):
     typed into Claude's prompt instead, like `las codex`.
     """
     if headless:
-        start_voice_session("claude", account=RELAY_ACCOUNT, widget=not no_widget)
+        from cli.voice_session import resume_from_args
+        start_voice_session("claude", account=RELAY_ACCOUNT, widget=not no_widget, resume=resume_from_args(claude_args))
         return
     _launch_claude(list(claude_args), no_widget, RELAY_ACCOUNT, pty)
 
@@ -802,14 +811,16 @@ def run_connected(argv: list) -> None:
 VOICE_TITLES = {"es": "sesión de voz, sin terminal", "en": "voice session, no terminal"}
 
 
-def start_voice_session(runtime: str, *, account: str | None = None, widget: bool = True, cwd: str | None = None) -> dict:
-    """`las claude|claudeRelay|codex --headless`: connect a detached voice session of the
-    agent here (docs/adr/0008) and point the mic at it — you opened it to talk to it."""
+def start_voice_session(runtime: str, *, account: str | None = None, widget: bool = True, cwd: str | None = None,
+                        resume: str | None = None) -> dict:
+    """`las claude|claudeRelay|codex --headless [--resume [ID]]`: connect a detached voice
+    session of the agent here (docs/adr/0008) and point the mic at it — you opened it to
+    talk to it. `resume`: a conversation id, or voice_session.LAST (this folder's latest)."""
     from cli.agent_config import read_agent_config
     from cli.connected import ConnectError, connect
     from cli.path_utils import agent_config_path
     from cli.turn_hook import _las_bin
-    from cli.voice_session import new_conversation, turn_command
+    from cli.voice_session import new_conversation, prepare_resume, turn_command
     binary = "codex" if runtime == "codex" else "claude"
     if not shutil.which(binary):
         click.echo(f"Error: {binary} not found on PATH.", err=True)
@@ -824,6 +835,13 @@ def start_voice_session(runtime: str, *, account: str | None = None, widget: boo
     locale = (read_agent_config(path) if path else {}).get("locale", "")
     title = VOICE_TITLES["es" if locale.lower().startswith("es") else "en"]
     conv = new_conversation()
+    resumed = None
+    if resume:
+        try:
+            resumed = prepare_resume(runtime, conv, resume, cwd, account)
+        except ValueError as err:
+            click.echo(f"Error: {err}", err=True)
+            raise SystemExit(1)
     try:
         pid, log_path = connect(name, Path(cwd), turn_command(_las_bin(), runtime, conv, account),
                                 locale=locale, runtime=label, title=title)
@@ -833,9 +851,11 @@ def start_voice_session(runtime: str, *, account: str | None = None, widget: boo
     sid = next((s["sid"] for s in (api.get(f"/agents/{quote(name, safe='')}/sessions") or {}).get("sessions", []) if s.get("pid") == pid), None)
     if sid:
         api.post(f"/agents/{quote(name, safe='')}/sessions/{quote(sid, safe='')}/touch", {})
-    click.echo(f"{name}: {label} voice session connected (pid {pid}{', ' + sid if sid else ''}) — the mic talks to it now; "
-               f"each dictation is one turn of the same conversation and the answer is spoken. ✕ in 👥 closes it. Log: {log_path}")
-    return {"pid": pid, "sid": sid, "conversation": conv, "log": str(log_path), "runtime": label}
+    again = f" — resuming {'the latest conversation here' if resumed == '--last' else resumed}" if resumed else ""
+    click.echo(f"{name}: {label} voice session connected (pid {pid}{', ' + sid if sid else ''}){again}. The mic talks to it now; "
+               f"each dictation is one turn of the same conversation and the answer is spoken; dictate \"nueva conversación\" "
+               f"(or /clear) to start over. ✕ in 👥 closes it. Log: {log_path}")
+    return {"pid": pid, "sid": sid, "conversation": conv, "resumed": resumed, "log": str(log_path), "runtime": label}
 
 
 @click.command("voice-turn", hidden=True)
@@ -846,11 +866,13 @@ def start_voice_session(runtime: str, *, account: str | None = None, widget: boo
 def voice_turn_cmd(runtime, conversation, text, account):
     """One turn of a voice session (docs/adr/0008): run by the detached session per message; prints the answer."""
     from cli.turn_hook import agent_here
-    from cli.voice_session import run_turn
+    from cli.voice_session import current_id, run_turn
     here = agent_here(os.getcwd())
     name, cfg = here if here else ("", {})
     click.echo(run_turn(runtime, conversation, text, name=name, locale=cfg.get("locale", ""), cwd=os.getcwd(),
                         account=account, claude=claude_bin()))
+    # For the log (📄): the id to resume this conversation with later (`--resume ID`).
+    click.echo(f"[voice] {runtime} conversation: {current_id(conversation) or '(new on the next turn)'}", err=True)
 
 
 @click.command("attach", context_settings={"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []})
@@ -887,7 +909,8 @@ def codex_cmd(command, no_widget, headless, intercept_url, port, codex_args):
     With --exec, no TUI: each message becomes a headless `codex exec` run whose answer goes back to the sender.
     """
     if headless:
-        start_voice_session("codex", widget=not no_widget)
+        from cli.voice_session import resume_from_args
+        start_voice_session("codex", widget=not no_widget, resume=resume_from_args(codex_args, "codex"))
         return
     name = resolve_agent_name(None)
     if not shutil.which("codex") and not command:

@@ -436,6 +436,11 @@ def test_voice_session_endpoint_runs_las_headless_in_the_agents_folder(app, tmp_
         argv, kw = ran[-1]
         assert argv[1:] == ["-lc", "las codex --headless --no-widget"] and kw["cwd"] == str(tmp_path)
         assert client.post("/agents/Robo/sessions/voice", json={"runtime": "rm -rf"}).status_code == 422
+        client.post("/agents/Robo/sessions/voice", json={"runtime": "claude", "resume": "abc-123"})
+        assert ran[-1][0][-1].endswith("las claude --headless --no-widget --resume abc-123")
+        client.post("/agents/Robo/sessions/voice", json={"runtime": "codex", "resume": "--last"})
+        assert ran[-1][0][-1].endswith("las codex --headless --no-widget resume --last")
+        assert client.post("/agents/Robo/sessions/voice", json={"runtime": "claude", "resume": "x; rm -rf ~"}).status_code == 422
         assert client.post("/agents/Nobody/sessions/voice", json={}).status_code == 404
     finally:
         main.subprocess.run = real

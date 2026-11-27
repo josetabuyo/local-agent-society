@@ -1660,6 +1660,7 @@ VOICE_RUNTIMES = {"claude": ["claude", "--headless"], "claudeRelay": ["claudeRel
 
 class VoiceSessionRequest(BaseModel):
     runtime: str = "claude"
+    resume: Optional[str] = None   # a conversation id, or "--last" (this folder's latest)
 
 
 def _login_shell() -> str:
@@ -1683,7 +1684,12 @@ def start_voice_session(name: str, body: VoiceSessionRequest):
     entry = load_json(REGISTRY_FILE, {}).get(name)
     if not entry or not entry.get("path") or not Path(entry["path"]).is_dir():
         raise HTTPException(status_code=404, detail="Agent not found")
-    line = " ".join(["las", *VOICE_RUNTIMES[body.runtime], "--no-widget"])
+    resume = []
+    if body.resume:
+        if not re.fullmatch(r"--last|[A-Za-z0-9][A-Za-z0-9._-]{0,127}", body.resume):
+            raise HTTPException(status_code=422, detail="resume must be a conversation id or --last")
+        resume = ["resume", body.resume] if body.runtime == "codex" else ["--resume", body.resume]
+    line = " ".join(["las", *VOICE_RUNTIMES[body.runtime], "--no-widget", *resume])
     try:
         out = subprocess.run([_login_shell(), "-lc", line], cwd=entry["path"], capture_output=True, text=True,
                              timeout=30, stdin=subprocess.DEVNULL)

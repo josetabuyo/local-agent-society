@@ -2714,11 +2714,12 @@ childrenEl.addEventListener('contextmenu', (e) => {
 // -- open: a NEW terminal window, or the folder, at this agent's path -------
 //
 // Replaces the retired command palette (saved-command list + edit form).
-// Two actions only, both anchored on the agent's registered directory —
-// main.js's agent:open resolves it from the backend registry, nothing is
-// typed in here:
-//   terminal — a new window of the default terminal, shell in that folder
-//   folder   — that folder in the file manager
+// Every action is anchored on the agent's registered directory — main.js's
+// agent:open resolves it from the backend registry, nothing is typed in here:
+//   terminal     — a new window of the default terminal, shell in that folder
+//   folder       — that folder in the file manager
+//   claude-voice — Claude with NO terminal in that folder: a voice session
+//   codex-voice  — the same with Codex (docs/adr/0008; the mic moves to it)
 // A plain click runs the DEFAULT action: whichever is first in
 // prefs.openOrder. Press-and-hold (or right-click) shows a small inline
 // menu listing both, in order; each row runs its action, and ▲/▼ move it —
@@ -2726,8 +2727,8 @@ childrenEl.addEventListener('contextmenu', (e) => {
 
 const openEl = document.getElementById('open');
 const openMenuEl = document.getElementById('openMenu');
-const OPEN_ACTION_LABELS = { terminal: 'Terminal', folder: 'Folder' };
-const DEFAULT_OPEN_ORDER = ['terminal', 'folder'];
+const OPEN_ACTION_LABELS = { terminal: 'Terminal', folder: 'Folder', 'claude-voice': '🎙 Claude · no terminal', 'codex-voice': '🎙 Codex · no terminal' };
+const DEFAULT_OPEN_ORDER = ['terminal', 'folder', 'claude-voice', 'codex-voice'];
 const OPEN_LONG_PRESS_MS = 600;
 
 /** prefs.openOrder, sanitized: unknown entries dropped, duplicates collapsed,

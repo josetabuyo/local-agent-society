@@ -664,7 +664,7 @@ const DEFAULT_PREFS = {
   micLanguage: 'es',
   // "Open" button actions, in menu order — the FIRST one is what a plain
   // click runs; press-and-hold shows the menu that reorders them.
-  openOrder: ['terminal', 'folder'],
+  openOrder: ['terminal', 'folder', 'claude-voice', 'codex-voice'],
   // Where a mic dictation goes is NOT a window pref: it is the agent's own
   // `sessions.target` in its .las-agent.json (children button), read and
   // written through the backend — see agent:config-sessions below.
@@ -1410,7 +1410,10 @@ ipcMain.on('window:report-visibility', (event, hidden, allowed) => {
 // button is on the widget's desktop), so no positioning is attempted —
 // Ghostty's dictionary exposes none anyway.
 
-const OPEN_ACTIONS = ['terminal', 'folder'];
+const OPEN_ACTIONS = ['terminal', 'folder', 'claude-voice', 'codex-voice'];
+// claude-voice / codex-voice: a voice session at the agent's folder — Claude or
+// Codex with no terminal at all, one conversation, answers spoken (docs/adr/0008).
+const OPEN_VOICE_RUNTIMES = { 'claude-voice': 'claude', 'codex-voice': 'codex' };
 
 // macOS has no LaunchServices "default terminal" role, so "default" is
 // resolved here: the first INSTALLED app in this list wins. Ghostty is the
@@ -1498,6 +1501,12 @@ async function resolveAgentPath(name) {
 
 ipcMain.handle('agent:open', async (_event, name, action) => {
   if (!OPEN_ACTIONS.includes(action)) return { ok: false, error: `unknown open action: ${action}` };
+  if (OPEN_VOICE_RUNTIMES[action]) {
+    // The backend runs `las <runtime> --headless` in the agent's registered folder.
+    const json = await postBackend(`/agents/${encodeURIComponent(name)}/sessions/voice`, `voice session for ${name}`, { runtime: OPEN_VOICE_RUNTIMES[action] });
+    if (json) log.info('open', `${action} for ${name}`);
+    return json ? { ok: true, action } : { ok: false, error: 'the backend could not open the voice session' };
+  }
   const dir = await resolveAgentPath(name);
   if (!dir) return { ok: false, error: `no registered path for agent ${name}` };
   try {
