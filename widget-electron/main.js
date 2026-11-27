@@ -1676,20 +1676,23 @@ function showBubble(name, text) {
   const win = windows.get(name);
   if (!bubbles || !win || win.isDestroyed()) return;
   const prefs = getPrefs(name);
+  const bounds = collapsedBounds.get(win) || win.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  // On the widget's own Space too (José + Javier, 2026-11-27: the face alone
+  // was easy to miss, and the bubble is where a reply is muted): the bubble
+  // goes on the side of the screen the widget is on. Off-Space it points
+  // toward the widget's Space, left or right.
+  const nearSide = () => (bounds.x + bounds.width / 2 < display.workArea.x + display.workArea.width / 2 ? 'left' : 'right');
   let side;
   const order = spaces.getSpaceOrderForWindow(win);
   if (order) {
-    if (order.index === order.currentIndex) return;   // on screen: the face shows it
-    side = order.index < order.currentIndex ? 'left' : 'right';
+    side = order.index === order.currentIndex ? nearSide() : order.index < order.currentIndex ? 'left' : 'right';
   } else {
-    // No order (API gone, non-macOS): still bubble when known to be
-    // off-Space, or when nothing is known at all — never when known on-Space.
+    // No order (API gone, non-macOS): same Space if known, else the right edge.
     const space = spaces.getSpaceForWindow(win);
     const current = space != null ? spaces.getCurrentSpaceForWindow(win) : null;
-    if (space != null && current != null && space === current) return;
-    side = 'right';
+    side = space != null && current != null && space === current ? nearSide() : 'right';
   }
-  const display = screen.getDisplayMatching(collapsedBounds.get(win) || win.getBounds());
   bubbles.show({ agentName: name, text, color: prefs.color, opacity: prefs.opacity, side, display });
 }
 

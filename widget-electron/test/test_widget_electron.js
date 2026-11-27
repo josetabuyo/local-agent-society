@@ -1062,7 +1062,8 @@ test('bubbles: a speak envelope bubbles only when the agent is off the Space bei
   assert.match(body, /pendingBubbles\.set\(envelope\.id/, 'an envelope is remembered, not shown: the bubble comes with the voice');
   const show = extractFunctionBody(src, 'function showBubble(name, text) {');
   assert.match(show, /spaces\.getSpaceOrderForWindow\(win\)/);
-  assert.match(show, /order\.index === order\.currentIndex\) return/, 'on the current Space the face shows it: no bubble');
+  assert.doesNotMatch(show, /currentIndex\) return/, 'on the current Space a bubble shows too (next to the widget)');
+  assert.match(show, /order\.index === order\.currentIndex \? nearSide\(\)/);
   assert.match(show, /order\.index < order\.currentIndex \? 'left' : 'right'/);
 });
 
