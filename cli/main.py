@@ -12,6 +12,7 @@ from cli.commands.completion import completion
 from cli.commands.shell_init import shell_init
 from cli.commands.vocab import vocab_cmd
 from cli.commands.map import map_group
+from cli.commands.hook import hook
 from cli.commands.bridge import attach_cmd, bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
 
 
@@ -81,6 +82,7 @@ cli.add_command(queue)
 cli.add_command(boarding)
 cli.add_command(completion)
 cli.add_command(bridge)
+cli.add_command(hook)
 cli.add_command(claude_cmd, name="claude")
 cli.add_command(claude_relay_cmd, name="claudeRelay")
 cli.add_command(codex_cmd, name="codex")

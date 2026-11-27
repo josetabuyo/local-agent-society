@@ -328,6 +328,8 @@ def phase_install(old: str, log_path: Path) -> int:
     las = shutil.which("las") or "las"
     if not Step("Normalizing agent configs", log).run([las, "agent", "normalize", "--all"]):
         print(f"      {yellow('⚠️  las agent normalize --all failed — run it by hand')}")
+    # The end-of-turn hooks (cli/turn_hook.py): every agent speaks its closing report.
+    Step("Installing the end-of-turn hooks", log).run([las, "hook", "install"])
     log.close()
 
     new = head()

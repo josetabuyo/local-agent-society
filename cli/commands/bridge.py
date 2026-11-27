@@ -433,6 +433,8 @@ def _chain(name: str | None, *, widget: bool = True) -> None:
     if not name:
         return
     ensure_mcp_registered()
+    from cli.turn_hook import ensure_installed
+    ensure_installed()  # the end-of-turn closing-report hooks (cli/turn_hook.py)
     if not _register_presence(name):
         click.echo(f"{name}: backend unreachable — presence not published (session opens anyway).", err=True)
     if widget:

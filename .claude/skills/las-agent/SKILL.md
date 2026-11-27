@@ -143,7 +143,9 @@ The old `voice` key (a macOS `say` name: Paulina, Samantha, Jorge…) is retired
 
 ### Closing report — brief summary at the end of every turn (mandatory)
 
-There is no longer a global `Stop` hook (`~/.claude/hooks/announce-here.sh`) announcing a generic "Here! `<Name>`" with no real content — it was removed from `~/.claude/settings.json`. That responsibility now belongs to this session: **before handing control back to the user, speak a brief summary of what just happened.** This is what leaves a useful record in the widget's message history of what the agent was actually doing — not just "it's alive," but "it did this."
+**Before handing control back to the user, speak a brief summary of what just happened** — whether the human used the widget mic, typed, or dictated with Claude Code's own voice input. This is what leaves a useful record in the widget's chat (and the phone's chat and notifications) of what the agent was actually doing — not just "it's alive," but "it did this."
+
+**The end-of-turn hook backs this up** (`cli/turn_hook.py`, installed by `las claude`/`las codex`/`las update`, or `las hook install`). In Claude Code it is a `Stop` hook (`las hook claude-stop`): if a turn ends with no `las speak` from this agent since the turn's prompt, it stops the stop once and you receive a reason starting with `[las-closing-report]` — then just speak the report and end, nothing else. In Codex it is `notify` (`las hook codex-notify`): the same `[las-closing-report]` text arrives as a message typed into the TUI. A turn started by that nudge is never nudged again, and housekeeping turns (probe, title request, cc, background-task notices) never are. Speaking the report yourself in the first place means the hook never shows up.
 
 **Format (a template with a slot, not fixed text):**
 
