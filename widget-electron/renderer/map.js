@@ -49,7 +49,7 @@
     const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
     const root = document.documentElement.style;
     root.setProperty('--widget-bg', `rgba(${rgb.join(', ')}, ${opacity})`);
-    root.setProperty('--text-fill', `rgba(20, 20, 20, ${opacity})`);
+    root.setProperty('--text-fill', '#000'); // the name never fades with the slider
     root.setProperty('--btn-fill', `rgba(0, 0, 0, ${(0.16 * opacity).toFixed(3)})`);
     const dark = S.luminance(ownColor) < 0.5;
     root.setProperty('--map-text', dark ? 'rgba(245, 245, 245, 0.95)' : 'rgba(20, 20, 20, 0.92)');
@@ -430,3 +430,6 @@
     resizeTimer = setTimeout(render, 120);
   });
 })();
+
+// Glass look toggled from the global map's ⚙ (main.js 'glass:changed').
+window.las.onGlass((flag) => { const c = document.documentElement.classList; c.toggle('glass', flag !== '0'); c.toggle('native', flag === '2'); });

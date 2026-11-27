@@ -28,7 +28,7 @@
   function applyColor() {
     const root = document.documentElement.style;
     root.setProperty('--widget-bg', 'rgba(143, 155, 176, 0.82)');
-    root.setProperty('--text-fill', 'rgba(20, 20, 20, 0.82)');
+    root.setProperty('--text-fill', '#000');
     root.setProperty('--btn-fill', 'rgba(0, 0, 0, 0.13)');
     root.setProperty('--map-text', 'rgba(20, 20, 20, 0.92)');
     root.setProperty('--map-tint', 'rgba(0, 0, 0, 0.07)');
@@ -194,6 +194,18 @@
   shrinkEl.addEventListener('change', async () => applyTileSettings(await window.las.setTileSettings({ collapseSettleMs: shrinkEl.value })));
   tickEl.addEventListener('change', async () => applyTileSettings(await window.las.setTileSettings({ tickMs: tickEl.value })));
   window.las.onTileSettings(applyTileSettings);
+
+  // Glass look (main.js "glass look"): one switch for every window; macOS only.
+  const glassEl = $('glassLook');
+  const applyGlass = (g) => {
+    if (!g) return;
+    glassEl.checked = !!g.on;
+    $('glassRow').classList.toggle('hidden', !g.supported);
+    glassEl.title = g.native ? 'Liquid Glass (this macOS has it)' : 'Blur behind the widgets (this macOS has no Liquid Glass)';
+  };
+  window.las.getGlass().then(applyGlass).catch((err) => console.warn('[global] could not read glass setting:', err));
+  glassEl.addEventListener('change', async () => applyGlass(await window.las.setGlass(glassEl.checked)));
+  window.las.onGlass((flag) => { glassEl.checked = flag !== '0'; const c = document.documentElement.classList; c.toggle('glass', flag !== '0'); c.toggle('native', flag === '2'); });
 
   const checkEl = $('updateCheck');
   const checkedEl = $('updateChecked');

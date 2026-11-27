@@ -2094,7 +2094,7 @@ test('las map global opens the global panel from any folder; each widget only li
   const src = readSrc('main.js');
   const route = src.slice(src.indexOf("if (action === 'global')"), src.indexOf('if (!name) return;'));
   assert.match(route, /openGlobalMapWindow\(\)/, 'routed before the agent name is required');
-  assert.match(src, /win\.loadFile\(path\.join\(WIDGET_SOURCES\.rendererDir, 'global\.html'\)\)/);
+  assert.match(src, /win\.loadFile\(path\.join\(WIDGET_SOURCES\.rendererDir, 'global\.html'\)/);
   const cli = fs.readFileSync(path.join(__dirname, '..', '..', 'cli', 'commands', 'map.py'), 'utf8');
   assert.match(cli, /localagentsociety:\/\/society\?action=global/);
   const html = readSrc('renderer', 'index.html');
@@ -2172,4 +2172,114 @@ test('🔇 on a speech bubble stops that agent\'s current message, without mutin
   assert.match(main, /kind === 'hush'[\s\S]{0,300}webContents\.send\('speech:stop'\)/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8'), /onSpeechStop/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'widget.js'), 'utf8'), /onSpeechStop\(\(\) => stopCurrentSpeech\(\)\)/);
+});
+
+// ── glass look ──────────────────────────────────────────────────────────────
+test('glass look: every face window takes glassWindowOptions and tells its page', () => {
+  const src = readSrc('main.js');
+  // Four face windows (widget, popup, agent map, global map): each spreads the
+  // vibrancy/roundedCorners options right after its transparent background.
+  const sites = src.match(/backgroundColor: '#00000000',\n\s*\.\.\.glassWindowOptions\(\),/g) || [];
+  assert.equal(sites.length, 4, 'glassWindowOptions on all 4 face windows');
+  assert.equal((src.match(/glass: glassFlag\(\)/g) || []).length, 4, 'glass flag in all 4 page queries');
+  // Measured on Electron 33 / macOS 26: without an explicit roundedCorners the
+  // blur fills the square window rect — the option is always passed.
+  const opts = extractFunctionBody(src, 'function glassWindowOptions(');
+  assert.match(opts, /roundedCorners: true \} : \{ roundedCorners: true \}/);
+  assert.match(opts, /visualEffectState: 'active'/);
+  // Live toggle: the store, every open window's vibrancy, and the pages.
+  assert.match(src, /ipcMain\.handle\('glass:set'/);
+  const apply = extractFunctionBody(src, 'function applyGlass(');
+  assert.match(apply, /setVibrancy\(on \? GLASS_MATERIAL : null\)/);
+  assert.match(apply, /send\('glass:changed', flag\)/);
+  // The pages switch the class before first paint (head script) and live.
+  for (const page of ['index.html', 'map.html', 'global.html']) {
+    assert.match(readSrc('renderer', page), /<script>\(function \(g, c\) \{ c\.toggle\('glass', g === '1' \|\| g === '2'\); c\.toggle\('native', g === '2'\); \}\)/, page);
+  }
+  for (const js of ['widget.js', 'map.js', 'global.js']) assert.match(readSrc('renderer', js), /window\.las\.onGlass\(/, js);
+  assert.match(readSrc('preload.js'), /getGlass: .*'glass:get'/);
+  assert.match(readSrc('renderer', 'widget.css'), /html\.glass \.widget:not\(\.icon-mode\)/);
+  assert.match(readSrc('renderer', 'map.css'), /html\.glass \.map-face/);
+});
+
+test('glass look: bubbles fill their window (no margin, no tail) and fade in at the window level', () => {
+  const src = readSrc('bubbles.js');
+  assert.match(src, /glass = \(\) => '0', glassMaterial = 'hud', dress = \(\) => \{\}/, 'off unless main passes the getter');
+  assert.match(src, /\.\.\.\(glass\(\) === '1' \? \{ vibrancy: glassMaterial, visualEffectState: 'active', roundedCorners: true \} : \{\}\)/);
+  assert.match(src, /if \(glassFlag === '2'\) dress\(win, color, opacity\);/, 'native glass under the bubble');
+  assert.match(src, /glass: glassFlag \}/);
+  assert.match(src, /if \(glassOn\) win\.setOpacity\(0\);\n\s*win\.showInactive\(\);\n\s*if \(glassOn\) fadeIn\(win\);/);
+  const html = readSrc('renderer', 'bubble.html');
+  assert.match(html, /html\.glass \.card \{\n\s*margin: 0;/);
+  assert.match(html, /html\.glass \.card::before \{ display: none; \}/);
+  // The size report is the card itself in glass (the 12px was the margins).
+  assert.match(html, /height: card\.offsetHeight \+ \(glass \? 0 : 12\)/);
+  assert.match(readSrc('main.js'), /createBubbles\(\{ .*glass: glassFlag, glassMaterial: GLASS_MATERIAL, dress: dressWindow \}\)/);
+});
+
+test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibrancy the fallback', () => {
+  const src = readSrc('main.js');
+  assert.match(src, /const glass = require\('\.\/lib\/glass'\);/);
+  // '2' when the Mac has NSGlassEffectView, '1' for the blur, '0' off.
+  const flag = extractFunctionBody(src, 'function glassFlag(');
+  assert.match(flag, /return glass\.available\(\) \? '2' : '1'/);
+  // Native glass draws its own shape: no vibrancy/roundedCorners options then.
+  assert.match(extractFunctionBody(src, 'function glassWindowOptions('), /if \(!GLASS_SUPPORTED \|\| glass\.available\(\)\) return \{\};/);
+  // Every face window is dressed right after creation, with its page's tint.
+  assert.equal((src.match(/^  dressWindow\((win|p), /gm) || []).length, 4, 'widget, popup, map, global');
+  assert.match(extractFunctionBody(src, 'function dressWindow('), /glass\.attach\(win, \{ color, opacity \}\)/);
+  // A color/opacity change in ⚙ re-tints the agent's windows.
+  assert.match(src, /if \(patch\.color !== undefined \|\| patch\.opacity !== undefined\) \{\n\s*for \(const w of \[win, popup, mapWindows\.get\(name\)\]\) retintWindow\(w, next\.color, next\.opacity\);/);
+  // The pages paint no plate, rim or sheen of their own on native glass...
+  // ...except the agent color itself: AppKit mutes the glass's own tint on an
+  // un-key window, so the page lays the color over the glass (always visible).
+  assert.match(readSrc('renderer', 'widget.css'), /html\.glass\.native \.widget:not\(\.icon-mode\) \{\n\s*background: color-mix\(in srgb, var\(--widget-bg\) 40%, transparent\);/);
+  assert.match(readSrc('renderer', 'map.css'), /html\.glass\.native \.map-face \{\n\s*background: color-mix\(in srgb, var\(--widget-bg\) 40%, transparent\);/);
+  assert.match(readSrc('renderer', 'bubble.html'), /html\.glass\.native \.card \{ background: color-mix\(in srgb, var\(--bubble-color\) calc\(var\(--bubble-opacity\) \* 40%\), transparent\); box-shadow: none; \}/);
+  // lib/glass.js: capability check, no variadic objc_msgSend, superview owns the view.
+  const lib = readSrc('lib', 'glass.js');
+  assert.match(lib, /getClass\('NSGlassEffectView'\)/);
+  assert.doesNotMatch(lib, /objc_msgSend\(.*\.\.\./, 'fixed prototypes only (arm64 variadic ABI differs)');
+  assert.match(lib, /send\.obj\(glass, sel\('release'\)\)/);
+  assert.match(lib, /removeFromSuperview/);
+  // AppKit mutes an un-key window's glass tint; the private flag is re-applied
+  // on every key-state move (show/focus/blur), guarded by respondsToSelector.
+  assert.match(lib, /for \(const ev of \['show', 'ready-to-show', 'focus', 'blur'\]\) win\.on\(ev, onKey\);/);
+  assert.match(lib, /if \(!keepTintSupported\) return;\n\s*send\.bool\(glass, setter, false\);/);
+  assert.match(lib, /const KEEP_TINT_DELAYS_MS = \[0, 60, 400\];/, 'again after AppKit recomputes');
+  assert.match(lib, /for \(const ev of \['show', 'ready-to-show', 'focus', 'blur'\]\) win\.removeListener\(ev, entry\.onKey\);/, 'detach unhooks');
+  // The opacity pref is the glass alpha (less = more sharp desktop through it); the tint alpha is fixed.
+  const glassLib = require('../lib/glass');
+  assert.equal(glassLib.glassAlpha(0.78), 1, 'the default range is full glass');
+  assert.equal(glassLib.glassAlpha(0.35), 0.5, 'below 0.7 the glass thins out');
+  assert.equal(glassLib.glassAlpha(0), 0.08, 'never fully gone');
+  assert.equal(glassLib.glassAlpha('x'), 1, 'default pref');
+  assert.match(lib, /send\.double\(glass, sel\('setAlphaValue:'\), glassAlpha\(opacity\)\);/);
+  // Shipped: lib/** is in the electron-builder whitelist.
+  assert.ok(require('../package.json').build.files.includes('lib/**/*'));
+});
+
+test('the widget name is solid black at full opacity whatever the opacity slider says', () => {
+  const widget = extractFunctionBody(readSrc('renderer', 'widget.js'), 'function applyColorVars(');
+  assert.match(widget, /setProperty\('--text-fill', '#000'\)/);
+  assert.doesNotMatch(widget, /--text-fill', hexToRgba/);
+  assert.match(readSrc('renderer', 'map.js'), /setProperty\('--text-fill', '#000'\)/);
+  assert.match(readSrc('renderer', 'global.js'), /setProperty\('--text-fill', '#000'\)/);
+  assert.match(readSrc('renderer', 'widget.css'), /\.name \{[^}]*color: var\(--text-fill, #000\);/);
+});
+
+test('a drag or resize whose release never reaches the page ends on the next button-up move', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const mover = extractFunctionBody(src, 'function makeWindowMover(');
+  assert.match(mover, /if \(\(ev\.buttons & 1\) === 0\) return up\(\);/, 'mover: button up = release');
+  assert.match(mover, /el\.addEventListener\('lostpointercapture', up\);/);
+  assert.match(mover, /window\.addEventListener\('blur', up\);/);
+  assert.match(mover, /window\.removeEventListener\('blur', up\);/, 'unhooked on release');
+  const resize = src.slice(src.indexOf("window.addEventListener('mousemove', (e) => {\n  if (!resizing) return;"));
+  assert.match(resize, /if \(\(e\.buttons & 1\) === 0\) return endResize\(\);/, 'resize: button up = release');
+  assert.match(src, /resizeHandleEl\.addEventListener\('lostpointercapture', endResize\);/);
+  assert.match(src, /window\.addEventListener\('blur', endResize\);/);
+  const splitter = src.slice(src.indexOf("drawerSplitterEl.addEventListener('pointerdown'"), src.indexOf("drawerSplitterEl.addEventListener('dblclick'"));
+  assert.match(splitter, /if \(\(ev\.buttons & 1\) === 0\) return up\(\);/, 'splitter: button up = release');
+  assert.match(splitter, /addEventListener\('lostpointercapture', up\);/);
 });

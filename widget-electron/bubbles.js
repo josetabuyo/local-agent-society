@@ -68,7 +68,7 @@ function clampHeight(h) {
  * @param {{sources: {bubbleDir: string, bubblePreloadPath: string}, log: object,
  *          onAction: (kind: string, agentName: string, payload: object) => void}} opts
  */
-function createBubbles({ sources, log, onAction }) {
+function createBubbles({ sources, log, onAction, glass = () => '0', glassMaterial = 'hud', dress = () => {} }) {
   /** @type {Array<{win: BrowserWindow, agentName: string, side: string, displayId: number, height: number, timer: any, pinned: boolean}>} */
   const bubbles = [];
 
@@ -104,6 +104,16 @@ function createBubbles({ sources, log, onAction }) {
     b.timer = setTimeout(() => close(b), BUBBLE_TTL_MS);
   }
 
+  function fadeIn(win, ms = 180) {
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+      if (win.isDestroyed()) return clearInterval(tick);
+      const k = Math.min(1, (Date.now() - t0) / ms);
+      win.setOpacity(k);
+      if (k >= 1) clearInterval(tick);
+    }, 16);
+  }
+
   /**
    * @param {{agentName: string, text: string, color: string, opacity: number,
    *          side: 'left'|'right', display: Electron.Display}} spec
@@ -119,6 +129,9 @@ function createBubbles({ sources, log, onAction }) {
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
+      // Glass (main.js "glass look"): the card fills the window and the
+      // system blur sits behind it; roundedCorners gives the 15pt mask.
+      ...(glass() === '1' ? { vibrancy: glassMaterial, visualEffectState: 'active', roundedCorners: true } : {}),
       alwaysOnTop: true,
       skipTaskbar: true,
       resizable: false,
@@ -141,15 +154,22 @@ function createBubbles({ sources, log, onAction }) {
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
+    const glassFlag = glass();
+    const glassOn = glassFlag !== '0';
+    if (glassFlag === '2') dress(win, color, opacity);
     const b = { win, agentName, side, displayId, height: BUBBLE_MIN_HEIGHT, timer: null, pinned: false, voice: false, closing: false };
     bubbles.push(b);
     win.loadFile(path.join(sources.bubbleDir, 'bubble.html'), {
-      query: { agent: agentName, text, color, opacity: String(opacity), side },
+      query: { agent: agentName, text, color, opacity: String(opacity), side, glass: glassFlag },
     });
     win.once('ready-to-show', () => {
       if (win.isDestroyed()) return;
       relayout(side, displayId);
+      // A glass bubble can't slide in (the blur plate is the window itself
+      // and would show up before the card): it fades in at the window level.
+      if (glassOn) win.setOpacity(0);
       win.showInactive();
+      if (glassOn) fadeIn(win);
       armTimer(b);
     });
     win.on('closed', () => {
