@@ -195,6 +195,17 @@
   tickEl.addEventListener('change', async () => applyTileSettings(await window.las.setTileSettings({ tickMs: tickEl.value })));
   window.las.onTileSettings(applyTileSettings);
 
+  // Glass look (main.js "glass look"): one switch for every window; macOS only.
+  const glassEl = $('glassLook');
+  const applyGlass = (g) => {
+    if (!g) return;
+    glassEl.checked = !!g.on;
+    $('glassRow').classList.toggle('hidden', !g.supported);
+  };
+  window.las.getGlass().then(applyGlass).catch((err) => console.warn('[global] could not read glass setting:', err));
+  glassEl.addEventListener('change', async () => applyGlass(await window.las.setGlass(glassEl.checked)));
+  window.las.onGlass((on) => { glassEl.checked = on; document.documentElement.classList.toggle('glass', on); });
+
   const checkEl = $('updateCheck');
   const checkedEl = $('updateChecked');
   function applyUpdateStatus(status) {

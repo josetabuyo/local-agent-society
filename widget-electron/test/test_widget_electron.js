@@ -2094,7 +2094,7 @@ test('las map global opens the global panel from any folder; each widget only li
   const src = readSrc('main.js');
   const route = src.slice(src.indexOf("if (action === 'global')"), src.indexOf('if (!name) return;'));
   assert.match(route, /openGlobalMapWindow\(\)/, 'routed before the agent name is required');
-  assert.match(src, /win\.loadFile\(path\.join\(WIDGET_SOURCES\.rendererDir, 'global\.html'\)\)/);
+  assert.match(src, /win\.loadFile\(path\.join\(WIDGET_SOURCES\.rendererDir, 'global\.html'\)/);
   const cli = fs.readFileSync(path.join(__dirname, '..', '..', 'cli', 'commands', 'map.py'), 'utf8');
   assert.match(cli, /localagentsociety:\/\/society\?action=global/);
   const html = readSrc('renderer', 'index.html');
@@ -2172,4 +2172,46 @@ test('🔇 on a speech bubble stops that agent\'s current message, without mutin
   assert.match(main, /kind === 'hush'[\s\S]{0,300}webContents\.send\('speech:stop'\)/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8'), /onSpeechStop/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'widget.js'), 'utf8'), /onSpeechStop\(\(\) => stopCurrentSpeech\(\)\)/);
+});
+
+// ── glass look ──────────────────────────────────────────────────────────────
+test('glass look: every face window takes glassWindowOptions and tells its page', () => {
+  const src = readSrc('main.js');
+  // Four face windows (widget, popup, agent map, global map): each spreads the
+  // vibrancy/roundedCorners options right after its transparent background.
+  const sites = src.match(/backgroundColor: '#00000000',\n\s*\.\.\.glassWindowOptions\(\),/g) || [];
+  assert.equal(sites.length, 4, 'glassWindowOptions on all 4 face windows');
+  assert.equal((src.match(/glass: glassFlag\(\)/g) || []).length, 4, 'glass flag in all 4 page queries');
+  // Measured on Electron 33 / macOS 26: without an explicit roundedCorners the
+  // blur fills the square window rect — the option is always passed.
+  const opts = extractFunctionBody(src, 'function glassWindowOptions(');
+  assert.match(opts, /roundedCorners: true \} : \{ roundedCorners: true \}/);
+  assert.match(opts, /visualEffectState: 'active'/);
+  // Live toggle: the store, every open window's vibrancy, and the pages.
+  assert.match(src, /ipcMain\.handle\('glass:set'/);
+  const apply = extractFunctionBody(src, 'function applyGlass(');
+  assert.match(apply, /setVibrancy\(on \? GLASS_MATERIAL : null\)/);
+  assert.match(apply, /send\('glass:changed', on\)/);
+  // The pages switch the class before first paint (head script) and live.
+  for (const page of ['index.html', 'map.html', 'global.html']) {
+    assert.match(readSrc('renderer', page), /<script>document\.documentElement\.classList\.toggle\('glass'/, page);
+  }
+  for (const js of ['widget.js', 'map.js', 'global.js']) assert.match(readSrc('renderer', js), /window\.las\.onGlass\(/, js);
+  assert.match(readSrc('preload.js'), /getGlass: .*'glass:get'/);
+  assert.match(readSrc('renderer', 'widget.css'), /html\.glass \.widget:not\(\.icon-mode\)/);
+  assert.match(readSrc('renderer', 'map.css'), /html\.glass \.map-face/);
+});
+
+test('glass look: bubbles fill their window (no margin, no tail) and fade in at the window level', () => {
+  const src = readSrc('bubbles.js');
+  assert.match(src, /glass = \(\) => false, glassMaterial = 'popover'/, 'off unless main passes the getter');
+  assert.match(src, /\.\.\.\(glass\(\) \? \{ vibrancy: glassMaterial, visualEffectState: 'active' \} : \{\}\)/);
+  assert.match(src, /glass: glassOn \? '1' : '0'/);
+  assert.match(src, /if \(glassOn\) win\.setOpacity\(0\);\n\s*win\.showInactive\(\);\n\s*if \(glassOn\) fadeIn\(win\);/);
+  const html = readSrc('renderer', 'bubble.html');
+  assert.match(html, /html\.glass \.card \{\n\s*margin: 0;/);
+  assert.match(html, /html\.glass \.card::before \{ display: none; \}/);
+  // The size report is the card itself in glass (the 12px was the margins).
+  assert.match(html, /height: card\.offsetHeight \+ \(glass \? 0 : 12\)/);
+  assert.match(readSrc('main.js'), /createBubbles\(\{ .*glass: glassEnabled, glassMaterial: GLASS_MATERIAL \}\)/);
 });

@@ -714,6 +714,8 @@ expandWhenHiddenEl.addEventListener('change', () => {
   reportVisibility();
 });
 speechBubblesEl.addEventListener('change', () => persist({ speechBubbles: speechBubblesEl.checked }));
+// Glass look toggled from the global map's ⚙ (main.js 'glass:changed').
+window.las.onGlass((on) => document.documentElement.classList.toggle('glass', on));
 micLanguageEl.addEventListener('change', () => persist({ micLanguage: micLanguageEl.value }));
 micTargetEl.addEventListener('change', () => setSessionsConfig({ target: micTargetEl.value, mic_to: '' }));
 replyOutputEl.addEventListener('change', async () => {

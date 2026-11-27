@@ -430,3 +430,6 @@
     resizeTimer = setTimeout(render, 120);
   });
 })();
+
+// Glass look toggled from the global map's ⚙ (main.js 'glass:changed').
+window.las.onGlass((on) => document.documentElement.classList.toggle('glass', on));

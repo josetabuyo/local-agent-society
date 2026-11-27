@@ -62,6 +62,11 @@ contextBridge.exposeInMainWorld('las', {
   setTileSettings: (patch) => ipcRenderer.invoke('tiles:set', patch),
   /** Another widget changed the tile settings. @param {(settings: object) => void} cb */
   onTileSettings: (cb) => ipcRenderer.on('tiles:changed', (_e, settings) => cb(settings)),
+  /** Glass look (main.js "glass look"): the macOS background blur behind every face window. {on, supported} */
+  getGlass: () => ipcRenderer.invoke('glass:get'),
+  setGlass: (on) => ipcRenderer.invoke('glass:set', !!on),
+  /** The glass setting changed (any window). @param {(on: boolean) => void} cb */
+  onGlass: (cb) => ipcRenderer.on('glass:changed', (_e, on) => cb(!!on)),
 
   /** Update notice: { available, behind, commits: [{sha, subject}], checked_at, error } or null (backend/updates.py). */
   getUpdateStatus: () => ipcRenderer.invoke('update:get'),

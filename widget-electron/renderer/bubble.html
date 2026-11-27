@@ -31,6 +31,23 @@
       -webkit-app-region: no-drag;
     }
     body.left .card { animation-name: slide-in-left; }
+    /* Glass (main.js "glass look"): the window carries the system blur, so
+       the card IS the window — no margin, no tail, the 15pt system corner,
+       a thinner tint, a light rim and a top sheen standing in for the
+       refraction of the real material. */
+    html.glass .card {
+      margin: 0;
+      border-radius: 15px;
+      background:
+        linear-gradient(165deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.10) 38%, rgba(255, 255, 255, 0) 62%, rgba(255, 255, 255, 0.10) 100%),
+        color-mix(in srgb, var(--bubble-color) calc(var(--bubble-opacity) * 55%), transparent);
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.30),
+        inset 0 1px 0 rgba(255, 255, 255, 0.55),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.07);
+      animation: none;
+    }
+    html.glass .card::before { display: none; }
     .card::before {
       content: "";
       position: absolute;
@@ -164,6 +181,8 @@
     const color = params.get('color') || '#90c060';
     const opacity = Math.max(0.85, Math.min(1, Number(params.get('opacity')) || 0.92));
     const side = params.get('side') === 'left' ? 'left' : 'right';
+    const glass = params.get('glass') === '1';
+    document.documentElement.classList.toggle('glass', glass);
 
     document.body.classList.add(side);
     document.documentElement.style.setProperty('--bubble-color', color);
@@ -185,7 +204,7 @@
 
     // Main sizes the window to the card: report every change (fonts, the
     // reply row opening, long text wrapping).
-    const report = () => act('size', { height: card.offsetHeight + 12 });
+    const report = () => act('size', { height: card.offsetHeight + (glass ? 0 : 12) });
     new ResizeObserver(report).observe(card);
     report();
 

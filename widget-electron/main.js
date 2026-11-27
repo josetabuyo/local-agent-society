@@ -402,6 +402,45 @@ const WIDGET_HEIGHT = 160;
 // resize never does.
 const ICON_SIZE = 64;
 
+// ── glass look ─────────────────────────────────────────────────────────────
+// macOS only: every face window (widget, its popup, the maps, the speech
+// bubbles) carries an NSVisualEffectView behind the page — the system's own
+// background blur, like a Control Center tile — and the page paints the
+// agent's color as a thin tint over it (widget.css / map.css / bubble.html,
+// `html.glass`). A CSS backdrop-filter can't do this: it only blurs the
+// page's own pixels, never the desktop behind a transparent window.
+// Measured on Electron 33 / macOS 26: a `transparent` window only gets the
+// system corner mask with an EXPLICIT `roundedCorners: true` (otherwise the
+// blur fills the square window rect), the mask radius is 15pt — the CSS
+// radius matches it — and `visualEffectState: 'active'` keeps the full
+// material on these never-focused windows. The setting is global to the
+// instance (⚙ in the global map), live: setVibrancy() + 'glass:changed'.
+const GLASS_SUPPORTED = process.platform === 'darwin';
+const GLASS_MATERIAL = 'popover';
+function glassEnabled() {
+  return GLASS_SUPPORTED && store.get('glass', true) !== false;
+}
+function glassFlag() {
+  return glassEnabled() ? '1' : '0';
+}
+/** BrowserWindow options for a face window; roundedCorners always, so a later live toggle still gets the mask. */
+function glassWindowOptions() {
+  if (!GLASS_SUPPORTED) return {};
+  return glassEnabled() ? { vibrancy: GLASS_MATERIAL, visualEffectState: 'active', roundedCorners: true } : { roundedCorners: true };
+}
+/** Flip the blur on every open window and tell their pages (they switch the `glass` class). */
+function applyGlass(on) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try {
+      win.setVibrancy(on ? GLASS_MATERIAL : null);
+    } catch (err) {
+      log.warn('glass', `setVibrancy failed: ${err.message}`);
+    }
+    win.webContents.send('glass:changed', on);
+  }
+}
+
 function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // Random color ONLY the first time this agent ever gets a widget — once a
   // color exists (whether from that first randomization or a manual pick in
@@ -455,6 +494,7 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
     skipTaskbar: true,
     transparent: true,
     backgroundColor: '#00000000',
+    ...glassWindowOptions(),
     webPreferences: {
       preload: WIDGET_SOURCES.preloadPath,
       contextIsolation: true,
@@ -491,7 +531,7 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // window.las.getPrefs() IPC round-trip (see widget.js's initialParams
   // block, right below where agentName is read).
   win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'index.html'), {
-    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), icon: prefs.iconMode ? '1' : '0' },
+    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), icon: prefs.iconMode ? '1' : '0', glass: glassFlag() },
   });
 
   // Space (macOS virtual desktop) memory: a window is only ever placed on
@@ -897,6 +937,7 @@ function togglePopup(name, drawer = null, anchor = null) {
     skipTaskbar: true,
     transparent: true,
     backgroundColor: '#00000000',
+    ...glassWindowOptions(),
     webPreferences: { preload: WIDGET_SOURCES.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   p.agentName = name;
@@ -906,7 +947,7 @@ function togglePopup(name, drawer = null, anchor = null) {
   p.popupBarHeight = 60;
   popups.set(name, p);
   p.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'index.html'), {
-    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), role: 'popup', drawer: drawer || '', grow: place.grow },
+    query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), role: 'popup', drawer: drawer || '', grow: place.grow, glass: glassFlag() },
   });
   p.webContents.on('console-message', (_event, _level, message) => console.log(`[popup:${name}]`, message));
   placePopup(p);
@@ -1949,13 +1990,14 @@ function openMapWindow(name) {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
+    ...glassWindowOptions(),
     hasShadow: true,
     webPreferences: { preload: WIDGET_SOURCES.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   win.isMap = true;
   win.agentName = name;
   mapWindows.set(name, win);
-  win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'map.html'), { query: { agent: name, color: prefs.color || '', opacity: String(prefs.opacity) } });
+  win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'map.html'), { query: { agent: name, color: prefs.color || '', opacity: String(prefs.opacity), glass: glassFlag() } });
   win.webContents.on('console-message', (_event, _level, message) => console.log(`[map:${name}]`, message));
   win.on('closed', () => { if (mapWindows.get(name) === win) mapWindows.delete(name); });
   log.info('map', `${name}: open`);
@@ -1978,13 +2020,14 @@ function openGlobalMapWindow() {
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
+    ...glassWindowOptions(),
     hasShadow: true,
     webPreferences: { preload: WIDGET_SOURCES.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   win.isMap = true;
   win.isGlobalMap = true;
   globalMapWindow = win;
-  win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'global.html'));
+  win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'global.html'), { query: { glass: glassFlag() } });
   win.webContents.on('console-message', (_event, _level, message) => console.log('[global-map]', message));
   win.on('closed', () => { if (globalMapWindow === win) globalMapWindow = null; });
   log.info('map', 'global: open');
@@ -3063,7 +3106,7 @@ app.whenReady().then(async () => {
   setTimeout(mirrorAllColors, 30000);
 
   createTray({ registryUrl: REGISTRY_URL, onSelectAgent: openWidget, onReload: () => reloadWidgets(), onQuit: () => app.quit() });
-  bubbles = createBubbles({ sources: WIDGET_SOURCES, log, onAction: onBubbleAction });
+  bubbles = createBubbles({ sources: WIDGET_SOURCES, log, onAction: onBubbleAction, glass: glassEnabled, glassMaterial: GLASS_MATERIAL });
 
   // System sleep/wake: the occlusion-expand/mosaic feature (see
   // the tile reconciler below) drives off document.visibilitychange,
@@ -3127,6 +3170,15 @@ app.whenReady().then(async () => {
     tileHeartbeat = setInterval(() => reconcileTiles(), tileSettings.tickMs);
   };
   startTileHeartbeat();
+  // Glass look (see "glass look" above): one switch for every window of this instance.
+  ipcMain.handle('glass:get', () => ({ on: glassEnabled(), supported: GLASS_SUPPORTED }));
+  ipcMain.handle('glass:set', (_event, on) => {
+    if (!GLASS_SUPPORTED) return { on: false, supported: false };
+    store.set('glass', on !== false);
+    applyGlass(glassEnabled());
+    log.info('glass', glassEnabled() ? 'on' : 'off');
+    return { on: glassEnabled(), supported: true };
+  });
   ipcMain.handle('tiles:get', () => ({ ...tileSettings, limits: TILE_SETTINGS_LIMITS, defaults: { tickMs: TILE_TICK_MS, collapseSettleMs: TILE_COLLAPSE_SETTLE_MS } }));
   ipcMain.handle('tiles:set', (_event, patch) => {
     const before = { ...tileSettings };
