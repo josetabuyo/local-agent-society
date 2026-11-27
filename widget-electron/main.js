@@ -197,9 +197,18 @@ const vortexiaClients = new Map();
 // run simultaneously; two launches for the SAME agent still dedupe to one.
 
 const gotLock = app.requestSingleInstanceLock();
+// The crash marker (backend/widget_watchdog.py): our pid while we run, gone on
+// a clean quit — one left behind with a dead pid means we crashed, and the
+// backend reopens the app. Only the packaged app: a dev `npm start` is not
+// something to bring back.
+const CRASH_MARKER = path.join(path.dirname(SESSION_LOG_PATH), 'widget.running');
 if (!gotLock) {
   app.quit();
 } else {
+  if (app.isPackaged) {
+    try { fs.writeFileSync(CRASH_MARKER, String(process.pid)); } catch { /* best-effort */ }
+    app.on('will-quit', () => { try { fs.unlinkSync(CRASH_MARKER); } catch { /* already gone */ } });
+  }
   app.on('second-instance', (_event, argv) => {
     const url = argv.find((a) => a.startsWith(`${PROTOCOL_SCHEME}://`));
     if (url) {

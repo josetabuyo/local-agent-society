@@ -41,3 +41,4 @@ session/bridge-*.json
 # Tile reconciler's current picture (widget-electron/main.js) — rewritten every heartbeat
 session/widget-tiles.json
 bridge/node_modules/
+session/widget.running

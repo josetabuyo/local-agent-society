@@ -1113,6 +1113,9 @@ def _watch_chat() -> None:
 
 threading.Thread(target=_watch_chat, daemon=True).start()
 
+import widget_watchdog as _widget_watchdog
+_widget_watchdog.start()  # reopen the widget app if it crashes
+
 
 @app.get("/agents/{name}/chat")
 @app.get("/device/agents/{name}/chat")

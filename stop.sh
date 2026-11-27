@@ -18,6 +18,9 @@ bash "$SYSTEM_DIR/backend/service.sh" stop
 # without waiting — helper processes (renderer/GPU) can still be shutting
 # down and holding file handles into the bundle when the rebuild starts,
 # corrupting the freshly-built .app so it silently fails to launch.
+# A deliberate stop is not a crash: drop the marker first so the backend's
+# widget watchdog (backend/widget_watchdog.py) doesn't reopen what we close.
+rm -f "$SYSTEM_DIR/session/widget.running"
 FOUND=0
 WIDGET_PATTERN='Local Agent Society\.app/Contents/MacOS/Local Agent Society|widget-electron'
 PIDS=$(pgrep -f "$WIDGET_PATTERN" 2>/dev/null || true)
