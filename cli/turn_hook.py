@@ -8,16 +8,19 @@ the chat goes quiet. LAS has no AI to write that summary itself, so the hook
 asks the agent that did the work:
 
 * Claude Code — a `Stop` hook (`las hook claude-stop`). If the turn ends with
-  no `las speak` from this agent since the turn's prompt, it blocks the stop
-  once with a reason telling the agent to speak its report. `stop_hook_active`
-  (Claude's own flag for "already continued by a Stop hook") ends it there: one
-  nudge per turn, never a loop.
+  no `las speak` from this agent since the turn's prompt, the hook speaks the
+  report ITSELF from the agent's own final message (its first sentence,
+  markdown stripped) — quietly, no blocked stop, no extra turn: a blocked stop
+  showed up as a yellow "Stop hook reported a problem" plus a second turn,
+  far too often (2026-11-27). Only a turn with no final text gets the old
+  nudge (block once; `stop_hook_active` ends it, never a loop).
 * Claude Code — a `UserPromptSubmit` hook (`las hook claude-prompt`): a prompt
   typed (or dictated with Claude's own voice input) into the terminal is a human
   input on the Mac, so auto voice routing sends the reply's voice to the Mac —
   vortexia never sees it, so without this it stayed on the phone that dictated last.
 * Codex — its `notify` program (`las hook codex-notify`), run after each turn
-  with the turn's JSON. Codex can't be blocked, so the nudge goes the way every
+  with the turn's JSON. Same rule: its `last-assistant-message` is spoken as
+  the report; only without one, the nudge goes the way every
   other message reaches it: into this agent's codex session's mailbox, typed
   into the TUI that `las codex` runs. A turn whose prompt WAS that nudge is
   never nudged again.
@@ -97,6 +100,76 @@ def nudge_text(name: str, cfg: dict) -> str:
             f"Nothing else: no new work, no other reply.")
 
 
+# ── the report, from the agent's own words ──────────────────────────────────
+def _plain(line: str) -> str:
+    line = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", line)          # [label](url) -> label
+    line = re.sub(r"^\s*(?:[-•>]|\d+[.)])\s+", "", line)            # list / quote markers
+    return re.sub(r"[`*#|]+", "", line).strip()
+
+
+def first_sentence(text: str) -> str:
+    """The first whole sentence of the agent's final message, as plain speech.
+    Headings and code blocks are skipped; a heading is used only when nothing else is there."""
+    heading = ""
+    for raw in re.sub(r"```.*?```", "\n", text or "", flags=re.S).splitlines():
+        line = _plain(raw)
+        if not line:
+            continue
+        if raw.lstrip().startswith("#"):
+            heading = heading or line
+            continue
+        m = re.match(r"(.+?[.!?…])(?:\s|$)", line)
+        return (m.group(1) if m else line).rstrip(".!?…:; ").strip()
+    return heading.rstrip(".!?…:; ")
+
+
+def report_text(name: str, cfg: dict, final_message: str) -> str | None:
+    summary = first_sentence(final_message)
+    if not summary:
+        return None
+    verb = "Reportando" if str(cfg.get("locale", "")).lower().startswith("es") else "Reporting"
+    return f"{verb}: {summary}. {name}."
+
+
+def speak_report(name: str, text: str, post=None) -> bool:
+    """Queue `text` in `name`'s voice (the same queue `las speak` uses)."""
+    body = {"text": text, "name": name}
+    try:
+        if post:
+            post(body)
+        else:
+            req = urllib.request.Request(f"{BACKEND}/queue/speak", data=json.dumps(body).encode(), headers={"content-type": "application/json"})
+            urllib.request.urlopen(req, timeout=3).read()
+    except Exception:
+        return False
+    return True
+
+
+def last_assistant_text(transcript: Path, since_ms: int) -> str:
+    """The last assistant text written after `since_ms` (the turn's final message)."""
+    last = ""
+    try:
+        lines = transcript.read_text(errors="replace").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if e.get("type") != "assistant":
+            continue
+        try:
+            ts = int(datetime.fromisoformat(str(e.get("timestamp")).replace("Z", "+00:00")).timestamp() * 1000)
+        except ValueError:
+            continue
+        content = (e.get("message") or {}).get("content")
+        texts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"] if isinstance(content, list) else []
+        if ts >= since_ms and any(t.strip() for t in texts):
+            last = "\n".join(texts)
+    return last
+
+
 # ── Claude Code: Stop hook ──────────────────────────────────────────────────
 def _text_of(content) -> str | None:
     """A user entry's prompt text; None for a tool result (not a new prompt)."""
@@ -140,8 +213,10 @@ def voice_turn() -> bool:
     return bool(os.environ.get("LAS_VOICE_SESSION"))
 
 
-def claude_stop(payload: dict, fetch=None) -> dict | None:
-    """The Stop hook's decision: a {"decision": "block", ...} or None (let it stop)."""
+def claude_stop(payload: dict, fetch=None, speak_post=None) -> dict | None:
+    """The Stop hook's decision: None (let it stop — after speaking the report
+    from the final message when the agent didn't), or a {"decision": "block"}
+    nudge when there is no final message to speak."""
     if payload.get("stop_hook_active") or voice_turn():
         return None
     here = agent_here(payload.get("cwd") or os.getcwd())
@@ -155,6 +230,10 @@ def claude_stop(payload: dict, fetch=None) -> dict | None:
     if is_housekeeping(text) or re.search(r"<command-name>|<local-command", text):
         return None
     if spoke_since(name, ts, fetch) is not False:
+        return None
+    final = payload.get("last_assistant_message") or last_assistant_text(Path(payload.get("transcript_path") or ""), ts)
+    report = report_text(name, cfg, final)
+    if report and speak_report(name, report, speak_post):
         return None
     return {"decision": "block", "reason": nudge_text(name, cfg)}
 
@@ -192,8 +271,9 @@ def _load_state() -> dict:
         return {}
 
 
-def codex_notify(payload: dict, fetch=None, send=None, now=time.time, post=None) -> bool:
-    """After a Codex turn: nudge its session when it didn't speak. True = nudged."""
+def codex_notify(payload: dict, fetch=None, send=None, now=time.time, post=None, speak_post=None) -> bool:
+    """After a Codex turn that didn't speak: speak the report from its final
+    message, or (no final message) nudge its session. True = nudged."""
     if payload.get("type") != "agent-turn-complete" or voice_turn():
         return False
     thread = str(payload.get("thread-id") or payload.get("turn-id") or "?")
@@ -216,6 +296,9 @@ def codex_notify(payload: dict, fetch=None, send=None, now=time.time, post=None)
     if asked.strip() and "[LAS message from" not in asked:
         note_terminal_input(name, post)  # typed in the TUI: voice back on the Mac
     if spoke_since(name, since, fetch) is not False:
+        return False
+    report = report_text(name, cfg, str(payload.get("last-assistant-message") or ""))
+    if report and speak_report(name, report, speak_post):
         return False
     body = {"message": nudge_text(name, cfg), "to": name, "session": "codex", "source": "system", "from_agent": "LAS"}
     try:

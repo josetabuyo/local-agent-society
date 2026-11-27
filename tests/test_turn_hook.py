@@ -1,4 +1,6 @@
-"""The end-of-turn hook asks an agent for its closing report once, and only when it didn't speak."""
+"""The end-of-turn hook: when an agent didn't speak its closing report, the hook
+speaks it from the agent's own final message (quietly, no blocked stop); only a
+turn with no final text gets the old one-time nudge."""
 import json
 from pathlib import Path
 
@@ -28,7 +30,21 @@ def chat(*kinds):
     return lambda _url: {"messages": [{"kind": k} for k in kinds]}
 
 
-def test_turn_without_speak_is_blocked_once(tmp_path):
+def test_turn_without_speak_speaks_the_final_message_instead_of_blocking(tmp_path):
+    d = agent_dir(tmp_path)
+    t = transcript(tmp_path, "fix the bug")
+    t.write_text(t.read_text() + "\n" + json.dumps({"type": "assistant", "timestamp": "2026-11-27T10:05:20Z",
+        "message": {"content": [{"type": "text", "text": "## Hecho\n\nArreglé el **bug** en `cli/x.py`. Tests en verde."}]}}))
+    spoken = []
+    p = {"cwd": str(d), "transcript_path": str(t)}
+    assert th.claude_stop(p, fetch=chat("message"), speak_post=spoken.append) is None
+    assert spoken == [{"text": "Reportando: Arreglé el bug en cli/x.py. Alpha.", "name": "Alpha"}]
+    # Claude's own field wins over the transcript
+    th.claude_stop({**p, "last_assistant_message": "Listo, reporte hablado."}, fetch=chat(), speak_post=spoken.append)
+    assert spoken[-1]["text"] == "Reportando: Listo, reporte hablado. Alpha."
+
+
+def test_turn_without_speak_or_final_text_is_blocked_once(tmp_path):
     d = agent_dir(tmp_path)
     p = {"cwd": str(d / "sub"), "transcript_path": str(transcript(tmp_path, "fix the bug"))}
     (d / "sub").mkdir()
@@ -73,6 +89,10 @@ def test_codex_turn_without_speak_is_nudged_through_its_session(tmp_path, monkey
     assert not th.codex_notify(nudge_turn, fetch=chat(), send=sent.append, now=lambda: 1010.0, post=posted.append)
     assert not th.codex_notify(turn, fetch=chat("speak"), send=sent.append, now=lambda: 1020.0, post=posted.append)
     assert len(sent) == 1
+    spoken = []
+    assert not th.codex_notify({**turn, "last-assistant-message": "Done: fixed it.\nMore."}, fetch=chat(), send=sent.append,
+                               now=lambda: 1030.0, post=posted.append, speak_post=spoken.append)
+    assert spoken == [{"text": "Reporting: Done: fixed it. Alpha.", "name": "Alpha"}] and len(sent) == 1
 
 
 def test_installers_are_idempotent_and_keep_what_is_there(tmp_path):
