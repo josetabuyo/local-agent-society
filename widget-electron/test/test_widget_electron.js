@@ -2258,3 +2258,12 @@ test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibran
   // Shipped: lib/** is in the electron-builder whitelist.
   assert.ok(require('../package.json').build.files.includes('lib/**/*'));
 });
+
+test('the widget name is solid black at full opacity whatever the opacity slider says', () => {
+  const widget = extractFunctionBody(readSrc('renderer', 'widget.js'), 'function applyColorVars(');
+  assert.match(widget, /setProperty\('--text-fill', '#000'\)/);
+  assert.doesNotMatch(widget, /--text-fill', hexToRgba/);
+  assert.match(readSrc('renderer', 'map.js'), /setProperty\('--text-fill', '#000'\)/);
+  assert.match(readSrc('renderer', 'global.js'), /setProperty\('--text-fill', '#000'\)/);
+  assert.match(readSrc('renderer', 'widget.css'), /\.name \{[^}]*color: var\(--text-fill, #000\);/);
+});

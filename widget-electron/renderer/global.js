@@ -28,7 +28,7 @@
   function applyColor() {
     const root = document.documentElement.style;
     root.setProperty('--widget-bg', 'rgba(143, 155, 176, 0.82)');
-    root.setProperty('--text-fill', 'rgba(20, 20, 20, 0.82)');
+    root.setProperty('--text-fill', '#000');
     root.setProperty('--btn-fill', 'rgba(0, 0, 0, 0.13)');
     root.setProperty('--map-text', 'rgba(20, 20, 20, 0.92)');
     root.setProperty('--map-tint', 'rgba(0, 0, 0, 0.07)');

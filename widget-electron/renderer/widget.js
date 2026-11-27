@@ -271,7 +271,8 @@ function applyColorVars(color, opacity) {
   // opacity slider — the crisp outline (text-stroke on the name, border on
   // the face buttons) stays fully opaque regardless, so both stay legible.
   document.documentElement.style.setProperty('--widget-bg', hexToRgba(color, opacity));
-  document.documentElement.style.setProperty('--text-fill', hexToRgba('#141414', opacity));
+  // The name never fades: black at full opacity whatever the slider says (explicit request, 2026-11-27).
+  document.documentElement.style.setProperty('--text-fill', '#000');
   document.documentElement.style.setProperty('--btn-fill', `rgba(0, 0, 0, ${(0.16 * opacity).toFixed(3)})`);
 
   // Log/bubble contrast: dark widget color -> light text on a light-tinted
