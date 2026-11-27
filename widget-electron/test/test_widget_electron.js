@@ -2230,10 +2230,12 @@ test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibran
   assert.match(extractFunctionBody(src, 'function dressWindow('), /glass\.attach\(win, \{ color, opacity \}\)/);
   // A color/opacity change in ⚙ re-tints the agent's windows.
   assert.match(src, /if \(patch\.color !== undefined \|\| patch\.opacity !== undefined\) \{\n\s*for \(const w of \[win, popup, mapWindows\.get\(name\)\]\) retintWindow\(w, next\.color, next\.opacity\);/);
-  // The pages paint nothing behind their content on native glass.
-  assert.match(readSrc('renderer', 'widget.css'), /html\.glass\.native \.widget:not\(\.icon-mode\) \{\n\s*background: transparent;/);
-  assert.match(readSrc('renderer', 'map.css'), /html\.glass\.native \.map-face \{\n\s*background: transparent;/);
-  assert.match(readSrc('renderer', 'bubble.html'), /html\.glass\.native \.card \{ background: transparent; box-shadow: none; \}/);
+  // The pages paint no plate, rim or sheen of their own on native glass...
+  // ...except the agent color itself: AppKit mutes the glass's own tint on an
+  // un-key window, so the page lays the color over the glass (always visible).
+  assert.match(readSrc('renderer', 'widget.css'), /html\.glass\.native \.widget:not\(\.icon-mode\) \{\n\s*background: color-mix\(in srgb, var\(--widget-bg\) 40%, transparent\);/);
+  assert.match(readSrc('renderer', 'map.css'), /html\.glass\.native \.map-face \{\n\s*background: color-mix\(in srgb, var\(--widget-bg\) 40%, transparent\);/);
+  assert.match(readSrc('renderer', 'bubble.html'), /html\.glass\.native \.card \{ background: color-mix\(in srgb, var\(--bubble-color\) calc\(var\(--bubble-opacity\) \* 40%\), transparent\); box-shadow: none; \}/);
   // lib/glass.js: capability check, no variadic objc_msgSend, superview owns the view.
   const lib = readSrc('lib', 'glass.js');
   assert.match(lib, /getClass\('NSGlassEffectView'\)/);

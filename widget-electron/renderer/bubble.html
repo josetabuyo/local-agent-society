@@ -49,7 +49,7 @@
     }
     html.glass .card::before { display: none; }
     /* Native Liquid Glass under the window: nothing painted behind the words. */
-    html.glass.native .card { background: transparent; box-shadow: none; }
+    html.glass.native .card { background: color-mix(in srgb, var(--bubble-color) calc(var(--bubble-opacity) * 40%), transparent); box-shadow: none; }
     .card::before {
       content: "";
       position: absolute;

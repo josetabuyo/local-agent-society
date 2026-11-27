@@ -233,6 +233,6 @@ html.glass .map-face {
 }
 .global-settings .settings-row.hidden { display: none; }
 html.glass.native .map-face {
-  background: transparent;
+  background: color-mix(in srgb, var(--widget-bg) 40%, transparent);
   box-shadow: none;
 }

@@ -27,7 +27,11 @@ const DEFAULT_RADIUS = 15;
 const NSViewWidthSizable = 2;
 const NSViewHeightSizable = 16;
 const NSWindowBelow = -1;
-const NSGlassEffectViewStyleRegular = 0;
+// Style 'clear' (1), not 'regular' (0): measured over pure white in dark
+// mode, regular is a dark smoky plate (white → gray 114) that swallows the
+// tint when the window is not key (→ gray 126 with it), while clear stays a
+// light pane (white → 207) and keeps the tint (→ (206,158,159)) key or not.
+const NSGlassEffectViewStyleClear = 1;
 
 let api = null;
 let initError = null;
@@ -155,7 +159,7 @@ function attach(win, { color, opacity, radius = DEFAULT_RADIUS } = {}) {
   let glass = send.obj(api.glassClass, sel('alloc'));
   glass = send.initRect(glass, sel('initWithFrame:'), bounds);
   send.double(glass, sel('setCornerRadius:'), radius);
-  send.long(glass, sel('setStyle:'), NSGlassEffectViewStyleRegular);
+  send.long(glass, sel('setStyle:'), NSGlassEffectViewStyleClear);
   send.ptr(glass, sel('setTintColor:'), tintColor(color));
   send.double(glass, sel('setAlphaValue:'), glassAlpha(opacity));
   send.ulong(glass, sel('setAutoresizingMask:'), NSViewWidthSizable | NSViewHeightSizable);
