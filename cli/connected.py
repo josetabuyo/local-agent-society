@@ -64,13 +64,16 @@ def spawn_detached(argv: list, *, cwd: Path, log_path: Path, env: dict) -> subpr
     return subprocess.Popen(argv, **kwargs)
 
 
-def connect(name: str, agent_dir: Path, command: str, *, locale: str = "", sessions=detached_sessions) -> tuple:
-    """Start `command` as a detached session of `name`; (pid, log path). Raises ConnectError if it dies right away."""
+def connect(name: str, agent_dir: Path, command: str, *, locale: str = "", runtime: str = "", title: str = "",
+            sessions=detached_sessions) -> tuple:
+    """Start `command` as a detached session of `name`; (pid, log path). Raises ConnectError if it dies right away.
+    `runtime`/`title` name the session in 👥 (default: the command's first word / the command line)."""
     log_path = new_log_path(name)
     env = {**os.environ, "LAS_LOCALE": locale}
     if sys.platform != "win32":
         env["SHELL"] = login_shell()
-    argv = bridge_argv("exec", name, ["--exec", command, "--text-as", "arg", "--log", str(log_path)])
+    extra = (["--runtime", runtime] if runtime else []) + (["--title", title] if title else [])
+    argv = bridge_argv("exec", name, ["--exec", command, "--text-as", "arg", "--log", str(log_path), *extra])
     proc = spawn_detached(argv, cwd=agent_dir, log_path=log_path, env=env)
     deadline = time.time() + STARTUP_WAIT_S
     while time.time() < deadline:

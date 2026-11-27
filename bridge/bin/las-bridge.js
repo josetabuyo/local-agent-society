@@ -35,6 +35,7 @@ const { values: opts, positionals } = parseArgs({
     'intercept-url': { type: 'string' },
     exec: { type: 'string' },
     runtime: { type: 'string' },
+    title: { type: 'string' },
     log: { type: 'string' },
     'text-as': { type: 'string' },
     yes: { type: 'boolean', default: false },
@@ -47,7 +48,7 @@ const { values: opts, positionals } = parseArgs({
 const SINKS = ['claude', 'stdout', 'shell', 'exec'];
 const sinkName = positionals[0];
 if (opts.help || !SINKS.includes(sinkName)) {
-  process.stderr.write(`usage: las-bridge <${SINKS.join('|')}> [--agent NAME] [--exec CMD] [--runtime NAME] [--yes] [--all] [--intercept-url URL] [--port N] [--quiet]\n`);
+  process.stderr.write(`usage: las-bridge <${SINKS.join('|')}> [--agent NAME] [--exec CMD] [--runtime NAME] [--title TEXT] [--yes] [--all] [--intercept-url URL] [--port N] [--quiet]\n`);
   process.exit(opts.help ? 0 : 64);
 }
 
@@ -118,7 +119,7 @@ const sid = newSessionId(runtime);
 const isDetached = sinkName === 'exec' && Boolean(opts.log);
 const detached = isDetached ? { command: opts.exec, log: opts.log } : null;
 const commandSession = isDetached || opts['text-as'] === 'arg';
-const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, title: commandSession ? opts.exec : '', log });
+const session = new SessionRegistry({ agent: agent.name, sid, runtime, cwd: process.cwd(), detached, title: opts.title || (commandSession ? opts.exec : ''), log });
 const speak = makeSpeaker({ agent: agent.name });
 if (sinkName === 'exec') {
   // `las <command…>` / `las attach`: text as the last argument, answers spoken for the mic (answer.js).

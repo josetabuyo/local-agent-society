@@ -134,9 +134,15 @@ def turn_prompt(transcript: Path) -> tuple[int, str] | None:
     return last
 
 
+def voice_turn() -> bool:
+    """A turn of a voice session (cli/voice_session.py): its final message is
+    spoken by LAS already — no nudge, and it is not the human typing here."""
+    return bool(os.environ.get("LAS_VOICE_SESSION"))
+
+
 def claude_stop(payload: dict, fetch=None) -> dict | None:
     """The Stop hook's decision: a {"decision": "block", ...} or None (let it stop)."""
-    if payload.get("stop_hook_active"):
+    if payload.get("stop_hook_active") or voice_turn():
         return None
     here = agent_here(payload.get("cwd") or os.getcwd())
     if not here:
@@ -172,7 +178,7 @@ def claude_prompt(payload: dict, post=None) -> bool:
     the agent's voice should come out on this Mac, not on the phone that
     dictated last. True = noted."""
     text = str(payload.get("prompt") or "")
-    if not text.strip() or "<channel" in text or text.lstrip().startswith("/") or is_housekeeping(text):
+    if voice_turn() or not text.strip() or "<channel" in text or text.lstrip().startswith("/") or is_housekeeping(text):
         return False
     here = agent_here(payload.get("cwd") or os.getcwd())
     return bool(here) and note_terminal_input(here[0], post)
@@ -188,7 +194,7 @@ def _load_state() -> dict:
 
 def codex_notify(payload: dict, fetch=None, send=None, now=time.time, post=None) -> bool:
     """After a Codex turn: nudge its session when it didn't speak. True = nudged."""
-    if payload.get("type") != "agent-turn-complete":
+    if payload.get("type") != "agent-turn-complete" or voice_turn():
         return False
     thread = str(payload.get("thread-id") or payload.get("turn-id") or "?")
     state = _load_state()

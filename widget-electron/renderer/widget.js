@@ -2518,6 +2518,38 @@ function renderSessionRows(body) {
     refreshRow.appendChild(refreshBtn);
     body.appendChild(refreshRow);
   }
+  body.appendChild(voiceSessionRow());
+}
+
+/**
+ * 🎙 Claude / 🎙 Codex: open a voice session — no terminal, one conversation,
+ * every dictation a turn and every answer spoken (docs/adr/0008). It takes
+ * the mic, so the menu closes on success.
+ */
+function voiceSessionRow() {
+  const row = document.createElement('div');
+  row.className = 'open-row';
+  for (const [runtime, label] of [['claude', '🎙 Claude'], ['codex', '🎙 Codex']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'open-label';
+    b.textContent = label;
+    b.title = `Open ${label.slice(3)} with no terminal: talk to it by voice, it answers out loud`;
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      b.textContent = `${label} …`;
+      const res = await window.las.startVoiceSession(agentName, runtime);
+      if (res) {
+        await reloadChildrenMenu();
+        closeChildrenMenu();
+      } else {
+        b.textContent = `${label} — failed`;
+        b.disabled = false;
+      }
+    });
+    row.appendChild(b);
+  }
+  return row;
 }
 
 /** Re-read the sessions and redraw the menu, if it is still open. */

@@ -2091,6 +2091,15 @@ ipcMain.handle('agent:request-session-titles', async (_event, name) => {
   return json;
 });
 
+// The children menu's 🎙 buttons: a voice session — Claude or Codex with no
+// terminal, one conversation, answers spoken (docs/adr/0008). The backend runs
+// `las <runtime> --headless` in the agent's folder.
+ipcMain.handle('agent:session-voice', async (_event, name, runtime) => {
+  const json = await postBackend(`/agents/${encodeURIComponent(name)}/sessions/voice`, `voice session for ${name}`, { runtime });
+  if (json) log.info('children', `${name}: ${runtime} voice session opened`);
+  return json;
+});
+
 // The children menu's find button: the backend gives the session's terminal
 // a unique title and rings its bell (session_beacon); Ghostty, which exposes
 // its terminals' titles, is then asked to focus the one carrying it — that

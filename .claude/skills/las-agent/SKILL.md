@@ -65,6 +65,7 @@ las codex [codex args]     # Codex's own TUI (`codex --yolo`) in a PTY; every ma
 las shell [--yes] [--all]  # a terminal with no AI: messages print, kind=command ones run after y/N
 las <command…>             # any program on PATH, connected with NO terminal: each message runs `<command…> '<text>'` once (`las echo Recibido:`)
 las attach <command…>      # the same, but in this terminal (each run's output shows here)
+las claude --headless      # Claude with NO terminal, voice only: each message = one turn of the same conversation (also claudeRelay, codex)
 ```
 
 `las <command…>` connects ANY program: when the first word is not a `las` subcommand but a program on PATH, it becomes a session of the agent in this folder (runtime = its first word, e.g. `echo`; title = the command line) with NO terminal, and this terminal is free again. Every message to it runs the command once with the text as ONE more argument — `las echo Recibido:` + a dictation runs `echo Recibido: '<what the mic heard>'` — and what it prints is the answer: spoken in the agent's voice for the mic, sent back to another agent, never echoed into itself. It never takes the default session: pick it in 👥 to point the mic at it; ✕ closes it; 📄 opens its log. `las attach <command…>` is the same in the foreground. Contract: docs/adr/0006-detached-sessions.md. There is no 🧭 general mic anymore: talking to a particular terminal is a task for whatever agent is listening. LAS carries no AI of its own and is coupled to no product: whatever thinks inside a connected command is that command's business.
@@ -110,6 +111,12 @@ las agent poll --timeout 2    # prints anything queued; the mailbox keeps everyt
 ```
 
 **Never start `las agent listen` under a Monitor anymore.** That was the previous delivery path, and its 30-minute re-arm turns — a shell command, a "Monitor started", a "Listener re-armed" and a recap, every half hour, in every session — are exactly the noise the channel removes. `las agent listen` / `las bridge stdout` still exist for plain terminals and scripts; `las bridge shell` for a terminal with no AI in it; `las codex --exec CMD` / `las bridge exec` for a headless runtime (one run per message, answer sent back). None of them is for a Claude session.
+
+### Voice sessions — Claude or Codex with no terminal (docs/adr/0008)
+
+`las claude --headless`, `las claudeRelay --headless` and `las codex --headless` connect a session of the agent here that has **no terminal at all**: it shows in 👥 (`detached`, title "sesión de voz, sin terminal"), takes the mic, and every message to it runs ONE non-interactive turn of the SAME conversation — `claude -p --session-id/--resume <conv>`, `codex exec [resume <thread>]` — whose final message is spoken in the agent's voice (to the human) or sent back (to another agent). The human dictates, hears the answer, dictates the reply: a whole conversation by voice. ✕ in 👥 closes it, 📄 opens its log. The same start is open to every entry point: `POST /agents/{name}/sessions/voice {"runtime": "claude"|"claudeRelay"|"codex"}` (the widget's 👥 drawer, the phone, another agent).
+
+**If you ARE such a turn** — `LAS_VOICE_SESSION=1` is in your environment, and the appended system prompt says so: none of this skill's session-start work applies. Do not run `las bridge status`, `las agent register` or `las agent poll`, do not ack probes, do not set titles, do not `las speak` (no closing report either: your final message IS the report, LAS speaks it), and never tell the human about live delivery or `las claude --resume` — this session is connected by design. Just do the task and end with a short answer in the agent's language, plain spoken sentences, no markdown. The end-of-turn hooks stay out of voice turns by themselves.
 
 ### Mic self-test ping — reply "OK" immediately
 

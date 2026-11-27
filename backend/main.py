@@ -1655,6 +1655,47 @@ def close_session(name: str, sid: str):
     return {**unregister_session(name, sid), "tty": tty}
 
 
+VOICE_RUNTIMES = {"claude": ["claude", "--headless"], "claudeRelay": ["claudeRelay", "--headless"], "codex": ["codex", "--headless"]}
+
+
+class VoiceSessionRequest(BaseModel):
+    runtime: str = "claude"
+
+
+def _login_shell() -> str:
+    """The user's login shell: launchd's PATH has no claude/codex/node, a login shell has the terminal's."""
+    if os.environ.get("SHELL"):
+        return os.environ["SHELL"]
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_shell or "/bin/sh"
+    except (ImportError, KeyError):
+        return "/bin/sh"
+
+
+@app.post("/agents/{name}/sessions/voice")
+def start_voice_session(name: str, body: VoiceSessionRequest):
+    """Open a voice session of `name` — Claude or Codex with no terminal (docs/adr/0008):
+    `las <runtime> --headless` in the agent's folder. The widget's 👥 drawer, the phone
+    and other agents use this; it returns the agent's sessions once the new one is in."""
+    if body.runtime not in VOICE_RUNTIMES:
+        raise HTTPException(status_code=422, detail=f"runtime must be one of {', '.join(VOICE_RUNTIMES)}")
+    entry = load_json(REGISTRY_FILE, {}).get(name)
+    if not entry or not entry.get("path") or not Path(entry["path"]).is_dir():
+        raise HTTPException(status_code=404, detail="Agent not found")
+    line = " ".join(["las", *VOICE_RUNTIMES[body.runtime], "--no-widget"])
+    try:
+        out = subprocess.run([_login_shell(), "-lc", line], cwd=entry["path"], capture_output=True, text=True,
+                             timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as err:
+        raise HTTPException(status_code=500, detail=f"{line}: {err}")
+    if out.returncode != 0:
+        raise HTTPException(status_code=500, detail=(out.stderr or out.stdout).strip()[-400:] or f"{line} exited {out.returncode}")
+    with _sessions_lock:
+        view = _sessions_view(name, _load_sessions(name))
+    return {"ok": True, "runtime": body.runtime, "output": out.stdout.strip(), **view}
+
+
 def _society_node(name: str, registry: dict, inactive: list, sessions_by_agent: dict) -> dict:
     """One agent as a tile of the society panel: identity, scope, its
     terminals and map elements. Children are attached by society_tree."""

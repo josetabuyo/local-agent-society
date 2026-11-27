@@ -13,7 +13,7 @@ from cli.commands.shell_init import shell_init
 from cli.commands.vocab import vocab_cmd
 from cli.commands.map import map_group
 from cli.commands.hook import hook
-from cli.commands.bridge import attach_cmd, bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd
+from cli.commands.bridge import attach_cmd, bridge, claude_cmd, claude_relay_cmd, codex_cmd, shell_cmd, voice_turn_cmd
 
 
 class LasGroup(click.Group):
@@ -88,5 +88,6 @@ cli.add_command(claude_relay_cmd, name="claudeRelay")
 cli.add_command(codex_cmd, name="codex")
 cli.add_command(shell_cmd, name="shell")
 cli.add_command(attach_cmd, name="attach")
+cli.add_command(voice_turn_cmd, name="voice-turn")
 cli.add_command(shell_init, name="shell-init")
 cli.add_command(vocab_cmd, name="vocab")

@@ -621,14 +621,18 @@ class ClaudeGroup(click.Group):
 @click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
 @click.option("--account", default=None, metavar="NAME", help="Another Claude login on this Mac: config in ~/.claude-NAME, session shown as runtime claudeNAME (e.g. --account relay -> claudeRelay).")
 @click.option("--pty/--channel", "pty", default=None, help="How the mailbox reaches Claude: typed into its prompt (--pty, no channel needed) or the LAS channel (--channel). Default: the channel, unless this account's org blocks channels.")
+@click.option("--headless", is_flag=True, help="No terminal: a voice session — each message is one turn of the same conversation, the answer is spoken (docs/adr/0008).")
 @click.pass_context
-def claude_cmd(ctx, no_widget, account, pty):
+def claude_cmd(ctx, no_widget, account, pty, headless):
     """Claude Code, connected to LAS: `las claude [claude args]` starts it here with the channel on, presence published and the widget on this Space.
 
     Everything after `las claude` that isn't one of the subcommands below goes to Claude Code as-is (`--resume`, a prompt, `mcp list`...).
     `--account relay` (or CLAUDE_CONFIG_DIR=~/.claude-relay) opens a second Claude account alongside the personal one.
     """
     ctx.obj = {"no_widget": no_widget, "account": account, "pty": pty}
+    if headless:
+        start_voice_session("claude", account=account, widget=not no_widget)
+        return
     if ctx.invoked_subcommand is None:
         _launch_claude(list(ctx.args), no_widget, account, pty)
     else:
@@ -679,8 +683,9 @@ RELAY_ACCOUNT = "relay"
 @click.command("claudeRelay", context_settings={"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []})
 @click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
 @click.option("--pty/--channel", "pty", default=None, help="Typed into the prompt, or the LAS channel. Default: the channel unless the org blocks it.")
+@click.option("--headless", is_flag=True, help="No terminal: a voice session on this account (docs/adr/0008).")
 @click.argument("claude_args", nargs=-1, type=click.UNPROCESSED)
-def claude_relay_cmd(no_widget, pty, claude_args):
+def claude_relay_cmd(no_widget, pty, headless, claude_args):
     """Claude Code on the second (company) account, connected to LAS — `las claude --account relay`.
 
     Config in ~/.claude-relay (created on first use, sharing CLAUDE.md/settings/skills/hooks with
@@ -690,6 +695,9 @@ def claude_relay_cmd(no_widget, pty, claude_args):
     without channelsEnabled — detected from Claude's own MCP log), messages are
     typed into Claude's prompt instead, like `las codex`.
     """
+    if headless:
+        start_voice_session("claude", account=RELAY_ACCOUNT, widget=not no_widget)
+        return
     _launch_claude(list(claude_args), no_widget, RELAY_ACCOUNT, pty)
 
 
@@ -791,6 +799,60 @@ def run_connected(argv: list) -> None:
     click.echo(f"{name}: `{command}` connected (pid {pid}). Pick it in 👥 and the mic runs it; ✕ closes it.")
 
 
+VOICE_TITLES = {"es": "sesión de voz, sin terminal", "en": "voice session, no terminal"}
+
+
+def start_voice_session(runtime: str, *, account: str | None = None, widget: bool = True, cwd: str | None = None) -> dict:
+    """`las claude|claudeRelay|codex --headless`: connect a detached voice session of the
+    agent here (docs/adr/0008) and point the mic at it — you opened it to talk to it."""
+    from cli.agent_config import read_agent_config
+    from cli.connected import ConnectError, connect
+    from cli.path_utils import agent_config_path
+    from cli.turn_hook import _las_bin
+    from cli.voice_session import new_conversation, turn_command
+    binary = "codex" if runtime == "codex" else "claude"
+    if not shutil.which(binary):
+        click.echo(f"Error: {binary} not found on PATH.", err=True)
+        raise SystemExit(1)
+    name = resolve_agent_name(None)
+    cwd = cwd or os.getcwd()
+    _chain(name, widget=widget)
+    if account:
+        ensure_account_dir(account_config_dir(account))
+    label = runtime if runtime == "codex" else ("claude" + "".join(p[:1].upper() + p[1:] for p in account.split("-") if p) if account else "claude")
+    path = agent_config_path(Path(cwd)) or agent_config_path(Path(cwd).parent)
+    locale = (read_agent_config(path) if path else {}).get("locale", "")
+    title = VOICE_TITLES["es" if locale.lower().startswith("es") else "en"]
+    conv = new_conversation()
+    try:
+        pid, log_path = connect(name, Path(cwd), turn_command(_las_bin(), runtime, conv, account),
+                                locale=locale, runtime=label, title=title)
+    except ConnectError as err:
+        click.echo(f"Error: {err}", err=True)
+        raise SystemExit(1)
+    sid = next((s["sid"] for s in (api.get(f"/agents/{quote(name, safe='')}/sessions") or {}).get("sessions", []) if s.get("pid") == pid), None)
+    if sid:
+        api.post(f"/agents/{quote(name, safe='')}/sessions/{quote(sid, safe='')}/touch", {})
+    click.echo(f"{name}: {label} voice session connected (pid {pid}{', ' + sid if sid else ''}) — the mic talks to it now; "
+               f"each dictation is one turn of the same conversation and the answer is spoken. ✕ in 👥 closes it. Log: {log_path}")
+    return {"pid": pid, "sid": sid, "conversation": conv, "log": str(log_path), "runtime": label}
+
+
+@click.command("voice-turn", hidden=True)
+@click.argument("runtime", type=click.Choice(["claude", "codex"]))
+@click.argument("conversation")
+@click.argument("text")
+@click.option("--account", default=None)
+def voice_turn_cmd(runtime, conversation, text, account):
+    """One turn of a voice session (docs/adr/0008): run by the detached session per message; prints the answer."""
+    from cli.turn_hook import agent_here
+    from cli.voice_session import run_turn
+    here = agent_here(os.getcwd())
+    name, cfg = here if here else ("", {})
+    click.echo(run_turn(runtime, conversation, text, name=name, locale=cfg.get("locale", ""), cwd=os.getcwd(),
+                        account=account, claude=claude_bin()))
+
+
 @click.command("attach", context_settings={"ignore_unknown_options": True, "allow_extra_args": True, "help_option_names": []})
 @click.argument("argv", nargs=-1, required=True, type=click.UNPROCESSED)
 def attach_cmd(argv):
@@ -815,14 +877,18 @@ def run_codex_interactive(name: str, agent_dir: str, codex_args=(), intercept_ur
 @click.command("codex", context_settings={"ignore_unknown_options": True, "allow_extra_args": True})
 @click.option("--exec", "command", default=None, help=f'Headless instead of the TUI: run this command per message, text on stdin (e.g. "{CODEX_DEFAULT_CMD}", or $LAS_CODEX_CMD).')
 @click.option("--no-widget", is_flag=True, help="Don't bring this agent's widget to the current Space.")
+@click.option("--headless", is_flag=True, help="No terminal: a voice session — each message is one turn of the same Codex thread, the answer is spoken (docs/adr/0008).")
 @_intercept
 @_port
 @click.argument("codex_args", nargs=-1, type=click.UNPROCESSED)
-def codex_cmd(command, no_widget, intercept_url, port, codex_args):
+def codex_cmd(command, no_widget, headless, intercept_url, port, codex_args):
     """Codex here, connected to LAS: opens `codex --yolo` (extra args pass through) and types every mailbox message into it.
 
     With --exec, no TUI: each message becomes a headless `codex exec` run whose answer goes back to the sender.
     """
+    if headless:
+        start_voice_session("codex", widget=not no_widget)
+        return
     name = resolve_agent_name(None)
     if not shutil.which("codex") and not command:
         click.echo("Error: codex not found on PATH (install the Codex CLI, or pass --exec).", err=True)

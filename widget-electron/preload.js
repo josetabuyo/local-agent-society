@@ -163,6 +163,10 @@ contextBridge.exposeInMainWorld('las', {
    * later — re-read getAgentSessions. */
   requestSessionTitles: (name) => ipcRenderer.invoke('agent:request-session-titles', name),
 
+  /** Open a voice session (Claude/Codex with no terminal, docs/adr/0008): runtime
+   * claude | claudeRelay | codex. Resolves to the backend's sessions view, or null. */
+  startVoiceSession: (name, runtime) => ipcRenderer.invoke('agent:session-voice', name, runtime),
+
   /** Make one session's terminal findable (unique title + bell) and focus it
    * where the terminal app allows (Ghostty). Resolves to {ok, focused}. */
   findSession: (name, sid) => ipcRenderer.invoke('agent:session-find', name, sid),

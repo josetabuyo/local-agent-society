@@ -420,3 +420,22 @@ def test_close_of_a_detached_session_signals_its_bridge_instead_of_a_tty(app, tt
     assert killed == [(7, main.signal.SIGTERM)]
     assert view["detached"] is True and [s["sid"] for s in view["sessions"]] == ["claude-1"]
     assert not any(c[0] == "hangup" for c in tty_calls)
+
+
+def test_voice_session_endpoint_runs_las_headless_in_the_agents_folder(app, tmp_path):
+    """docs/adr/0008: the widget, the phone and other agents open a voice session through the backend."""
+    main, client = app
+    ran = []
+
+    class Out:
+        returncode, stdout, stderr = 0, "connected", ""
+    main.subprocess.run, real = (lambda argv, **kw: (ran.append((argv, kw)), Out())[1]), main.subprocess.run
+    try:
+        r = client.post("/agents/Robo/sessions/voice", json={"runtime": "codex"})
+        assert r.status_code == 200, r.text
+        argv, kw = ran[-1]
+        assert argv[1:] == ["-lc", "las codex --headless --no-widget"] and kw["cwd"] == str(tmp_path)
+        assert client.post("/agents/Robo/sessions/voice", json={"runtime": "rm -rf"}).status_code == 422
+        assert client.post("/agents/Nobody/sessions/voice", json={}).status_code == 404
+    finally:
+        main.subprocess.run = real
