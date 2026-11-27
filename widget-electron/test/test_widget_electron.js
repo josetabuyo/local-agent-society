@@ -2267,3 +2267,19 @@ test('the widget name is solid black at full opacity whatever the opacity slider
   assert.match(readSrc('renderer', 'global.js'), /setProperty\('--text-fill', '#000'\)/);
   assert.match(readSrc('renderer', 'widget.css'), /\.name \{[^}]*color: var\(--text-fill, #000\);/);
 });
+
+test('a drag or resize whose release never reaches the page ends on the next button-up move', () => {
+  const src = readSrc('renderer', 'widget.js');
+  const mover = extractFunctionBody(src, 'function makeWindowMover(');
+  assert.match(mover, /if \(\(ev\.buttons & 1\) === 0\) return up\(\);/, 'mover: button up = release');
+  assert.match(mover, /el\.addEventListener\('lostpointercapture', up\);/);
+  assert.match(mover, /window\.addEventListener\('blur', up\);/);
+  assert.match(mover, /window\.removeEventListener\('blur', up\);/, 'unhooked on release');
+  const resize = src.slice(src.indexOf("window.addEventListener('mousemove', (e) => {\n  if (!resizing) return;"));
+  assert.match(resize, /if \(\(e\.buttons & 1\) === 0\) return endResize\(\);/, 'resize: button up = release');
+  assert.match(src, /resizeHandleEl\.addEventListener\('lostpointercapture', endResize\);/);
+  assert.match(src, /window\.addEventListener\('blur', endResize\);/);
+  const splitter = src.slice(src.indexOf("drawerSplitterEl.addEventListener('pointerdown'"), src.indexOf("drawerSplitterEl.addEventListener('dblclick'"));
+  assert.match(splitter, /if \(\(ev\.buttons & 1\) === 0\) return up\(\);/, 'splitter: button up = release');
+  assert.match(splitter, /addEventListener\('lostpointercapture', up\);/);
+});

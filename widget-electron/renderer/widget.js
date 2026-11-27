@@ -338,6 +338,11 @@ function makeWindowMover(el, onHold = null) {
     let dragging = false;
     let hold = onHold ? setTimeout(() => { hold = null; if (!dragging) onHold(); }, ICON_HOLD_MS) : null;
     const move = (ev) => {
+      // The button is no longer down: the release was never delivered here
+      // (the window moved out from under the pointer, capture was lost, the
+      // release landed on another app). Without this every later hover over
+      // the strip kept moving the window (seen 2026-11-27).
+      if ((ev.buttons & 1) === 0) return up();
       if (!dragging && Math.hypot(ev.screenX - startX, ev.screenY - startY) < ICON_DRAG_THRESHOLD_PX) return;
       if (hold) { clearTimeout(hold); hold = null; }
       dragging = true;
@@ -350,11 +355,15 @@ function makeWindowMover(el, onHold = null) {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
+      el.removeEventListener('lostpointercapture', up);
+      window.removeEventListener('blur', up);
     };
     el.setPointerCapture(e.pointerId);
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
+    el.addEventListener('lostpointercapture', up);
+    window.addEventListener('blur', up);
   });
 }
 
@@ -600,6 +609,7 @@ drawerSplitterEl.addEventListener('pointerdown', (e) => {
   drawerSplitterEl.setPointerCapture(e.pointerId);
   drawerSplitterEl.classList.add('dragging');
   const move = (ev) => {
+    if ((ev.buttons & 1) === 0) return up(); // release never delivered here (see makeWindowMover)
     px = Math.max(DRAWER_MIN_PX, Math.min(maxPx, startPx - (ev.clientY - startY)));
     setDrawerHeight(el, px);
     compactHeight = total - px - DRAWER_EXTRAS_PX;
@@ -608,6 +618,7 @@ drawerSplitterEl.addEventListener('pointerdown', (e) => {
     drawerSplitterEl.removeEventListener('pointermove', move);
     drawerSplitterEl.removeEventListener('pointerup', up);
     drawerSplitterEl.removeEventListener('pointercancel', up);
+    drawerSplitterEl.removeEventListener('lostpointercapture', up);
     drawerSplitterEl.classList.remove('dragging');
     if (px === startPx) return;
     const split = { log: compactHeight - chromeHeight, drawer: px };
@@ -617,6 +628,7 @@ drawerSplitterEl.addEventListener('pointerdown', (e) => {
   drawerSplitterEl.addEventListener('pointermove', move);
   drawerSplitterEl.addEventListener('pointerup', up);
   drawerSplitterEl.addEventListener('pointercancel', up);
+  drawerSplitterEl.addEventListener('lostpointercapture', up);
 });
 
 drawerSplitterEl.addEventListener('dblclick', async () => {
@@ -1302,8 +1314,19 @@ resizeHandleEl.addEventListener('pointerdown', (e) => {
   if (e.button === 0) resizeHandleEl.setPointerCapture(e.pointerId);
 });
 
+// A release that never reached this page (the window shrank out from under
+// the pointer, capture was lost, the button came up over another app) used
+// to leave `resizing` set, and every later hover kept resizing the window
+// (seen 2026-11-27): a move with the button up ends the resize, as do a lost
+// capture and the window losing focus.
+const endResize = () => { resizing = false; };
+resizeHandleEl.addEventListener('lostpointercapture', endResize);
+resizeHandleEl.addEventListener('pointercancel', endResize);
+window.addEventListener('blur', endResize);
+
 window.addEventListener('mousemove', (e) => {
   if (!resizing) return;
+  if ((e.buttons & 1) === 0) return endResize();
   const dw = e.screenX - lastX;
   const dh = e.screenY - lastY;
   lastX = e.screenX;
