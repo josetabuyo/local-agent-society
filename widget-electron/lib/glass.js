@@ -97,9 +97,11 @@ function tintColor(color) {
   const [r, g, b] = parseHex(color);
   return api.send.color(api.colorClass, api.sel('colorWithSRGBRed:green:blue:alpha:'), r, g, b, TINT_ALPHA);
 }
+/** Full glass down to FULL_GLASS_AT on the slider, then it thins out. */
+const FULL_GLASS_AT = 0.7;
 function glassAlpha(opacity) {
   const o = Number(opacity);
-  return Math.max(MIN_GLASS_ALPHA, Math.min(1, Number.isFinite(o) ? o : 0.72));
+  return Math.max(MIN_GLASS_ALPHA, Math.min(1, (Number.isFinite(o) ? o : 0.72) / FULL_GLASS_AT));
 }
 
 /**

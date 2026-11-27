@@ -2247,9 +2247,10 @@ test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibran
   assert.match(lib, /for \(const ev of \['show', 'focus', 'blur'\]\) win\.removeListener\(ev, entry\.onKey\);/, 'detach unhooks');
   // The opacity pref is the glass alpha (less = more sharp desktop through it); the tint alpha is fixed.
   const glassLib = require('../lib/glass');
-  assert.equal(glassLib.glassAlpha(0.78), 0.78);
+  assert.equal(glassLib.glassAlpha(0.78), 1, 'the default range is full glass');
+  assert.equal(glassLib.glassAlpha(0.35), 0.5, 'below 0.7 the glass thins out');
   assert.equal(glassLib.glassAlpha(0), 0.08, 'never fully gone');
-  assert.equal(glassLib.glassAlpha('x'), 0.72, 'default pref');
+  assert.equal(glassLib.glassAlpha('x'), 1, 'default pref');
   assert.match(lib, /send\.double\(glass, sel\('setAlphaValue:'\), glassAlpha\(opacity\)\);/);
   // Shipped: lib/** is in the electron-builder whitelist.
   assert.ok(require('../package.json').build.files.includes('lib/**/*'));
