@@ -1026,6 +1026,22 @@ def _note_reply_route(envelope: dict) -> None:
             save_json(REPLY_ROUTES_FILE, routes)
 
 
+class TerminalInput(BaseModel):
+    runtime: Optional[str] = None
+
+
+@app.post("/agents/{name}/terminal-input")
+def note_terminal_input(name: str, body: TerminalInput | None = None):
+    """The human typed (or dictated with the runtime's own voice input) into
+    this agent's terminal — a human input on the Mac, invisible to vortexia.
+    Auto routing learns it like a widget-mic dictation: the voice comes out
+    on the Mac again (cli/turn_hook.py, Claude's UserPromptSubmit hook)."""
+    if name not in load_json(REGISTRY_FILE, {}):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    _note_reply_route({"source": "human", "to": name, "kind": "message"})
+    return {"agent": name, "learned": _learned_route(name)}
+
+
 def _learned_route(name: str) -> str:
     with _reply_routes_lock:
         return load_json(REPLY_ROUTES_FILE, {}).get(name, "mac")

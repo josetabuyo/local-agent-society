@@ -65,11 +65,13 @@ def test_codex_turn_without_speak_is_nudged_through_its_session(tmp_path, monkey
     d = agent_dir(tmp_path, locale="en-US")
     sent = []
     turn = {"type": "agent-turn-complete", "thread-id": "t1", "cwd": str(d), "input-messages": ["fix it"]}
-    assert th.codex_notify(turn, fetch=chat(), send=sent.append, now=lambda: 1000.0)
+    posted = []
+    assert th.codex_notify(turn, fetch=chat(), send=sent.append, now=lambda: 1000.0, post=posted.append)
+    assert posted and posted[0].endswith('/agents/Alpha/terminal-input')
     assert sent[0]["to"] == "Alpha" and sent[0]["session"] == "codex" and "Reporting" in sent[0]["message"]
     nudge_turn = {**turn, "input-messages": [sent[0]["message"]]}
-    assert not th.codex_notify(nudge_turn, fetch=chat(), send=sent.append, now=lambda: 1010.0)
-    assert not th.codex_notify(turn, fetch=chat("speak"), send=sent.append, now=lambda: 1020.0)
+    assert not th.codex_notify(nudge_turn, fetch=chat(), send=sent.append, now=lambda: 1010.0, post=posted.append)
+    assert not th.codex_notify(turn, fetch=chat("speak"), send=sent.append, now=lambda: 1020.0, post=posted.append)
     assert len(sent) == 1
 
 
@@ -80,6 +82,7 @@ def test_installers_are_idempotent_and_keep_what_is_there(tmp_path):
     data = json.loads(s.read_text())
     assert data["model"] == "x" and len(data["hooks"]["Stop"]) == 2
     assert data["hooks"]["Stop"][1]["hooks"][0]["command"] == "/bin/las hook claude-stop"
+    assert data["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"] == "/bin/las hook claude-prompt"
 
     c = tmp_path / "codex" / "config.toml"
     c.parent.mkdir()
@@ -90,3 +93,14 @@ def test_installers_are_idempotent_and_keep_what_is_there(tmp_path):
     other = tmp_path / "codex" / "other.toml"
     other.write_text('notify = ["my-notifier"]\n')
     assert not th.ensure_codex_notify(other, las="/bin/las") and "my-notifier" in other.read_text()
+
+
+def test_a_typed_prompt_brings_the_voice_back_to_the_mac(tmp_path):
+    d = agent_dir(tmp_path)
+    posted = []
+    assert th.claude_prompt({"cwd": str(d), "prompt": "yo no escuché nada"}, post=posted.append)
+    assert posted == [f"{th.BACKEND}/agents/Alpha/terminal-input"]
+    for p in ['<channel source="las" kind="message">dictado del teléfono</channel>', "/rename x", ""]:
+        assert not th.claude_prompt({"cwd": str(d), "prompt": p}, post=posted.append)
+    assert not th.claude_prompt({"cwd": str(tmp_path / "nowhere"), "prompt": "hola"}, post=posted.append)
+    assert len(posted) == 1

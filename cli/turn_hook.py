@@ -12,6 +12,10 @@ asks the agent that did the work:
   once with a reason telling the agent to speak its report. `stop_hook_active`
   (Claude's own flag for "already continued by a Stop hook") ends it there: one
   nudge per turn, never a loop.
+* Claude Code — a `UserPromptSubmit` hook (`las hook claude-prompt`): a prompt
+  typed (or dictated with Claude's own voice input) into the terminal is a human
+  input on the Mac, so auto voice routing sends the reply's voice to the Mac —
+  vortexia never sees it, so without this it stayed on the phone that dictated last.
 * Codex — its `notify` program (`las hook codex-notify`), run after each turn
   with the turn's JSON. Codex can't be blocked, so the nudge goes the way every
   other message reaches it: into this agent's codex session's mailbox, typed
@@ -149,6 +153,31 @@ def claude_stop(payload: dict, fetch=None) -> dict | None:
     return {"decision": "block", "reason": nudge_text(name, cfg)}
 
 
+# ── Claude Code: UserPromptSubmit hook ──────────────────────────────────────
+def note_terminal_input(name: str, post=None) -> bool:
+    url = f"{BACKEND}/agents/{urllib.parse.quote(name)}/terminal-input"
+    try:
+        if post:
+            post(url)
+        else:
+            req = urllib.request.Request(url, data=b"{}", headers={"content-type": "application/json"})
+            urllib.request.urlopen(req, timeout=2).read()
+    except Exception:
+        return False
+    return True
+
+
+def claude_prompt(payload: dict, post=None) -> bool:
+    """A prompt the human typed here (not a channel event, not a slash command):
+    the agent's voice should come out on this Mac, not on the phone that
+    dictated last. True = noted."""
+    text = str(payload.get("prompt") or "")
+    if not text.strip() or "<channel" in text or text.lstrip().startswith("/") or is_housekeeping(text):
+        return False
+    here = agent_here(payload.get("cwd") or os.getcwd())
+    return bool(here) and note_terminal_input(here[0], post)
+
+
 # ── Codex: notify ───────────────────────────────────────────────────────────
 def _load_state() -> dict:
     try:
@@ -157,7 +186,7 @@ def _load_state() -> dict:
         return {}
 
 
-def codex_notify(payload: dict, fetch=None, send=None, now=time.time) -> bool:
+def codex_notify(payload: dict, fetch=None, send=None, now=time.time, post=None) -> bool:
     """After a Codex turn: nudge its session when it didn't speak. True = nudged."""
     if payload.get("type") != "agent-turn-complete":
         return False
@@ -178,6 +207,8 @@ def codex_notify(payload: dict, fetch=None, send=None, now=time.time) -> bool:
     asked = "\n".join(str(m) for m in payload.get("input-messages") or [])
     if is_housekeeping(asked):
         return False
+    if asked.strip() and "[LAS message from" not in asked:
+        note_terminal_input(name, post)  # typed in the TUI: voice back on the Mac
     if spoke_since(name, since, fetch) is not False:
         return False
     body = {"message": nudge_text(name, cfg), "to": name, "session": "codex", "source": "system", "from_agent": "LAS"}
@@ -216,11 +247,18 @@ def ensure_claude_hook(path: Path | None = None, las: str | None = None) -> bool
         return False  # a file we can't parse is not ours to rewrite
     hooks = settings.get("hooks") if isinstance(settings.get("hooks"), dict) else {}
     stop = hooks.get("Stop") if isinstance(hooks.get("Stop"), list) else []
-    if any("hook claude-stop" in json.dumps(g) for g in stop):
+    prompt = hooks.get("UserPromptSubmit") if isinstance(hooks.get("UserPromptSubmit"), list) else []
+    has_stop = any("hook claude-stop" in json.dumps(g) for g in stop)
+    has_prompt = any("hook claude-prompt" in json.dumps(g) for g in prompt)
+    if has_stop and has_prompt:
         return True
-    cmd = f"{shlex.quote(las or _las_bin())} hook claude-stop"
-    stop.append({"hooks": [{"type": "command", "command": cmd, "timeout": 10}]})
+    las_q = shlex.quote(las or _las_bin())
+    if not has_stop:
+        stop.append({"hooks": [{"type": "command", "command": f"{las_q} hook claude-stop", "timeout": 10}]})
+    if not has_prompt:
+        prompt.append({"hooks": [{"type": "command", "command": f"{las_q} hook claude-prompt", "timeout": 5}]})
     hooks["Stop"] = stop
+    hooks["UserPromptSubmit"] = prompt
     settings["hooks"] = hooks
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")

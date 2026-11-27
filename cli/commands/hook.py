@@ -24,6 +24,15 @@ def claude_stop():
         click.echo(json.dumps(decision))
 
 
+@hook.command("claude-prompt")
+def claude_prompt():
+    """Claude Code `UserPromptSubmit` hook: a prompt typed here sends the agent's voice back to the Mac."""
+    try:
+        turn_hook.claude_prompt(json.loads(sys.stdin.read() or "{}"))
+    except Exception:
+        pass
+
+
 @hook.command("codex-notify", context_settings={"ignore_unknown_options": True})
 @click.argument("payload", required=False)
 def codex_notify(payload):
@@ -39,5 +48,5 @@ def install():
     """Write both hooks (Claude's settings.json Stop hook, Codex's notify) — idempotent."""
     c = turn_hook.ensure_claude_hook()
     x = turn_hook.ensure_codex_notify()
-    click.echo(f"Claude Stop hook: {'ok' if c else 'not written (settings.json unreadable)'}")
+    click.echo(f"Claude hooks:     {'ok' if c else 'not written (settings.json unreadable)'}")
     click.echo(f"Codex notify:     {'ok' if x else 'not set (no ~/.codex, or another notify program holds it)'}")

@@ -19,6 +19,7 @@ from pathlib import Path
 os.environ.setdefault("LAS_BACKEND_LOG_DIR", tempfile.mkdtemp(prefix="las-backend-test-logs-"))
 # Importing backend/main.py must not start fetching GitHub in the background (backend/updates.py).
 os.environ.setdefault("LAS_NO_UPDATE_CHECK", "1")
+os.environ.setdefault("LAS_NO_WIDGET_WATCHDOG", "1")  # importing backend/main.py must never reopen the real widget
 
 BOARDING_HTML = Path(__file__).parent.parent / "docs" / "boarding.html"
 _MARKER = re.compile(
