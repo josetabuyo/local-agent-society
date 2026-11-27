@@ -140,3 +140,13 @@ def test_deleting_an_archived_agent_takes_it_off_the_archive_too(app, monkeypatc
     assert client.delete("/agents/Alpha").status_code == 200
     assert client.get("/agents/archived").json()["archived"] == []
     assert (tmp / "alpha" / ".las-agent.json").exists(), "its folder is not touched"
+
+
+def test_a_session_started_in_an_archived_agent_brings_it_back(app, monkeypatch):
+    main, client, tmp = app
+    monkeypatch.setattr(main, "ARCHIVED_AGENTS_FILE", tmp / "archived-agents.json")
+    monkeypatch.setattr(main, "_vortexia_set_presence_online", lambda _n: True)
+    assert client.post("/agents/Alpha/archived").json()["archived"] is True
+    assert client.post("/agents/Alpha/vortexia/register").status_code == 200   # `las claude` in its folder
+    tree = client.get("/society/tree").json()
+    assert tree["archived"] == [] and "Alpha" in [a["name"] for a in tree["agents"]], "in use = on the tree again"

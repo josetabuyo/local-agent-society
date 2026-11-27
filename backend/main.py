@@ -2572,6 +2572,16 @@ def vortexia_register(name: str):
     if name not in registry:
         raise HTTPException(status_code=404, detail="Agent not found")
     ok = _vortexia_set_presence_online(name)
+    # A session opened in an archived agent's folder (`las claude`, `las codex`…)
+    # means it's in use again: back on the society tree. Otherwise its widget
+    # reopens (the session chain brings it to this Space) while the agent stays
+    # off every panel — on screen, missing from the global panel.
+    with _archived_agents_lock:
+        rows = load_json(ARCHIVED_AGENTS_FILE, [])
+        kept = [a for a in rows if not (isinstance(a, dict) and a.get("name") == name)]
+        if len(kept) != len(rows):
+            save_json(ARCHIVED_AGENTS_FILE, kept)
+            logger.info(f"[archive] {name}: a session started in it — back from the archive")
     return {"ok": True, "registered": ok, "via": "vortexia"}
 
 
