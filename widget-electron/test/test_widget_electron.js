@@ -2242,9 +2242,10 @@ test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibran
   assert.match(lib, /removeFromSuperview/);
   // AppKit mutes an un-key window's glass tint; the private flag is re-applied
   // on every key-state move (show/focus/blur), guarded by respondsToSelector.
-  assert.match(lib, /for \(const ev of \['show', 'focus', 'blur'\]\) win\.on\(ev, onKey\);/);
-  assert.match(lib, /respondsToSelector:'\), setter\)\) return;\n\s*send\.bool\(glass, setter, false\);/);
-  assert.match(lib, /for \(const ev of \['show', 'focus', 'blur'\]\) win\.removeListener\(ev, entry\.onKey\);/, 'detach unhooks');
+  assert.match(lib, /for \(const ev of \['show', 'ready-to-show', 'focus', 'blur'\]\) win\.on\(ev, onKey\);/);
+  assert.match(lib, /if \(!keepTintSupported\) return;\n\s*send\.bool\(glass, setter, false\);/);
+  assert.match(lib, /const KEEP_TINT_DELAYS_MS = \[0, 60, 400\];/, 'again after AppKit recomputes');
+  assert.match(lib, /for \(const ev of \['show', 'ready-to-show', 'focus', 'blur'\]\) win\.removeListener\(ev, entry\.onKey\);/, 'detach unhooks');
   // The opacity pref is the glass alpha (less = more sharp desktop through it); the tint alpha is fixed.
   const glassLib = require('../lib/glass');
   assert.equal(glassLib.glassAlpha(0.78), 1, 'the default range is full glass');

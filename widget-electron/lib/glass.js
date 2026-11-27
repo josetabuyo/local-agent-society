@@ -82,7 +82,8 @@ function available() {
 /** Why native glass is off, for the log; '' when it is on. */
 function status() {
   init();
-  return api ? 'native' : (initError ? initError.message : 'unavailable');
+  if (!api) return initError ? initError.message : 'unavailable';
+  return keepTintSupported === false ? 'native (tint mutes when not key: no set_tintOpacityReduced:)' : 'native';
 }
 
 /** '#rrggbb' → [r, g, b] in 0..1; anything else → a neutral gray. */
@@ -111,11 +112,24 @@ function glassAlpha(opacity) {
  * reset by AppKit on every key-state change, so attach() re-applies it on
  * the window's focus/blur/show (the only moments the key state moves).
  */
+let keepTintSupported = null;
 function keepTint(glass) {
   const { sel, send } = api;
   const setter = sel('set_tintOpacityReduced:');
-  if (!send.responds(glass, sel('respondsToSelector:'), setter)) return;
+  if (keepTintSupported === null) keepTintSupported = !!send.responds(glass, sel('respondsToSelector:'), setter);
+  if (!keepTintSupported) return;
   send.bool(glass, setter, false);
+}
+/** AppKit recomputes the mute on its next run-loop turns after a key-state
+ * move, so one call right away is not enough: again shortly after. */
+const KEEP_TINT_DELAYS_MS = [0, 60, 400];
+function keepTintSoon(win, glass) {
+  for (const ms of KEEP_TINT_DELAYS_MS) {
+    setTimeout(() => {
+      if (win.isDestroyed() || !attached.has(win)) return;
+      keepTint(glass);
+    }, ms);
+  }
 }
 
 /** @type {WeakMap<import('electron').BrowserWindow, {glass: bigint, onKey: () => void}>} window → its glass view */
@@ -147,14 +161,11 @@ function attach(win, { color, opacity, radius = DEFAULT_RADIUS } = {}) {
   send.ulong(glass, sel('setAutoresizingMask:'), NSViewWidthSizable | NSViewHeightSizable);
   send.addSubview(content, sel('addSubview:positioned:relativeTo:'), glass, NSWindowBelow, null);
   send.obj(glass, sel('release')); // the superview owns it now (see detach)
-  const onKey = () => {
-    if (win.isDestroyed() || !attached.has(win)) return;
-    keepTint(glass);
-  };
-  for (const ev of ['show', 'focus', 'blur']) win.on(ev, onKey);
+  const onKey = () => keepTintSoon(win, glass);
+  for (const ev of ['show', 'ready-to-show', 'focus', 'blur']) win.on(ev, onKey);
   attached.set(win, { glass, onKey });
   win.once('closed', () => attached.delete(win));
-  keepTint(glass);
+  keepTintSoon(win, glass);
   return true;
 }
 
@@ -173,7 +184,7 @@ function detach(win) {
   if (!entry || !api) return;
   attached.delete(win);
   if (win.isDestroyed()) return;
-  for (const ev of ['show', 'focus', 'blur']) win.removeListener(ev, entry.onKey);
+  for (const ev of ['show', 'ready-to-show', 'focus', 'blur']) win.removeListener(ev, entry.onKey);
   api.send.obj(entry.glass, api.sel('removeFromSuperview')); // the superview's retain was the last one
 }
 
