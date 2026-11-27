@@ -1,745 +1,867 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Local Agent Society — Boarding</title>
-  <!-- Test results injected by tests/conftest.py on each pytest run -->
-  <script id="las-test-results" type="application/json">{"timestamp": "2026-11-14 20:08", "duration": 24.728, "total": 352, "passed": 352, "failed": 0, "skipped": 0, "exit_code": 0, "tests": [{"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_returns_explicit_name_without_touching_cwd", "doc": "If a name is explicitly given, it's returned as-is and cwd is never inspected.", "outcome": "passed", "duration": 0.019039, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_uses_the_registrys_spelling", "doc": "`las agent sessions team-knowledge` answered \"no connected sessions\" for an\nagent registered as \"Team Knowledge\" (2026-10-14): the folder name is what\npeople type. Case and punctuation don't count; an unknown name stays as typed.", "outcome": "passed", "duration": 7.8e-05, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_keeps_the_name_when_the_backend_is_down", "doc": "", "outcome": "passed", "duration": 4.9e-05, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_falls_back_to_cwd", "doc": "With no explicit name, it resolves from .las-agent.json in the cwd.", "outcome": "passed", "duration": 0.000539, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_never_reads_the_retired_agent_json", "doc": ".agent.json (pre-rename) is retired: it no longer identifies an agent.", "outcome": "passed", "duration": 0.000226, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_errors_when_no_name_and_no_agent_json", "doc": "Neither an explicit name nor a discoverable agent config -> SystemExit(1).", "outcome": "passed", "duration": 0.000603, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_resolve_agent_name_echoes_error_message", "doc": "", "outcome": "passed", "duration": 0.000151, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_legacy_voice_name_only_gives_a_language", "doc": "", "outcome": "passed", "duration": 0.000564, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_agent_new_reports_clear_error_on_write_failure", "doc": "If writing .las-agent.json raises OSError, `agent new` must exit(1) with a clear message.", "outcome": "passed", "duration": 0.00329, "longrepr": null}, {"nodeid": "tests/test_agent_common.py::test_agent_restore_reports_clear_error_on_write_failure", "doc": "If writing .las-agent.json raises OSError, `agent restore` must exit(1) with a clear message.", "outcome": "passed", "duration": 0.0013, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_defaults_target_the_last_used_session_without_cc_and_describe_the_three_runtimes", "doc": "", "outcome": "passed", "duration": 6.6e-05, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_sessions_config_fills_defaults_and_merges_a_partial_runtime_descriptor", "doc": "", "outcome": "passed", "duration": 0.000105, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_runtime_descriptor_assumes_an_unknown_runtime_is_intelligent", "doc": "", "outcome": "passed", "duration": 6.8e-05, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_merge_config_patch_replaces_top_level_keys_but_merges_sessions_and_its_runtimes", "doc": "", "outcome": "passed", "duration": 6.7e-05, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_read_and_write_round_trip_and_a_broken_file_reads_as_empty", "doc": "", "outcome": "passed", "duration": 0.002604, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_sessions_config_ignores_a_hand_edited_file_of_the_wrong_shape", "doc": "", "outcome": "passed", "duration": 0.00011, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_strict_read_refuses_a_broken_file_but_not_a_missing_one", "doc": "", "outcome": "passed", "duration": 0.003778, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_the_first_sessions_patch_seeds_the_whole_section_with_its_descriptors", "doc": "", "outcome": "passed", "duration": 7e-05, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_scope_docs_are_discovered_in_ladder_order", "doc": "", "outcome": "passed", "duration": 0.000862, "longrepr": null}, {"nodeid": "tests/test_agent_config.py::test_normalize_fills_only_what_is_missing_in_a_fixed_order", "doc": "", "outcome": "passed", "duration": 0.000427, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_backend_reachable", "doc": "Backend must respond at http://localhost:8700/health.", "outcome": "passed", "duration": 0.022251, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_inject_uses_ascii_13_for_enter", "doc": "_inject_via_iterm must use 'ASCII character 13' for Enter — not System Events.", "outcome": "passed", "duration": 0.000233, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_inject_does_not_use_system_events_key_code", "doc": "_inject_via_iterm must not use System Events key code 36 — causes intermittent failures.", "outcome": "passed", "duration": 0.000165, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_registered_agents_have_agent_json", "doc": "Each registered agent must have a .las-agent.json at its declared project path.", "outcome": "passed", "duration": 0.006241, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_install_sh_purges_legacy_watcher_plists", "doc": "install.sh must detect and remove orphaned *.haiku.plist / *.opus.plist from ~/Library/LaunchAgents.\n\nThese were left behind by a pre-TTY-injection system where each project\nran haiku-watcher.sh and opus-watcher.sh via launchd. The scripts no\nlonger exist; install.sh must clean up any survivors.", "outcome": "passed", "duration": 0.000465, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_stop_sh_waits_for_widget_processes_to_exit_before_returning", "doc": "stop.sh must not fire-and-forget `kill` at the widget processes.\n\nupdate.sh/start.sh run electron-builder right after stop.sh to overwrite\ndist/mac-arm64/Local Agent Society.app. If stop.sh returns immediately\nafter sending SIGTERM, old helper processes (renderer/GPU) can still be\nshutting down and holding file handles into that bundle when the rebuild\nstarts, corrupting the freshly-built .app so it silently fails to launch\n(the exact bug reported by System on uy-mac, 2026-09-16). stop.sh must\npoll until the processes are actually gone, with a SIGKILL fallback for\nones that don't exit in time.", "outcome": "passed", "duration": 0.0005, "longrepr": null}, {"nodeid": "tests/test_agent_consistency.py::test_registered_agents_settings_no_direct_say_hooks", "doc": "No registered agent's hook settings should invoke 'say -v' directly — use POST /queue/speak.", "outcome": "passed", "duration": 0.021231, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_register_and_list_agent", "doc": "", "outcome": "passed", "duration": 0.004453, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_register_duplicate_name_overwrites_not_rejected", "doc": "POST /agents is upsert-by-name (no explicit duplicate-rejection route);\nposting the same name twice must not error and the latest data wins.", "outcome": "passed", "duration": 0.011476, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_rename_agent_valid", "doc": "", "outcome": "passed", "duration": 0.007547, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_rename_agent_missing_name_404", "doc": "", "outcome": "passed", "duration": 0.001808, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_rename_agent_empty_new_name_422", "doc": "", "outcome": "passed", "duration": 0.004764, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_rename_agent_collision_409", "doc": "", "outcome": "passed", "duration": 0.015611, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_rename_agent_to_same_name_allowed", "doc": "", "outcome": "passed", "duration": 0.004493, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_rename_updates_pronunciation_when_it_matched_old_name", "doc": "", "outcome": "passed", "duration": 0.005873, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_delete_agent", "doc": "", "outcome": "passed", "duration": 0.006144, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_delete_missing_agent_404", "doc": "", "outcome": "passed", "duration": 0.001802, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_focus_agent_not_found_404", "doc": "", "outcome": "passed", "duration": 0.001984, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_focus_agent_success", "doc": "", "outcome": "passed", "duration": 0.005132, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_focus_agent_no_ttys_found", "doc": "", "outcome": "passed", "duration": 0.003648, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_get_agent_ttys", "doc": "", "outcome": "passed", "duration": 0.003689, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_get_agent_ttys_missing_agent_404", "doc": "", "outcome": "passed", "duration": 0.00155, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_open_terminal_missing_agent_404", "doc": "", "outcome": "passed", "duration": 0.001796, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_open_terminal_success", "doc": "", "outcome": "passed", "duration": 0.003086, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_open_terminal_bare_shell", "doc": "", "outcome": "passed", "duration": 0.008954, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_open_terminal_osascript_failure_returns_500", "doc": "", "outcome": "passed", "duration": 0.006047, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_inject_missing_agent_404", "doc": "", "outcome": "passed", "duration": 0.002246, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_vortexia_register_and_poll_missing_agent_404", "doc": "", "outcome": "passed", "duration": 0.005467, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_inject_publishes_envelope_to_vortexia", "doc": "", "outcome": "passed", "duration": 0.009613, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_inject_reports_failure_when_vortexia_unreachable", "doc": "", "outcome": "passed", "duration": 0.005223, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_vortexia_register_sets_presence", "doc": "", "outcome": "passed", "duration": 0.003472, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_vortexia_poll_returns_pending_messages", "doc": "", "outcome": "passed", "duration": 0.006001, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_vortexia_poll_names_a_relayed_sender_with_its_env", "doc": "", "outcome": "passed", "duration": 0.003733, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_mute_unmute_and_status", "doc": "", "outcome": "passed", "duration": 0.017653, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_mute_is_idempotent", "doc": "", "outcome": "passed", "duration": 0.005017, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_list_voices_is_the_kokoro_catalogue", "doc": "", "outcome": "passed", "duration": 0.002823, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_list_voices_shows_who_speaks_with_each", "doc": "", "outcome": "passed", "duration": 0.007996, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_random_voice", "doc": "", "outcome": "passed", "duration": 0.003122, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_random_voice_avoids_taken_voices", "doc": "", "outcome": "passed", "duration": 0.0132, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_get_voice_by_name", "doc": "", "outcome": "passed", "duration": 0.002236, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_get_voice_by_name_404", "doc": "", "outcome": "passed", "duration": 0.001796, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_widget_returns_html_with_agent_name", "doc": "", "outcome": "passed", "duration": 0.001573, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_attribution_post_and_get", "doc": "", "outcome": "passed", "duration": 0.006437, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_queue_get_and_delete", "doc": "", "outcome": "passed", "duration": 0.004676, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_ports_register_list_delete", "doc": "", "outcome": "passed", "duration": 0.004779, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_ports_delete_missing_404", "doc": "", "outcome": "passed", "duration": 0.001403, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_pin_tty_and_pending_link_roundtrip", "doc": "", "outcome": "passed", "duration": 0.003157, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_pin_tty_empty_value_not_ok", "doc": "", "outcome": "passed", "duration": 0.001385, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_pending_link_none_when_never_pinned", "doc": "", "outcome": "passed", "duration": 0.001382, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_relayed_send_fails_when_the_gateway_rejects_the_name", "doc": "", "outcome": "passed", "duration": 0.002422, "longrepr": null}, {"nodeid": "tests/test_api_endpoints.py::test_a_long_message_is_accepted", "doc": "", "outcome": "passed", "duration": 0.00167, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_concurrent_speak_calls_are_not_lost", "doc": "", "outcome": "passed", "duration": 0.043894, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_concurrent_agent_registration_not_lost", "doc": "", "outcome": "passed", "duration": 0.033595, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_ports_free_end_of_range_reachable", "doc": "", "outcome": "passed", "duration": 0.001621, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_concurrent_ports_free_and_claim_no_duplicates", "doc": "Fire concurrent /ports/free + /ports/claim (no explicit port) and make sure\nno two callers are ever handed the same port.", "outcome": "passed", "duration": 0.018948, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_inject_ignores_malformed_legacy_tty_field", "doc": "", "outcome": "passed", "duration": 0.002984, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_inject_ignores_unknown_legacy_fields", "doc": "A widget/caller still sending the old tty/queue fields must not break —\nthey're just ignored, delivery goes through vortexia regardless.", "outcome": "passed", "duration": 0.003135, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_inject_rejects_oversized_message", "doc": "", "outcome": "passed", "duration": 0.009337, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_speak_rejects_oversized_text", "doc": "", "outcome": "passed", "duration": 0.001458, "longrepr": null}, {"nodeid": "tests/test_backend_concurrency.py::test_inject_never_interpolates_message_into_applescript_source", "doc": "_inject_via_iterm must pass the message via argv, not string-interpolate it\ninto the AppleScript source (regression guard for the injection fix).", "outcome": "passed", "duration": 0.000117, "longrepr": null}, {"nodeid": "tests/test_backend_service.py::test_start_bootstraps_the_launchd_job_and_reports_its_pid", "doc": "", "outcome": "passed", "duration": 1.134278, "longrepr": null}, {"nodeid": "tests/test_backend_service.py::test_start_removes_a_stray_manual_backend_before_launchd_takes_the_port", "doc": "", "outcome": "passed", "duration": 1.149247, "longrepr": null}, {"nodeid": "tests/test_backend_service.py::test_stop_unloads_the_job_and_restart_kickstarts_it", "doc": "", "outcome": "passed", "duration": 2.528047, "longrepr": null}, {"nodeid": "tests/test_backend_service.py::test_backend_start_sh_by_hand_hands_over_to_launchd", "doc": "The old trap itself: someone runs backend/start.sh. With the LaunchAgent\ninstalled it must not spawn uvicorn — it goes through service.sh.", "outcome": "passed", "duration": 0.708038, "longrepr": null}, {"nodeid": "tests/test_backend_service.py::test_top_level_scripts_never_start_a_manual_backend", "doc": "", "outcome": "passed", "duration": 0.001765, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_default_account_is_plain_claude_at_home_claude_json", "doc": "", "outcome": "passed", "duration": 0.00015, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_claude_config_dir_drives_config_path_and_runtime", "doc": "", "outcome": "passed", "duration": 0.000457, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_las_claude_config_still_overrides_the_path", "doc": "", "outcome": "passed", "duration": 8.9e-05, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_bridge_claude_passes_the_runtime_from_the_inherited_config_dir", "doc": "", "outcome": "passed", "duration": 0.001538, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_las_claude_relay_sets_up_the_account_and_launches_claude_in_it[argv0]", "doc": "", "outcome": "passed", "duration": 0.007699, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_las_claude_relay_sets_up_the_account_and_launches_claude_in_it[argv1]", "doc": "", "outcome": "passed", "duration": 0.006239, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_account_dir_bootstrap_never_replaces_what_is_there", "doc": "", "outcome": "passed", "duration": 0.000728, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_a_personal_entry_in_the_relay_config_is_upgraded_to_name_its_runtime", "doc": "", "outcome": "passed", "duration": 0.000886, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_status_reports_this_sessions_bridge_when_two_claude_sessions_are_open", "doc": "", "outcome": "passed", "duration": 0.026577, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_the_relay_guide_names_its_own_reconnect_command", "doc": "", "outcome": "passed", "duration": 0.014966, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_a_second_claude_account_is_described_as_claude", "doc": "", "outcome": "passed", "duration": 9.8e-05, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_channels_blocked_reads_claude_codes_own_verdict_for_this_accounts_sessions", "doc": "", "outcome": "passed", "duration": 0.001464, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_claude_relay_falls_back_to_the_pty_when_its_org_blocks_channels", "doc": "", "outcome": "passed", "duration": 0.010371, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_pty_can_be_asked_for_explicitly_on_any_account", "doc": "", "outcome": "passed", "duration": 0.006578, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_run_in_pty_with_bridge_wires_a_session_bridge_of_that_runtime", "doc": "", "outcome": "passed", "duration": 0.000144, "longrepr": null}, {"nodeid": "tests/test_claude_relay.py::test_status_names_a_background_session_that_can_never_arm", "doc": "", "outcome": "passed", "duration": 0.005522, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_agent_new_propagates_backend_failure", "doc": "`las agent new` must exit non-zero if the backend locale lookup fails.", "outcome": "passed", "duration": 0.000354, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_widgets_all_skips_inactive_agents", "doc": "`las widgets` is a bulk/auto reopen — an inactive agent must stay put\naway unless deliberately reactivated (`las widget NAME`, `las agent\nactivate`, or the vortexia wake-enabled fallback), none of which go\nthrough this command.", "outcome": "passed", "duration": 0.000265, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_widget_reports_success_once_process_is_found", "doc": "`las widget` must confirm the app actually launched — not just that\n`open` was fired — before printing \"Widget reopened\". If pgrep finds the\npackaged app process on the very first check, it must report success\nimmediately (no unnecessary polling/sleeping).", "outcome": "passed", "duration": 0.000233, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_widget_reports_failure_when_process_never_appears", "doc": "If `open` routes the reopen request but the packaged app never\nactually starts (e.g. a corrupted dist/ build from the electron-builder\nrebuild race), `las widget` must say so instead of unconditionally\nclaiming success — this is what hid the widget-electron launch bug from\nthe reporter for two days.", "outcome": "passed", "duration": 0.000168, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_agent_listen_exits_cleanly_when_vortexia_unreachable", "doc": "`las agent listen` must fail soft (clear message, exit 1) — not hang or\ncrash — when it can't find a vortexia-mqtt port in the registry. This is\nthe live-delivery counterpart to `las agent poll`: it's meant to be run\nunder Claude Code's Monitor tool (see .claude/skills/las-agent/SKILL.md),\nso a hang here would hang the whole session-start flow instead of just\nreporting \"no live delivery available\" and moving on.", "outcome": "passed", "duration": 0.00025, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_agent_listen_mechanically_and_silently_answers_the_mic_selftest_ping_without_any_llm", "doc": "`las agent listen` must answer the mic self-test sentinel the instant\nit arrives, entirely on its own, with a SILENT direct MQTT pong — never\n/queue/speak (that would make plumbing-only confirmation sound like a\nreal LLM reply, since /queue/speak is audible). This is what lets the\nwidget's double-click self-test confirm the mic -> vortexia -> a live\nterminal-side listener pipe is intact without depending on whether an\nLLM session is attached and chooses to react (see widget.js's\nMIC_SELFTEST_PING / runMicSelfTest / the 'mic-selftest-pong' kind check,\nand this command's docstring).", "outcome": "passed", "duration": 0.000584, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_agent_new_is_what_writes_las_agent_json", "doc": "install.sh no longer creates any .las-agent.json (d044934): creating an\nagent is the one place the file comes from, so `las agent new` must write it.", "outcome": "passed", "duration": 0.000957, "longrepr": null}, {"nodeid": "tests/test_cli_agents.py::test_agent_new_takes_the_language_and_gender_most_agents_here_have", "doc": "No --voice/--locale: a machine whose agents all speak Spanish with male\nvoices gets a new Spanish male voice nobody uses yet.", "outcome": "passed", "duration": 0.001048, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_request_turns_a_timeout_into_a_clean_exit[ReadTimeout]", "doc": "", "outcome": "passed", "duration": 0.000153, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_request_turns_a_timeout_into_a_clean_exit[ConnectTimeout]", "doc": "", "outcome": "passed", "duration": 8.7e-05, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_request_turns_a_timeout_into_a_clean_exit[Timeout]", "doc": "", "outcome": "passed", "duration": 7.4e-05, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_request_still_reports_a_dead_backend_the_old_way", "doc": "", "outcome": "passed", "duration": 7.2e-05, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_las_claude_still_opens_when_the_backend_only_times_out", "doc": "End to end through the real cli.api: the presence step fails soft on a\ntimeout exactly as it does on a dead backend, and Claude is still exec'd.", "outcome": "passed", "duration": 0.004671, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_a_live_backend_the_caller_cannot_reach_is_not_called_dead", "doc": "Regression 2026-10-08: a Codex sandbox with network off got \"backend not\nrunning\" while the backend was up — the agent then told the user LAS was down.", "outcome": "passed", "duration": 8.2e-05, "longrepr": null}, {"nodeid": "tests/test_cli_api_timeout.py::test_codex_network_disabled_sandbox_is_named_explicitly", "doc": "", "outcome": "passed", "duration": 8.3e-05, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_each_sink_launches_the_node_bridge_with_agent_and_sink", "doc": "", "outcome": "passed", "duration": 0.019327, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_exec_sink_requires_a_command", "doc": "", "outcome": "passed", "duration": 0.001371, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_claude_adds_the_channel_flag_and_passes_everything_else_through", "doc": "", "outcome": "passed", "duration": 0.128848, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_status_exit_code_is_the_skill_contract", "doc": "", "outcome": "passed", "duration": 0.038985, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_claude_register_is_idempotent_and_unregister_removes_it", "doc": "", "outcome": "passed", "duration": 0.014504, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_a_working_entry_is_never_rewritten_but_a_broken_one_is_repaired", "doc": "", "outcome": "passed", "duration": 0.005435, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_node_is_found_on_path_or_in_nvm_and_homebrew_fallbacks", "doc": "", "outcome": "passed", "duration": 0.061065, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_claude_chains_mcp_registration_presence_and_widget_then_execs", "doc": "", "outcome": "passed", "duration": 0.160539, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_launchers_sign_the_terminal_and_las_claude_owns_the_window_title", "doc": "The window says \"Agent · runtime\" from the first second (SKILL.md §10); Claude Code's\nown summaries would overwrite it, so its documented switch goes into the environment —\nunless LAS_TERMINAL_TITLE=0 asks to keep Claude's titles.", "outcome": "passed", "duration": 0.005592, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_claude_outside_an_agent_folder_skips_the_chain_but_still_passes_the_flag", "doc": "", "outcome": "passed", "duration": 0.018049, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_chain_fails_soft_when_the_backend_is_down", "doc": "", "outcome": "passed", "duration": 0.004312, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_codex_opens_the_tui_in_a_pty_with_the_bridge_typing_into_it", "doc": "", "outcome": "passed", "duration": 0.017462, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_codex_exec_keeps_the_headless_path_and_las_shell_launches_its_sink", "doc": "", "outcome": "passed", "duration": 0.010665, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_run_codex_interactive_wires_a_codex_session_bridge_into_the_pty", "doc": "", "outcome": "passed", "duration": 0.000212, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_codex_names_the_directory_explicitly_so_resume_never_returns_to_a_stale_path", "doc": "Regression 2026-10-14 (Relay renamed agents -> local-agents): `codex resume`\nwent back to the directory recorded with the session — a removed path —\nthough it was launched from the new one. -C goes where Codex reads it.", "outcome": "passed", "duration": 5.8e-05, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_codex_refuses_clearly_when_codex_is_missing", "doc": "", "outcome": "passed", "duration": 0.000278, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_bridge_claude_outside_an_agent_folder_starts_the_idle_server_instead_of_failing", "doc": "", "outcome": "passed", "duration": 0.000221, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_claude_passes_options_prompts_and_claude_subcommands_through", "doc": "", "outcome": "passed", "duration": 0.031045, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_claude_help_lists_only_our_scoped_subcommands", "doc": "", "outcome": "passed", "duration": 0.000843, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_claude_inside_a_claude_session_guides_instead_of_nesting", "doc": "", "outcome": "passed", "duration": 0.000328, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_las_codex_runs_in_the_current_directory_not_the_agent_root", "doc": "Identity from the nearest .las-agent.json upward; working directory = where you launched it.", "outcome": "passed", "duration": 0.005418, "longrepr": null}, {"nodeid": "tests/test_cli_bridge.py::test_codex_session_picker_is_detected_so_messages_never_choose_a_session", "doc": "", "outcome": "passed", "duration": 6e-05, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_status_happy_path", "doc": "", "outcome": "passed", "duration": 0.000259, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_status_backend_down", "doc": "", "outcome": "passed", "duration": 0.000119, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_ports_ls_happy_path", "doc": "", "outcome": "passed", "duration": 0.000339, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_ports_ls_backend_down", "doc": "", "outcome": "passed", "duration": 0.000668, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_ports_free_malformed_response_missing_port_key", "doc": "Backend returns a dict without 'port' -- must exit cleanly with an\nerror, never print the literal string 'None' or raise KeyError.", "outcome": "passed", "duration": 0.000276, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_ports_free_happy_path", "doc": "", "outcome": "passed", "duration": 0.000195, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_voices_list_happy_path", "doc": "", "outcome": "passed", "duration": 0.000659, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_voices_list_backend_down", "doc": "", "outcome": "passed", "duration": 0.000181, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_queue_ls_happy_path", "doc": "", "outcome": "passed", "duration": 0.000253, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_queue_ls_empty", "doc": "", "outcome": "passed", "duration": 0.000148, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_queue_ls_backend_down", "doc": "", "outcome": "passed", "duration": 0.00014, "longrepr": null}, {"nodeid": "tests/test_cli_commands.py::test_las_version_prints_the_release_and_commit", "doc": "`las --version` (asked for from another machine) prints pyproject's version and the short commit.", "outcome": "passed", "duration": 0.044304, "longrepr": null}, {"nodeid": "tests/test_cli_connected.py::test_log_paths_are_per_agent", "doc": "", "outcome": "passed", "duration": 0.00016, "longrepr": null}, {"nodeid": "tests/test_cli_connected.py::test_connect_spawns_a_detached_exec_bridge_with_the_text_as_an_argument", "doc": "", "outcome": "passed", "duration": 0.000299, "longrepr": null}, {"nodeid": "tests/test_cli_connected.py::test_las_any_program_connects_it_and_unknown_words_still_error", "doc": "", "outcome": "passed", "duration": 0.001009, "longrepr": null}, {"nodeid": "tests/test_cli_connected.py::test_run_connected_quotes_the_command_line", "doc": "", "outcome": "passed", "duration": 0.000203, "longrepr": null}, {"nodeid": "tests/test_cli_connected.py::test_las_attach_runs_the_same_in_this_terminal", "doc": "", "outcome": "passed", "duration": 0.000213, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_own_session_by_ancestry", "doc": "", "outcome": "passed", "duration": 5.9e-05, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_own_session_by_runtime_and_cwd_when_ancestry_says_nothing", "doc": "", "outcome": "passed", "duration": 0.000317, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_runtime_hint_from_the_process_tree", "doc": "", "outcome": "passed", "duration": 6.7e-05, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_title_lands_on_the_sessions_terminal", "doc": "", "outcome": "passed", "duration": 0.007068, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_title_without_a_session_of_its_own_asks_for_the_flag", "doc": "", "outcome": "passed", "duration": 0.010773, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_set_terminal_title_is_best_effort", "doc": "", "outcome": "passed", "duration": 0.00013, "longrepr": null}, {"nodeid": "tests/test_cli_session_title.py::test_ring_bell_writes_bel_and_hangup_targets_the_tty_by_name", "doc": "", "outcome": "passed", "duration": 0.000332, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_sessions_lists_most_recent_first_with_the_default_marked", "doc": "", "outcome": "passed", "duration": 0.000592, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_sessions_use_touches_by_id_or_runtime", "doc": "", "outcome": "passed", "duration": 0.001079, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_send_session_and_all_sessions_flags_reach_the_backend", "doc": "", "outcome": "passed", "duration": 0.001068, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_legacy_listen_stands_down_when_a_bridge_session_holds_the_mailbox", "doc": "No fight with `las claude|codex|shell`: with a session registered, `listen` holds nothing and waits.", "outcome": "passed", "duration": 0.000235, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_legacy_listen_yields_when_a_bridge_session_kicks_it_later", "doc": "The bridge arrives AFTER listen: the first kick makes listen look, see the session, disconnect and stand by — never kick back.", "outcome": "passed", "duration": 0.000465, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_target_shows_the_agents_choice_and_the_connected_sessions", "doc": "", "outcome": "passed", "duration": 0.000317, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_target_sets_target_and_cc_through_the_config_patch", "doc": "", "outcome": "passed", "duration": 0.000521, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_send_cc_reaches_the_backend_and_needs_a_plain_to", "doc": "", "outcome": "passed", "duration": 0.001046, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_send_reports_a_fallback_when_the_recipients_target_is_not_connected", "doc": "", "outcome": "passed", "duration": 0.000283, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_send_command_marks_the_kind", "doc": "", "outcome": "passed", "duration": 0.000241, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_send_to_another_machine_puts_the_session_in_the_address", "doc": "", "outcome": "passed", "duration": 0.000405, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_plain_send_to_an_agent_with_several_sessions_lists_them", "doc": "", "outcome": "passed", "duration": 0.000408, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_exec_runs_a_script_without_shebang_through_sh_like_a_shell_would", "doc": "", "outcome": "passed", "duration": 0.000589, "longrepr": null}, {"nodeid": "tests/test_cli_sessions.py::test_claude_bin_prefers_the_native_install_over_path", "doc": "", "outcome": "passed", "duration": 0.000227, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_ignores_the_retired_agent_json", "doc": ".agent.json (pre-rename) is retired: it is never discovered.", "outcome": "passed", "duration": 0.000977, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_finds_in_exact_dir", "doc": "", "outcome": "passed", "duration": 0.000231, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_walks_up_one_level", "doc": "", "outcome": "passed", "duration": 0.000282, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_walks_up_multiple_levels", "doc": "", "outcome": "passed", "duration": 0.000388, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_walks_down_when_nothing_above", "doc": "", "outcome": "passed", "duration": 0.000355, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_takes_shallowest_when_walking_down", "doc": "", "outcome": "passed", "duration": 0.000566, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_up_wins_over_down", "doc": "", "outcome": "passed", "duration": 0.000306, "longrepr": null}, {"nodeid": "tests/test_find_nearest_agent.py::test_returns_none_when_nothing_found", "doc": "", "outcome": "passed", "duration": 0.000192, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_friends_of_is_tolerant_unique_ordered_and_never_self", "doc": "", "outcome": "passed", "duration": 5.1e-05, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_with_friend_appends_once_and_removes", "doc": "", "outcome": "passed", "duration": 8.4e-05, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_link_writes_the_agents_own_file_in_order_and_unlink_removes_only_one_side", "doc": "", "outcome": "passed", "duration": 0.007358, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_mutual_only_when_both_sides_link", "doc": "", "outcome": "passed", "duration": 0.004472, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_friend_rows_carry_widget_and_session_state", "doc": "", "outcome": "passed", "duration": 0.005474, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_link_refuses_self_unknown_agents_and_a_broken_file", "doc": "", "outcome": "passed", "duration": 0.005111, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_a_friend_unregistered_later_is_listed_not_dropped", "doc": "", "outcome": "passed", "duration": 0.005058, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_send_friends_fans_out_to_every_registered_friend", "doc": "", "outcome": "passed", "duration": 0.000337, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_send_friends_needs_a_plain_to", "doc": "", "outcome": "passed", "duration": 0.000795, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_friends_command_adds_removes_and_lists", "doc": "", "outcome": "passed", "duration": 0.000226, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_a_friend_on_another_machine_is_linked_and_listed_as_remote", "doc": "", "outcome": "passed", "duration": 0.003214, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_a_remote_friend_on_this_machine_is_the_local_agent", "doc": "", "outcome": "passed", "duration": 0.002413, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_remote_friend_refusals", "doc": "", "outcome": "passed", "duration": 0.003747, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_send_friends_reaches_remote_friends_by_their_relay_address", "doc": "", "outcome": "passed", "duration": 0.000299, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_a_local_friend_carries_the_color_in_its_own_file", "doc": "", "outcome": "passed", "duration": 0.005449, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_a_config_color_must_be_hex", "doc": "", "outcome": "passed", "duration": 0.005256, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_a_remote_friend_gets_its_color_from_the_relay_directory", "doc": "", "outcome": "passed", "duration": 0.00462, "longrepr": null}, {"nodeid": "tests/test_friends.py::test_the_relay_directory_is_held_in_memory_so_the_panel_never_waits", "doc": "The friends view never opens a broker connection: a background subscriber keeps the\nretained directory current, and a malformed payload never wipes the last good copy.", "outcome": "passed", "duration": 0.000106, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_parent_is_nearest_registered_ancestor", "doc": "", "outcome": "passed", "duration": 0.000211, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_parent_skips_unregistered_intermediate_folders", "doc": "", "outcome": "passed", "duration": 8.1e-05, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_sibling_prefix_is_not_containment", "doc": "/w/relay must not be mistaken for an ancestor of /w/relay-ros.", "outcome": "passed", "duration": 0.0001, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_children_direct_vs_deep", "doc": "", "outcome": "passed", "duration": 0.000578, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_children_of_unknown_agent_is_empty", "doc": "", "outcome": "passed", "duration": 4.5e-05, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_roots_and_tree", "doc": "", "outcome": "passed", "duration": 0.000958, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_tree_marker_suffix", "doc": "", "outcome": "passed", "duration": 0.000164, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_hierarchy_endpoint", "doc": "", "outcome": "passed", "duration": 0.010597, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_children_command_lists_and_hints_deep", "doc": "", "outcome": "passed", "duration": 0.016838, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_parent_command", "doc": "", "outcome": "passed", "duration": 0.010366, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_send_children_fans_out_one_send_per_subordinate", "doc": "", "outcome": "passed", "duration": 0.000256, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_send_children_reports_failures_nonzero", "doc": "", "outcome": "passed", "duration": 0.000199, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_send_children_without_to_is_usage_error", "doc": "", "outcome": "passed", "duration": 0.000333, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_send_children_with_no_subordinates_sends_nothing", "doc": "", "outcome": "passed", "duration": 0.000195, "longrepr": null}, {"nodeid": "tests/test_hierarchy.py::test_agents_tree_flag", "doc": "", "outcome": "passed", "duration": 0.000355, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_unknown_agent_returns_404", "doc": "", "outcome": "passed", "duration": 1.095797, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_inject_response_shape", "doc": "", "outcome": "passed", "duration": 1.105483, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_voice_source_returns_ok", "doc": "", "outcome": "passed", "duration": 1.093389, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_agent_source_returns_ok", "doc": "", "outcome": "passed", "duration": 1.0966, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_newlines_in_message_dont_crash", "doc": "", "outcome": "passed", "duration": 1.096182, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_empty_message_rejected", "doc": "", "outcome": "passed", "duration": 0.019595, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_oversized_message_rejected", "doc": "", "outcome": "passed", "duration": 1.102085, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_message_actually_arrives_via_vortexia", "doc": "The strongest e2e check: publish while the receiver is polling and\nconfirm the exact envelope shows up — real MQTT round-trip, nothing\nmocked. Requires vortexia to actually be running; skipped otherwise.", "outcome": "passed", "duration": 1.51819, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_register_sets_presence_online", "doc": "", "outcome": "passed", "duration": 0.00559, "longrepr": null}, {"nodeid": "tests/test_inject.py::test_audit_log_records_via_vortexia", "doc": "", "outcome": "passed", "duration": 0.034315, "longrepr": null}, {"nodeid": "tests/test_install_node.py::test_node_is_chosen_before_the_first_npm_call", "doc": "", "outcome": "passed", "duration": 0.000743, "longrepr": null}, {"nodeid": "tests/test_install_node.py::test_node_ok_rejects_20_and_accepts_22_12", "doc": "", "outcome": "passed", "duration": 1.622137, "longrepr": null}, {"nodeid": "tests/test_install_node.py::test_installer_never_makes_the_checkout_an_agent", "doc": "The checkout is a tool on most machines: on uy-mac install.sh wrote a\n.las-agent.json named System into it, a second \"System\" beside the real one.\nAn agent is created on purpose, with `las agent new`, never by installing.", "outcome": "passed", "duration": 0.000191, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_no_monitor_based_listener_remains_anywhere_in_the_skill", "doc": "", "outcome": "passed", "duration": 0.00017, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_session_start_is_one_check_and_register_plus_poll_are_the_fallback_only", "doc": "", "outcome": "passed", "duration": 0.000109, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_one_command_per_runtime_is_the_documented_way_to_open_a_session", "doc": "", "outcome": "passed", "duration": 5.7e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_channel_event_shape_and_reply_path_are_documented", "doc": "", "outcome": "passed", "duration": 6.6e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_probe_is_acked_silently_and_gates_mailbox_consumption", "doc": "", "outcome": "passed", "duration": 6.4e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_listen_under_a_monitor_is_explicitly_forbidden_and_non_claude_runtimes_are_named", "doc": "", "outcome": "passed", "duration": 7.3e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_closing_report_is_skipped_on_housekeeping_turns_including_probes", "doc": "", "outcome": "passed", "duration": 6.3e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_installed_copy_matches_the_repo_copy_when_present", "doc": "", "outcome": "passed", "duration": 0.000556, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_skill_tells_sessions_to_title_themselves_and_answer_a_title_request_silently", "doc": "", "outcome": "passed", "duration": 7.8e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_skill_names_how_each_runtime_finds_its_own_session_and_owns_the_window_title", "doc": "2026-10-14: `las agent title` failed inside Codex (its daemon runs the commands) and the\nwindow still showed Codex's own title. The skill must say why per runtime, not hand-wave.", "outcome": "passed", "duration": 9.1e-05, "longrepr": null}, {"nodeid": "tests/test_las_agent_skill.py::test_skill_teaches_the_society_map_and_the_recipient_note", "doc": "", "outcome": "passed", "duration": 7.7e-05, "longrepr": null}, {"nodeid": "tests/test_logging_config.py::test_suite_never_writes_the_production_log", "doc": "", "outcome": "passed", "duration": 0.000175, "longrepr": null}, {"nodeid": "tests/test_logging_config.py::test_env_override_is_honored_at_import", "doc": "", "outcome": "passed", "duration": 0.001755, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_poll_inbox_connects_as_mailbox_consumer_without_touching_presence", "doc": "", "outcome": "passed", "duration": 0.000129, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_poll_inbox_does_not_resubscribe_when_session_present", "doc": "", "outcome": "passed", "duration": 0.000107, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_poll_inbox_stands_down_when_listener_holds_the_session", "doc": "", "outcome": "passed", "duration": 5.6e-05, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_poll_inbox_takeover_flag_ignores_live_listener", "doc": "", "outcome": "passed", "duration": 8.2e-05, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_register_default_still_manages_presence", "doc": "", "outcome": "passed", "duration": 0.000123, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_is_the_mailbox_consumer", "doc": "", "outcome": "passed", "duration": 0.000785, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_skips_subscribe_when_broker_restored_the_session", "doc": "", "outcome": "passed", "duration": 0.000361, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_prints_message_and_never_clears_a_retained_slot", "doc": "", "outcome": "passed", "duration": 0.000419, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_reconnects_after_a_single_drop", "doc": "A keep-alive timeout (Mac stalled/slept) or a broker restart is one\ndrop: paho reconnects and the broker restores the session — no exit.", "outcome": "passed", "duration": 0.000332, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_gives_up_when_repeatedly_kicked", "doc": "Three connections in a row that each die within seconds = another\nclient keeps taking the session over (MQTT-3.1.4-2): exit 2 instead of\nfighting forever.", "outcome": "passed", "duration": 0.000393, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_stall_storm_keep_alive_drops_never_read_as_a_fight", "doc": "relay-sim, evening of 2026-09-23: vortexia's event loop stalls (Mac\nasleep / process not scheduled), so on resume every client's keep-alive\nexpires at once — several times an hour. Each such drop follows a\nconnection that lived a full keep-alive period, however close together\nthe drops land: never exit, just reconnect (and only on stderr).", "outcome": "passed", "duration": 0.000421, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_a_long_lived_connection_resets_the_fight_counter", "doc": "", "outcome": "passed", "duration": 0.00034, "longrepr": null}, {"nodeid": "tests/test_mailbox.py::test_listen_clean_disconnect_does_not_exit", "doc": "", "outcome": "passed", "duration": 0.000288, "longrepr": null}, {"nodeid": "tests/test_map.py::test_map_elements_of_is_tolerant_unique_and_ordered", "doc": "", "outcome": "passed", "duration": 7.8e-05, "longrepr": null}, {"nodeid": "tests/test_map.py::test_with_map_element_adds_once_replaces_in_place_and_removes", "doc": "", "outcome": "passed", "duration": 6.5e-05, "longrepr": null}, {"nodeid": "tests/test_map.py::test_add_repo_inside_the_agent_folder_is_stored_relative_and_read_live", "doc": "", "outcome": "passed", "duration": 0.06118, "longrepr": null}, {"nodeid": "tests/test_map.py::test_add_repo_outside_is_absolute_and_a_non_git_folder_is_refused", "doc": "", "outcome": "passed", "duration": 0.047668, "longrepr": null}, {"nodeid": "tests/test_map.py::test_urls_add_idempotently_bad_ones_are_refused_and_remove_by_id", "doc": "", "outcome": "passed", "duration": 0.006711, "longrepr": null}, {"nodeid": "tests/test_map.py::test_a_repo_that_disappeared_stays_listed_as_missing", "doc": "", "outcome": "passed", "duration": 0.001175, "longrepr": null}, {"nodeid": "tests/test_map.py::test_cli_add_list_remove_call_the_backend", "doc": "", "outcome": "passed", "duration": 0.001385, "longrepr": null}, {"nodeid": "tests/test_map.py::test_security_mode_defaults_to_dangerous_and_only_takes_the_two_modes", "doc": "", "outcome": "passed", "duration": 0.00338, "longrepr": null}, {"nodeid": "tests/test_map.py::test_cli_security_shows_and_sets", "doc": "", "outcome": "passed", "duration": 0.000337, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_mailbox_lines_are_pasted_into_the_tui_and_submitted_with_enter", "doc": "", "outcome": "passed", "duration": 0.065516, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_human_keystrokes_are_forwarded_and_injection_names_the_mic", "doc": "", "outcome": "passed", "duration": 1.585362, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_format_injection_tags_agent_and_mic", "doc": "", "outcome": "passed", "duration": 0.000242, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_draft_tracker_sees_a_half_typed_line_and_its_submit", "doc": "", "outcome": "passed", "duration": 0.000164, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_a_message_arriving_mid_typing_waits_for_the_submit", "doc": "", "outcome": "passed", "duration": 0.817224, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_on_a_picker_messages_wait_until_the_human_has_chosen", "doc": "`codex resume` with no id opens a session picker: a message typed there\nwould pick a session. With hold_until_submit nothing is typed before the\nhuman's first Enter — then it goes in as usual.", "outcome": "passed", "duration": 0.919557, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_terminal_restored_when_las_is_killed", "doc": "", "outcome": "passed", "duration": 0.092603, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_las_returns_when_the_tui_exits_even_if_a_child_keeps_its_pty_open", "doc": "Claude leaves MCP servers / shell jobs behind holding the PTY: waiting for\nEOF would hang `las` with the human's terminal still raw.", "outcome": "passed", "duration": 0.038084, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_goodbye_resume_hint_names_the_las_command", "doc": "", "outcome": "passed", "duration": 0.036352, "longrepr": null}, {"nodeid": "tests/test_pty_session.py::test_resume_id_reads_claude_and_codex_goodbyes", "doc": "", "outcome": "passed", "duration": 0.000147, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_register_makes_the_new_session_the_default_and_publishes_it_retained", "doc": "", "outcome": "passed", "duration": 0.003201, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_touch_moves_the_default_and_delete_hands_it_to_the_next_most_recent", "doc": "", "outcome": "passed", "duration": 0.008012, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_dead_processes_are_pruned_on_read", "doc": "", "outcome": "passed", "duration": 0.004155, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_send_routes_to_default_one_session_by_id_or_runtime_or_all", "doc": "", "outcome": "passed", "duration": 0.01555, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_config_view_fills_sessions_defaults_and_patch_writes_the_file", "doc": "", "outcome": "passed", "duration": 0.006492, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_sessions_view_carries_each_runtimes_descriptor_and_the_agents_target", "doc": "", "outcome": "passed", "duration": 0.003082, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_plain_send_honors_the_agents_configured_target", "doc": "", "outcome": "passed", "duration": 0.006767, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_an_explicit_session_choice_beats_the_configured_target_and_a_missing_explicit_choice_is_404", "doc": "", "outcome": "passed", "duration": 0.007105, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_configured_target_that_is_not_connected_falls_back_to_the_agent_mailbox_and_says_so", "doc": "", "outcome": "passed", "duration": 0.003501, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_cc_hands_the_default_session_a_for_the_record_copy_only_when_it_was_not_a_target", "doc": "", "outcome": "passed", "duration": 0.009236, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_patch_refuses_to_overwrite_a_broken_file", "doc": "", "outcome": "passed", "duration": 0.002018, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_shell_child_is_handed_everything_as_a_command_and_an_explicit_kind_passes_through", "doc": "", "outcome": "passed", "duration": 0.008425, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_broken_config_file_never_takes_a_send_or_a_session_register_down", "doc": "", "outcome": "passed", "duration": 0.005224, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_title_is_set_per_session_without_moving_the_default_and_survives_a_re_register", "doc": "", "outcome": "passed", "duration": 0.008491, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_title_request_goes_to_each_intelligent_session_mailbox_never_the_shell", "doc": "", "outcome": "passed", "duration": 0.006323, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_plain_send_goes_to_the_recipients_choice_and_tells_the_sender_what_else_is_open", "doc": "", "outcome": "passed", "duration": 0.005304, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_society_map_lists_every_agent_with_live_sessions", "doc": "", "outcome": "passed", "duration": 0.007959, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_gone_session_has_its_broker_mailbox_dropped", "doc": "", "outcome": "passed", "duration": 0.006413, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_beacon_titles_the_sessions_tty_uniquely_rings_and_restores_its_own_title", "doc": "The widget's find button: the beacon is what it asks Ghostty to focus, so it must be unique.", "outcome": "passed", "duration": 0.10736, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_close_hangs_up_the_sessions_tty_and_drops_it", "doc": "", "outcome": "passed", "duration": 0.004322, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_beacon_and_close_refuse_unknown_sessions_and_sessions_without_a_terminal", "doc": "", "outcome": "passed", "duration": 0.004713, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_close_keeps_the_session_when_the_hangup_fails", "doc": "", "outcome": "passed", "duration": 0.004158, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_detached_session_is_listed_with_its_command_and_log_but_never_takes_the_default", "doc": "", "outcome": "passed", "duration": 0.003086, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_a_detached_session_alone_is_the_default", "doc": "", "outcome": "passed", "duration": 0.001553, "longrepr": null}, {"nodeid": "tests/test_sessions.py::test_close_of_a_detached_session_signals_its_bridge_instead_of_a_tty", "doc": "", "outcome": "passed", "duration": 0.004403, "longrepr": null}, {"nodeid": "tests/test_shell_init.py::test_install_adds_one_source_line_and_is_idempotent", "doc": "", "outcome": "passed", "duration": 0.000835, "longrepr": null}, {"nodeid": "tests/test_shell_init.py::test_print_mode_emits_the_snippet", "doc": "", "outcome": "passed", "duration": 0.000377, "longrepr": null}, {"nodeid": "tests/test_shell_init.py::test_agent_folder_tints_and_other_folders_reset", "doc": "", "outcome": "passed", "duration": 0.069137, "longrepr": null}, {"nodeid": "tests/test_society_tree.py::test_tree_nests_subordinates_and_carries_each_agents_tile", "doc": "", "outcome": "passed", "duration": 0.001744, "longrepr": null}, {"nodeid": "tests/test_society_tree.py::test_tree_lists_sessions_with_titles", "doc": "", "outcome": "passed", "duration": 0.004607, "longrepr": null}, {"nodeid": "tests/test_society_tree.py::test_etag_gives_304_and_device_alias_serves_the_same", "doc": "", "outcome": "passed", "duration": 0.007548, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_speak_envelope_carries_an_id_and_drainer_waits_for_done", "doc": "", "outcome": "passed", "duration": 0.427743, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_second_agent_is_not_published_until_first_reports_done", "doc": "The regression: two agents reporting at once must come out one after the other.", "outcome": "passed", "duration": 0.53964, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_skipped_ack_releases_the_queue_immediately", "doc": "A muted (or voiceless, or failed) widget must free the speaker at once —\nnot sit on the full per-clip timeout for a clip that never plays.", "outcome": "passed", "duration": 0.015596, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_unclaimed_speak_is_dropped_after_the_pickup_grace", "doc": "No widget for that agent (closed, stale build, vortexia down): move on\nafter the short grace instead of the long playback timeout.", "outcome": "passed", "duration": 0.207348, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_stalled_widget_hits_the_per_clip_ceiling", "doc": "Playing but never reported done (widget died mid-clip): the ceiling fires.", "outcome": "passed", "duration": 0.326385, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_speak_timeout_follows_the_real_duration_and_is_capped", "doc": "", "outcome": "passed", "duration": 0.000101, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_slow_synthesis_keeps_the_turn_instead_of_releasing_the_next_voice", "doc": "Regression 2026-10-14: synthesis took 27-82s, the old text-length timeout\n(~20s) released the next agent mid-synthesis, and four clips played at once.\nSynthesis has its own budget now: the next agent waits.", "outcome": "passed", "duration": 1.046616, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_a_clip_whose_turn_ended_is_refused_when_it_finally_wants_to_play", "doc": "When synthesis outlives its budget the turn moves on — and the late clip\nmust NOT play over the next one: its `playing` request is refused.", "outcome": "passed", "duration": 0.224913, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_a_grant_racing_the_synthesis_timeout_keeps_the_turn", "doc": "", "outcome": "passed", "duration": 8.4e-05, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_only_one_drainer_per_machine", "doc": "", "outcome": "passed", "duration": 0.000346, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_failed_publish_does_not_wait", "doc": "", "outcome": "passed", "duration": 0.002624, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_muted_agent_is_dropped_without_publishing", "doc": "", "outcome": "passed", "duration": 0.002286, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_speak_needs_no_voice_and_ignores_a_legacy_one", "doc": "", "outcome": "passed", "duration": 0.002908, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_empty_queue_reports_idle", "doc": "", "outcome": "passed", "duration": 8.4e-05, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_ack_for_unknown_id_is_harmless", "doc": "", "outcome": "passed", "duration": 0.001383, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_ack_validates_its_input[body0]", "doc": "", "outcome": "passed", "duration": 0.001309, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_ack_validates_its_input[body1]", "doc": "", "outcome": "passed", "duration": 0.001509, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_ack_validates_its_input[body2]", "doc": "", "outcome": "passed", "duration": 0.001262, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_a_held_queue_starts_no_turn_and_keeps_every_request", "doc": "", "outcome": "passed", "duration": 0.018331, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_the_hold_freezes_the_budget_of_the_clip_in_flight", "doc": "", "outcome": "passed", "duration": 0.835026, "longrepr": null}, {"nodeid": "tests/test_speak_queue.py::test_an_unrenewed_hold_lapses_so_a_crashed_widget_cannot_silence_everyone", "doc": "", "outcome": "passed", "duration": 0.210906, "longrepr": null}, {"nodeid": "tests/test_updater.py::test_commits_are_parsed_and_bookkeeping_is_dropped", "doc": "", "outcome": "passed", "duration": 0.000356, "longrepr": null}, {"nodeid": "tests/test_updater.py::test_changelog_groups_in_order_with_counts", "doc": "", "outcome": "passed", "duration": 0.000176, "longrepr": null}, {"nodeid": "tests/test_updater.py::test_empty_changelog_is_empty", "doc": "", "outcome": "passed", "duration": 5.9e-05, "longrepr": null}, {"nodeid": "tests/test_updater.py::test_long_subjects_wrap_inside_the_terminal", "doc": "", "outcome": "passed", "duration": 0.000119, "longrepr": null}, {"nodeid": "tests/test_updater.py::test_color_follows_claude_code_and_force_vars_but_no_color_wins", "doc": "", "outcome": "passed", "duration": 0.005734, "longrepr": null}, {"nodeid": "tests/test_updates.py::test_up_to_date_checkout_has_no_update", "doc": "", "outcome": "passed", "duration": 0.058847, "longrepr": null}, {"nodeid": "tests/test_updates.py::test_new_upstream_commits_are_an_update_with_their_subjects", "doc": "", "outcome": "passed", "duration": 0.119753, "longrepr": null}, {"nodeid": "tests/test_updates.py::test_a_failed_fetch_keeps_the_last_answer", "doc": "", "outcome": "passed", "duration": 0.127981, "longrepr": null}, {"nodeid": "tests/test_updates.py::test_notice_line_only_when_available", "doc": "", "outcome": "passed", "duration": 9.8e-05, "longrepr": null}, {"nodeid": "tests/test_updates.py::test_notice_never_blocks_when_the_backend_is_down", "doc": "", "outcome": "passed", "duration": 6.3e-05, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_whisper_spellings_of_wavi_become_wavi", "doc": "", "outcome": "passed", "duration": 0.000653, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_ordinary_words_are_left_alone", "doc": "", "outcome": "passed", "duration": 0.00013, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_heard_as_aliases_and_ambiguous_keys", "doc": "", "outcome": "passed", "duration": 0.000151, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_vocabulary_fixes_spanglish_dev_terms", "doc": "", "outcome": "passed", "duration": 0.001469, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_vocabulary_leaves_plain_spanish_alone", "doc": "", "outcome": "passed", "duration": 0.001063, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_user_vocabulary_file", "doc": "", "outcome": "passed", "duration": 0.001327, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_dictation_fix_endpoint_uses_the_live_agent_names", "doc": "", "outcome": "passed", "duration": 0.005707, "longrepr": null}, {"nodeid": "tests/test_vocabulary.py::test_silent_u_of_que_qui_is_not_a_w_glide", "doc": "", "outcome": "passed", "duration": 9.6e-05, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_live_port_file_beats_stale_registry", "doc": "", "outcome": "passed", "duration": 0.000281, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_port_file_with_dead_pid_is_ignored", "doc": "", "outcome": "passed", "duration": 0.00021, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_registry_picks_latest_claim", "doc": "", "outcome": "passed", "duration": 6.3e-05, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_default_when_nothing_known", "doc": "", "outcome": "passed", "duration": 6e-05, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_malformed_port_file_falls_through", "doc": "", "outcome": "passed", "duration": 0.000206, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_default_candidates_follow_env_claim_and_sibling", "doc": "", "outcome": "passed", "duration": 0.000126, "longrepr": null}, {"nodeid": "tests/test_vortexia_port_resolution.py::test_default_none_reports_nothing_known", "doc": "", "outcome": "passed", "duration": 6.1e-05, "longrepr": null}]}</script>
-  <style>
-    :root {
-      --bg:           #07070f;
-      --bg-card:      #0c0c1e;
-      --bg-card-2:    #10102a;
-      --primary:      #3a3aff;
-      --primary-dim:  rgba(58, 58, 255, 0.10);
-      --primary-glow: rgba(58, 58, 255, 0.22);
-      --accent:       #f0c040;
-      --accent-dim:   rgba(240, 192, 64, 0.10);
-      --ok:           #40c880;
-      --err:          #ff5060;
-      --warn:         #f0a020;
-      --text:         #ccc8e8;
-      --text-dim:     #6860a0;
-      --text-bright:  #f0eeff;
-      --text-code:    #8899ff;
-      --border:       rgba(58, 58, 255, 0.16);
-      --border-mid:   rgba(58, 58, 255, 0.28);
-      --font-serif:   'Georgia', 'Times New Roman', ui-serif;
-      --font-mono:    ui-monospace, 'Courier New', Courier, monospace;
-      --font-ui:      ui-sans-serif, -apple-system, system-ui, sans-serif;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Agent Society</title>
+<meta name="description" content="Everything Local Agent Society does: named agents with their own voice, a floating widget, voice-only Claude and Codex, messaging between agents and Macs, ports and the phone.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* ── tokens ────────────────────────────────────────────────────────────────
+   The page is lit like a Mac desktop at daylight; every agent brings its own
+   widget color, so color here always means "which agent". Amber means "live":
+   someone is speaking or a message is in flight. */
+:root {
+  --paper:   #eef2f9;
+  --sheet:   #ffffff;
+  --ink:     #0f2147;
+  --ink-2:   #4a5a7e;
+  --rule:    #d5ddec;
+  --las:     #004094;
+  --live:    #e89a0c;
+  --live-soft: #fff3d6;
+  --code-bg: #e6ecf7;
+  --scene-a: #dfe8f8;
+  --scene-b: #f7f9fd;
+  --shadow:  0 1px 0 rgba(15,33,71,.04), 0 14px 40px -18px rgba(15,33,71,.28);
+  --a-las: #004094; --a-pulpo: #2b8a3e; --a-garantido: #c2255c; --a-vortexia: #6741d9;
+  --a-wavi: #0b7285; --a-robotics: #d9480f; --a-teli: #1971c2;
+  --display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --body: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0c1428; --sheet: #121d36; --ink: #e7edfb; --ink-2: #9aa9c9; --rule: #24335a;
+    --las: #6f9cff; --live: #ffb938; --live-soft: #3a2c0c; --code-bg: #182748;
+    --scene-a: #13213f; --scene-b: #0e182f;
+    --shadow: 0 1px 0 rgba(0,0,0,.3), 0 18px 44px -20px rgba(0,0,0,.7);
+    --a-las: #3b7bff; --a-pulpo: #40c057; --a-garantido: #f06595; --a-vortexia: #9775fa;
+    --a-wavi: #22b8cf; --a-robotics: #ff8743; --a-teli: #4dabf7;
+    color-scheme: dark;
+  }
+}
 
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; }
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 17px/1.6 var(--body); font-feature-settings: "ss01";
+}
+a { color: var(--las); text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--live); outline-offset: 2px; border-radius: 6px; }
+code, kbd, .cmd { font-family: var(--mono); font-size: .86em; }
+code { background: var(--code-bg); padding: .1em .38em; border-radius: 5px; white-space: nowrap; }
+h1, h2, h3 { font-family: var(--display); color: var(--ink); margin: 0; }
+h2 { font-size: clamp(30px, 4.2vw, 48px); line-height: 1.04; font-weight: 800; letter-spacing: -.018em; max-width: 18ch; }
+h3 { font-size: 21px; font-weight: 600; letter-spacing: -.01em; }
+p { margin: 0 0 1em; max-width: 64ch; }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 56ch; }
 
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font-ui);
-      font-size: 14px;
-      line-height: 1.6;
-      min-height: 100vh;
-    }
+/* ── frame ──────────────────────────────────────────────────────────────── */
+.frame { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; max-width: 1280px; margin: 0 auto; padding: 0 40px; }
+nav.toc { position: sticky; top: 0; align-self: start; height: 100vh; padding: 40px 0; display: flex; flex-direction: column; gap: 2px; }
+nav.toc .brand { display: flex; align-items: center; gap: 10px; font: 800 17px/1.1 var(--display); color: var(--ink); text-decoration: none; margin-bottom: 26px; }
+nav.toc .brand svg { flex: none; }
+nav.toc a.item { color: var(--ink-2); text-decoration: none; font-size: 15px; padding: 6px 12px; border-left: 2px solid var(--rule); }
+nav.toc a.item:hover { color: var(--ink); }
+nav.toc a.item.here { color: var(--ink); border-left-color: var(--las); font-weight: 600; }
+nav.toc .update { margin-top: auto; font-size: 13px; color: var(--ink-2); }
+main { min-width: 0; padding-bottom: 120px; }
+section { padding: 112px 0 0; }
+section > header { display: grid; gap: 18px; margin-bottom: 44px; }
 
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background: repeating-linear-gradient(
-        0deg, transparent, transparent 2px,
-        rgba(0, 0, 20, 0.13) 2px, rgba(0, 0, 20, 0.13) 4px
-      );
-      pointer-events: none;
-      z-index: 1000;
-    }
+/* ── hero ───────────────────────────────────────────────────────────────── */
+.hero { padding-top: 48px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 40px; align-items: center; }
+.hero h1 { font-size: clamp(52px, 7.4vw, 104px); line-height: .92; letter-spacing: -.028em; font-weight: 800; font-variation-settings: "opsz" 96; }
+.hero h1 .line { display: block; }
+.hero .lede { margin: 26px 0 30px; }
+.start-line { display: flex; flex-wrap: wrap; gap: 10px; }
+.copy {
+  display: inline-flex; align-items: center; gap: 12px; padding: 11px 16px 11px 18px; border-radius: 12px;
+  background: var(--ink); color: var(--paper); border: 0; font: 500 15px var(--mono); cursor: pointer;
+}
+.copy .hint { font: 500 12px var(--body); opacity: .65; }
+.copy.done .hint { opacity: 1; color: var(--live); }
+.copy.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--rule); }
 
-    .page { max-width: 960px; margin: 0 auto; padding: 0 32px 80px; }
+.scene { position: relative; aspect-ratio: 640 / 470; border-radius: 28px; overflow: hidden;
+  background: radial-gradient(120% 90% at 20% 0%, var(--scene-b), var(--scene-a)); box-shadow: var(--shadow); }
+.scene svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.scene .w-name { font: 700 15px var(--display); fill: #fff; letter-spacing: -.01em; }
+.scene .hub-label { font: 600 12px var(--mono); fill: var(--ink-2); }
+.scene .bubble-text { font: 500 13px var(--body); fill: var(--ink); }
+.scene .space-label { font: 500 11px var(--body); fill: var(--ink-2); opacity: .8; }
+.scene-caption { margin-top: 14px; font-size: 14px; color: var(--ink-2); }
+.scene-caption b { color: var(--ink); font-weight: 600; }
 
-    /* ── hero ── */
-    .hero {
-      padding: 72px 0 56px;
-      border-bottom: 1px solid var(--border);
-      position: relative;
-    }
+/* ── quick start (a real sequence) ──────────────────────────────────────── */
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.step { padding: 26px 26px 6px 0; }
+.step + .step { padding-left: 26px; border-left: 1px solid var(--rule); }
+.step .n { font: 800 56px/1 var(--display); color: var(--las); letter-spacing: -.04em; }
+.step h3 { margin: 14px 0 8px; }
+.step p { font-size: 15.5px; color: var(--ink-2); }
+pre.term { margin: 0 0 18px; background: var(--code-bg); border-radius: 12px; padding: 14px 16px; font: 400 13.5px/1.7 var(--mono); overflow-x: auto; color: var(--ink); }
+pre.term .c { color: var(--ink-2); }
 
-    .hero::after {
-      content: 'LAS';
-      position: absolute;
-      bottom: -2px; right: 0;
-      font-family: var(--font-serif);
-      font-size: 140px;
-      font-weight: bold;
-      font-style: italic;
-      color: var(--primary);
-      opacity: 0.04;
-      line-height: 1;
-      letter-spacing: -0.05em;
-      pointer-events: none;
-      user-select: none;
-    }
+/* ── widget anatomy ─────────────────────────────────────────────────────── */
+.anatomy { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+.stage { background: linear-gradient(160deg, var(--scene-b), var(--scene-a)); border-radius: 28px; padding: 64px 32px; display: grid; place-items: center; min-height: 420px; position: relative; }
+.widget {
+  width: 300px; border-radius: 22px; padding: 14px 14px 16px; color: #fff; position: relative;
+  background: color-mix(in srgb, var(--a-las) 88%, transparent); box-shadow: 0 24px 60px -24px rgba(0,30,90,.7);
+  backdrop-filter: blur(8px);
+}
+.widget .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.widget .title { font: 800 26px/1 var(--display); letter-spacing: -.03em; margin: 12px 4px 10px; text-align: center; -webkit-text-stroke: .4px rgba(255,255,255,.6); }
+.widget .log { font-size: 13px; line-height: 1.45; background: rgba(255,255,255,.12); border-radius: 12px; padding: 9px 11px; margin-bottom: 12px; min-height: 58px; }
+.widget .log .me { display: block; text-align: right; opacity: .8; }
+.widget .row { display: flex; justify-content: space-between; }
+.fb {
+  width: 40px; height: 40px; border-radius: 50%; border: 2.4px solid rgba(255,255,255,.75);
+  background: rgba(255,255,255,.16); color: #fff; font-size: 17px; cursor: pointer; display: grid; place-items: center; padding: 0;
+  transition: transform .15s ease, background .15s ease;
+}
+.fb.small { width: 30px; height: 30px; font-size: 13px; border-width: 2px; }
+.fb[aria-pressed="true"] { background: #fff; color: var(--a-las); transform: scale(1.08); box-shadow: 0 0 0 5px color-mix(in srgb, var(--live) 70%, transparent); }
+.stage .note { position: absolute; bottom: 18px; left: 0; right: 0; text-align: center; font-size: 13px; color: var(--ink-2); }
+.explain { position: sticky; top: 32px; }
+.explain .what { font: 800 34px/1.05 var(--display); letter-spacing: -.03em; display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.explain .what .glyph { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; background: var(--las); color: #fff; font-size: 24px; flex: none; }
+.explain ul { padding-left: 1.1em; margin: 0; }
+.explain li { margin-bottom: .55em; max-width: 60ch; }
+.explain .gesture { color: var(--ink-2); font-size: 14px; margin-top: 18px; }
 
-    .hero-eyebrow {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--primary);
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .hero-eyebrow::before {
-      content: '';
-      display: block;
-      width: 24px;
-      height: 1px;
-      background: var(--primary);
-    }
+/* ── sessions switchboard ───────────────────────────────────────────────── */
+.board { border-radius: 22px; background: var(--sheet); box-shadow: var(--shadow); overflow: hidden; }
+.board .r { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) 7.5rem 7.5rem; gap: 20px; align-items: center; padding: 18px 26px; border-top: 1px solid var(--rule); }
+.board .r:first-child { border-top: 0; }
+.board .head { font-size: 13px; color: var(--ink-2); padding-top: 16px; padding-bottom: 12px; background: color-mix(in srgb, var(--paper) 60%, var(--sheet)); }
+.board .cmd { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.board .d { font-size: 15.5px; color: var(--ink-2); }
+.board .d b { color: var(--ink); font-weight: 600; }
+.pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; }
+.pill::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--rule); }
+.pill.on::before { background: var(--las); }
+.pill.live::before { background: var(--live); box-shadow: 0 0 0 4px var(--live-soft); }
+.board .r.new { background: linear-gradient(90deg, var(--live-soft), transparent 70%); }
+.aside-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; margin-top: 48px; }
+.aside-grid h3 { margin-bottom: 10px; }
+.aside-grid p { font-size: 15.5px; color: var(--ink-2); }
 
-    h1 {
-      font-family: var(--font-serif);
-      font-size: clamp(48px, 7vw, 86px);
-      font-weight: normal;
-      line-height: 0.92;
-      letter-spacing: -0.02em;
-      color: var(--text-bright);
-      margin-bottom: 28px;
-    }
-    h1 span { color: var(--primary); }
+/* ── voice loop ─────────────────────────────────────────────────────────── */
+.loop { background: var(--sheet); border-radius: 28px; box-shadow: var(--shadow); padding: 28px; }
+.loop svg { width: 100%; height: auto; display: block; }
+.loop .node-t { font: 700 15px var(--display); fill: var(--ink); }
+.loop .node-s { font: 400 12.5px var(--body); fill: var(--ink-2); }
+.loop-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 40px; }
+.loop-notes h3 { font-size: 18px; margin-bottom: 8px; }
+.loop-notes p { font-size: 15px; color: var(--ink-2); }
 
-    .hero-sub {
-      font-size: 15px;
-      color: var(--text-dim);
-      max-width: 520px;
-      line-height: 1.7;
-    }
+/* ── messaging ──────────────────────────────────────────────────────────── */
+.routes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 8px; }
+.route { padding: 22px 24px 8px 0; border-top: 6px solid var(--rule); }
+.route + .route { padding-left: 24px; }
+.route.l1 { border-top-color: var(--las); }
+.route.l2 { border-top-color: color-mix(in srgb, var(--las) 55%, var(--rule)); }
+.route.l3 { border-top-color: color-mix(in srgb, var(--las) 25%, var(--rule)); }
+.route h3 { font-size: 19px; margin-bottom: 6px; }
+.route p { font-size: 15px; color: var(--ink-2); }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; margin-top: 56px; }
+.split p { font-size: 15.5px; }
 
-    /* ── sections ── */
-    section { padding: 56px 0 0; }
+/* ── map / phone ────────────────────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 8px 0 40px; }
+.tile { border-radius: 16px; padding: 14px; color: #fff; min-height: 108px; display: flex; flex-direction: column; justify-content: space-between; position: relative; }
+.tile .k { font-size: 12px; opacity: .85; }
+.tile .t { font: 700 18px/1.1 var(--display); }
+.tile .mic { position: absolute; top: -10px; right: -8px; width: 30px; height: 30px; border-radius: 50%; background: var(--live); display: grid; place-items: center; font-size: 15px; box-shadow: 0 6px 16px -6px rgba(0,0,0,.5); }
+.tile.repo { background: var(--sheet); color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--rule); }
+.phone-wrap { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 56px; align-items: center; }
+.phone { width: 240px; aspect-ratio: 9 / 19; border-radius: 40px; background: #0a0f1c; border: 1.5px solid var(--rule); padding: 12px; box-shadow: var(--shadow); }
+.phone .screen { height: 100%; border-radius: 30px; background: #eef2f9; padding: 34px 12px 12px; display: grid; gap: 9px; align-content: start; }
+.phone .p { border-radius: 14px; color: #fff; padding: 10px 12px; font: 700 14px var(--display); display: flex; justify-content: space-between; align-items: center; }
+.phone .p span { font: 500 15px var(--body); opacity: .9; }
 
-    .section-label {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin-bottom: 28px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .section-label::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border);
-    }
+/* ── rules ──────────────────────────────────────────────────────────────── */
+.rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 48px; }
+.rule { padding: 22px 0; border-top: 1px solid var(--rule); display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; }
+.rule .ic { font-size: 26px; line-height: 1; }
+.rule h3 { font-size: 18px; margin-bottom: 4px; }
+.rule p { font-size: 15px; color: var(--ink-2); margin: 0; }
 
-    h2 {
-      font-family: var(--font-serif);
-      font-size: 28px;
-      font-weight: normal;
-      color: var(--text-bright);
-      margin-bottom: 32px;
-      letter-spacing: -0.01em;
-    }
+/* ── CLI reference ──────────────────────────────────────────────────────── */
+.find { display: flex; align-items: center; gap: 12px; background: var(--sheet); border-radius: 14px; padding: 4px 6px 4px 18px; box-shadow: var(--shadow); margin-bottom: 28px; max-width: 560px; }
+.find input { flex: 1; border: 0; background: transparent; font: 500 17px var(--body); color: var(--ink); padding: 12px 0; min-width: 0; }
+.find input:focus { outline: none; }
+.find:focus-within { box-shadow: var(--shadow), 0 0 0 3px var(--live); }
+.find .count { font-size: 13px; color: var(--ink-2); padding-right: 12px; white-space: nowrap; }
+.cli { columns: 2 380px; column-gap: 40px; }
+.group { break-inside: avoid; margin-bottom: 30px; }
+.group h3 { font-size: 17px; margin-bottom: 8px; color: var(--las); }
+.c-row { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: 14px; padding: 7px 0; border-top: 1px solid var(--rule); font-size: 14.5px; }
+.c-row .cmd { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.c-row span:last-child { color: var(--ink-2); }
+.c-row[hidden], .group[hidden] { display: none; }
+.empty { color: var(--ink-2); }
 
-    code {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-code);
-      background: rgba(136, 153, 255, 0.08);
-      padding: 2px 6px;
-      border-radius: 3px;
-    }
+footer { margin-top: 120px; padding-top: 28px; border-top: 2px solid var(--ink); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; color: var(--ink-2); font-size: 14px; }
 
-    pre {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-code);
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 14px 16px;
-      overflow-x: auto;
-      line-height: 1.7;
-      margin-top: 8px;
-    }
-    pre .dim    { color: var(--text-dim); }
-    pre .bright { color: var(--text-bright); }
-    pre .str    { color: var(--accent); }
-    pre .flag   { color: var(--ok); }
-
-    /* ── quick start ── */
-    .steps {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-    }
-
-    .step {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
-      position: relative;
-      overflow: hidden;
-      transition: border-color 0.2s, background 0.2s;
-    }
-    .step:hover { border-color: var(--border-mid); background: var(--bg-card-2); }
-    .step::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 2px;
-      background: var(--primary);
-      opacity: 0.45;
-    }
-
-    .step-num {
-      font-family: var(--font-serif);
-      font-size: 52px;
-      line-height: 1;
-      color: var(--primary);
-      opacity: 0.2;
-      position: absolute;
-      top: 14px; right: 18px;
-      font-style: italic;
-    }
-
-    .step-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-bright);
-      margin-bottom: 10px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-    }
-
-    .step p { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 12px; }
-
-    /* ── cli reference ── */
-    .cmd-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-    }
-
-    .cmd-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 14px 18px;
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 0 16px;
-      transition: border-color 0.15s;
-    }
-    .cmd-card:hover { border-color: var(--border-mid); }
-
-    .cmd-name {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-code);
-      font-weight: bold;
-      padding-top: 1px;
-      white-space: nowrap;
-    }
-
-    .cmd-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
-
-    .cmd-subs {
-      grid-column: 2;
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-    .cmd-sub {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--primary);
-      background: var(--primary-dim);
-      border: 1px solid rgba(58,58,255,0.18);
-      border-radius: 3px;
-      padding: 1px 6px;
-    }
-
-    /* ── society rules ── */
-    .rules {
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .rule {
-      display: grid;
-      grid-template-columns: 56px 1fr;
-      border-bottom: 1px solid var(--border);
-      transition: background 0.15s;
-    }
-    .rule:last-child { border-bottom: none; }
-    .rule:hover { background: var(--primary-dim); }
-
-    .rule-num {
-      font-family: var(--font-serif);
-      font-size: 22px;
-      font-style: italic;
-      color: var(--primary);
-      opacity: 0.38;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-right: 1px solid var(--border);
-    }
-
-    .rule-body { padding: 18px 24px; }
-
-    .rule-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-bright);
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .badge {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--accent);
-      background: var(--accent-dim);
-      border: 1px solid rgba(240,192,64,0.18);
-      border-radius: 2px;
-      padding: 1px 5px;
-    }
-
-    .rule-text { font-size: 12px; color: var(--text-dim); line-height: 1.6; }
-
-    /* ── test results ── */
-    .tests-summary {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-
-    .test-stat {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 16px 20px;
-      text-align: center;
-    }
-
-    .test-stat-value {
-      font-family: var(--font-serif);
-      font-size: 36px;
-      font-weight: normal;
-      line-height: 1;
-      margin-bottom: 4px;
-    }
-
-    .test-stat-label {
-      font-family: var(--font-mono);
-      font-size: 9px;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-    }
-
-    .color-ok   { color: var(--ok); }
-    .color-err  { color: var(--err); }
-    .color-warn { color: var(--warn); }
-    .color-dim  { color: var(--text-dim); }
-
-    .test-meta {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      color: var(--text-dim);
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-
-    .test-meta .dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      display: inline-block;
-    }
-
-    .tests-list {
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      overflow: hidden;
-    }
-
-    .test-row {
-      display: grid;
-      grid-template-columns: 20px 1fr auto;
-      gap: 12px;
-      align-items: center;
-      padding: 9px 14px;
-      border-bottom: 1px solid rgba(58,58,255,0.06);
-      font-size: 12px;
-      transition: background 0.1s;
-    }
-    .test-row:last-child { border-bottom: none; }
-    .test-row:hover { background: var(--primary-dim); }
-
-    .test-icon { font-size: 11px; text-align: center; }
-    .test-name { font-family: var(--font-mono); color: var(--text); }
-    .test-doc  { color: var(--text-dim); font-size: 11px; }
-    .test-dur  { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); white-space: nowrap; }
-
-    .no-results {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 40px;
-      text-align: center;
-    }
-    .no-results p { color: var(--text-dim); font-size: 13px; margin-bottom: 10px; }
-    .no-results code { font-size: 13px; }
-
-    /* ── footer ── */
-    .footer {
-      margin-top: 72px;
-      padding-top: 24px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .footer-brand { font-family: var(--font-serif); font-size: 13px; font-style: italic; color: var(--text-dim); }
-    .footer-links { display: flex; gap: 20px; }
-    .footer-links a {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      text-decoration: none;
-      transition: color 0.15s;
-    }
-    .footer-links a:hover { color: var(--primary); }
-
-    @media (max-width: 680px) {
-      .steps, .cmd-grid { grid-template-columns: 1fr; }
-      .tests-summary { grid-template-columns: repeat(2, 1fr); }
-      h1 { font-size: 48px; }
-    }
-  </style>
+/* ── responsive ─────────────────────────────────────────────────────────── */
+@media (max-width: 1080px) {
+  .frame { grid-template-columns: minmax(0, 1fr); padding: 0 24px; }
+  nav.toc { display: none; }
+  .hero, .anatomy, .split, .phone-wrap { grid-template-columns: minmax(0, 1fr); }
+  .explain { position: static; }
+}
+@media (max-width: 760px) {
+  body { font-size: 16px; }
+  .frame { padding: 0 16px; }
+  section { padding-top: 80px; }
+  .steps, .routes, .loop-notes, .aside-grid, .rules { grid-template-columns: minmax(0, 1fr); }
+  .step + .step, .route + .route { padding-left: 0; border-left: 0; }
+  .step + .step { border-top: 1px solid var(--rule); }
+  .board .r { grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 16px 18px; }
+  .board .head { display: none; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .c-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .widget { width: 100%; max-width: 300px; }
+  .stage { padding: 48px 16px 56px; }
+  .phone-wrap { justify-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .fb { transition: none; }
+}
+</style>
 </head>
 <body>
-<div class="page">
+<div class="frame">
 
-  <!-- ── HERO ── -->
-  <header class="hero">
-    <div class="hero-eyebrow">Onboarding · Port 8700</div>
-    <h1>Local<br><span>Agent</span><br>Society</h1>
-    <p class="hero-sub">A society of agents that coexist, respect shared resources, and communicate in an orderly way. Running locally on your machine.</p>
-  </header>
+<nav class="toc" aria-label="Sections">
+  <a class="brand" href="#top">
+    <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="5" fill="var(--las)"/><circle cx="5" cy="8" r="3.2" fill="var(--a-pulpo)"/><circle cx="25" cy="7" r="3.2" fill="var(--a-garantido)"/><circle cx="24" cy="24" r="3.2" fill="var(--a-vortexia)"/><circle cx="6" cy="23" r="3.2" fill="var(--live)"/></svg>
+    Local Agent Society
+  </a>
+  <a class="item" href="#start">Start</a>
+  <a class="item" href="#widget">The widget</a>
+  <a class="item" href="#sessions">Sessions</a>
+  <a class="item" href="#voice">Voice</a>
+  <a class="item" href="#messages">Messages</a>
+  <a class="item" href="#map">Map and friends</a>
+  <a class="item" href="#phone">Phone</a>
+  <a class="item" href="#rules">House rules</a>
+  <a class="item" href="#cli">Every command</a>
+  <p class="update">Up to date in one step:<br><code>las update</code></p>
+</nav>
 
-  <!-- ── QUICK START ── -->
-  <section>
-    <div class="section-label">Getting started</div>
-    <h2>Three steps to join the society</h2>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">1</div>
-        <div class="step-title">Install</div>
-        <p>Run the installer from the project root. Compiles the widget, sets up LaunchAgents, starts the backend on port 8700.</p>
-        <pre><span class="dim">$</span> <span class="bright">./install.sh</span>
-<span class="dim">$</span> <span class="bright">las status</span></pre>
-      </div>
-      <div class="step">
-        <div class="step-num">2</div>
-        <div class="step-title">Create an agent</div>
-        <p>Navigate to your project and run the new-agent skill. It registers the agent, assigns a unique voice, and opens the widget.</p>
-        <pre><span class="dim">$</span> cd ~/Development/MyProject
-<span class="dim">$</span> <span class="dim"># inside Claude Code:</span>
-<span class="bright">/new-local-agent</span></pre>
-      </div>
-      <div class="step">
-        <div class="step-num">3</div>
-        <div class="step-title">Speak &amp; inject</div>
-        <p>Agents speak via the queue, never directly. Send messages to other agents via the inject command.</p>
-        <pre><span class="dim">$</span> <span class="bright">las speak</span> <span class="str">"Hello society"</span>
-<span class="dim">$</span> <span class="bright">las agent inject</span> Wavi <span class="str">"Hey"</span> <span class="flag">--from</span> Me</pre>
-      </div>
+<main id="top">
+
+<!-- ═══ hero ═══════════════════════════════════════════════════════════════ -->
+<div class="hero">
+  <div>
+    <h1><span class="line">Local</span><span class="line">Agent</span><span class="line">Society</span></h1>
+    <p class="lede">Every project folder on your Mac becomes an agent with a name, a color and its own voice. Talk to Claude or Codex out loud, hear what they did, and let them message each other — without stepping on each other's ports or voices.</p>
+    <div class="start-line">
+      <button class="copy" data-copy="las agent new MyAgent">las agent new MyAgent <span class="hint">Copy</span></button>
+      <button class="copy ghost" data-copy="las claude">las claude <span class="hint">Copy</span></button>
     </div>
-  </section>
-
-  <!-- ── CLI REFERENCE ── -->
-  <section>
-    <div class="section-label">Command reference</div>
-    <h2>The <code>las</code> CLI</h2>
-    <div class="cmd-grid">
-      <div class="cmd-card">
-        <div class="cmd-name">las status</div>
-        <div class="cmd-desc">Show backend status, registered agents, and active ports.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las start / stop</div>
-        <div class="cmd-desc">Start or stop the backend server and tray app.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las logs</div>
-        <div class="cmd-desc">Tail the backend log in real time.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las speak</div>
-        <div class="cmd-desc">Enqueue a TTS message. Safe for concurrent agents — never collides.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las agents</div>
-        <div class="cmd-desc">List all registered agents with their voice and project path.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las agent</div>
-        <div>
-          <div class="cmd-desc">Manage a specific agent.</div>
-          <div class="cmd-subs">
-            <span class="cmd-sub">inject</span>
-            <span class="cmd-sub">clean</span>
-            <span class="cmd-sub">mute</span>
-            <span class="cmd-sub">unmute</span>
-            <span class="cmd-sub">sync</span>
-            <span class="cmd-sub">restore</span>
-            <span class="cmd-sub">delete</span>
-          </div>
-        </div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las widget</div>
-        <div class="cmd-desc">Reopen the floating agent widget on the current macOS Space.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las widgets</div>
-        <div class="cmd-desc">Reopen <em>all</em> registered agent widgets on the current Space at once.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las link</div>
-        <div class="cmd-desc">Link the current terminal session to the agent widget — the widget will route voice/text injections to this TTY. Auto-detects the TTY by walking the process tree (works in Claude Code terminals where stdin is redirected). Accepts <code>--agent NAME</code> and optional <code>--tty /dev/ttysNNN</code>.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las ports</div>
-        <div>
-          <div class="cmd-desc">Manage the port registry. Always claim before binding — never hardcode.</div>
-          <div class="cmd-subs">
-            <span class="cmd-sub">ls</span>
-            <span class="cmd-sub">free</span>
-            <span class="cmd-sub">claim</span>
-            <span class="cmd-sub">release</span>
-          </div>
-        </div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las voices</div>
-        <div>
-          <div class="cmd-desc">Query TTS voices — each voice has a fixed language.</div>
-          <div class="cmd-subs">
-            <span class="cmd-sub">list</span>
-            <span class="cmd-sub">info</span>
-            <span class="cmd-sub">random</span>
-          </div>
-        </div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las queue</div>
-        <div>
-          <div class="cmd-desc">Inspect and manage the TTS speech queue.</div>
-          <div class="cmd-subs">
-            <span class="cmd-sub">ls</span>
-            <span class="cmd-sub">clear</span>
-          </div>
-        </div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las install / update</div>
-        <div class="cmd-desc">Install or update the full system (widget, LaunchAgent, backend).</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">las boarding</div>
-        <div class="cmd-desc">Print the path to this page. Pass <code>--open</code> to launch in the browser.</div>
-      </div>
+  </div>
+  <figure style="margin:0">
+    <div class="scene" id="scene" role="img" aria-label="A live view of the society: agent widgets on two Spaces exchange messages through vortexia while one of them speaks its report.">
+      <svg viewBox="0 0 640 470" id="scene-svg" aria-hidden="true">
+        <defs>
+          <filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0a1f4d" flood-opacity=".25"/></filter>
+        </defs>
+        <rect x="16" y="16" width="296" height="438" rx="20" fill="none" stroke="var(--rule)" stroke-dasharray="4 6"/>
+        <rect x="328" y="16" width="296" height="438" rx="20" fill="none" stroke="var(--rule)" stroke-dasharray="4 6"/>
+        <text class="space-label" x="32" y="40">Desktop 1</text>
+        <text class="space-label" x="344" y="40">Desktop 2</text>
+        <g id="wires"></g>
+        <g id="hub">
+          <circle cx="320" cy="250" r="30" fill="var(--sheet)" stroke="var(--las)" stroke-width="2"/>
+          <circle id="hub-ring" cx="320" cy="250" r="30" fill="none" stroke="var(--live)" stroke-width="2" opacity="0"/>
+          <text class="hub-label" x="320" y="296" text-anchor="middle">vortexia</text>
+          <path d="M309 250 q5.5 -9 11 0 t11 0" fill="none" stroke="var(--las)" stroke-width="2.4" stroke-linecap="round"/>
+        </g>
+        <g id="widgets"></g>
+        <g id="pulses"></g>
+        <g id="bubble" opacity="0">
+          <rect id="bubble-box" rx="14" height="34" fill="var(--sheet)" filter="url(#soft)"/>
+          <text id="bubble-text" class="bubble-text" y="0"></text>
+        </g>
+      </svg>
     </div>
-  </section>
-
-  <!-- ── WIDGET UI ── -->
-  <section>
-    <div class="section-label">Widget controls</div>
-    <h2>The floating widget</h2>
-    <div class="cmd-grid">
-      <div class="cmd-card">
-        <div class="cmd-name">⚙ Gear panel</div>
-        <div class="cmd-desc">Expands downward from the widget. Shows agent info (voice, locale, ports, branch), color/opacity controls, and a <strong>Route</strong> dropdown to select which terminal receives voice injections. Click ⚙ to toggle.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">⊙ Scope button — drag to link</div>
-        <div class="cmd-desc">Tap to focus the agent's Claude terminal. <strong>Drag</strong> the scope icon onto any terminal window to link it: the widget pastes <code>las link --agent NAME</code> and sends Enter via AppleScript. The widget flashes green when the link is confirmed. Works with any shell — no <code>!</code> prefix needed.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">⊞ Command panel</div>
-        <div class="cmd-desc">Click the terminal button (<code>&gt;_</code>) to slide open the command panel below the widget — same expand mechanic as the gear panel. Each row shows a <strong>grip handle</strong> (drag up/down to reorder), a clickable <strong>alias</strong> that executes the command, and a scrolling <strong>marquee</strong> showing the exact command that will run (e.g. <code>claude --model claude-sonnet-4-6</code>). Click ✏ to edit or delete. Three command types: <strong>claude</strong> (opens iTerm2 running <code>claude --model &lt;id&gt;</code>), <strong>Terminal</strong> (opens a plain shell in the agent's directory, no claude), <strong>Inject</strong> (types into the linked session). If no alias is given, one is derived from the payload (e.g. <code>/clear</code> → <code>clear</code>). Commands are stored per-agent in UserDefaults.</div>
-      </div>
-      <div class="cmd-card">
-        <div class="cmd-name">Backend: link flow</div>
-        <div class="cmd-desc"><code>POST /agents/{name}/pin-tty</code> registers a TTY. <code>GET /agents/{name}/pending-link</code> returns and clears it (consumed once). The widget polls pending-link every 500 ms for up to 4 s after a drag completes.</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── SOCIETY RULES ── -->
-  <section>
-    <div class="section-label">Civility contract</div>
-    <h2>The six rules of the society</h2>
-    <div class="rules">
-      <div class="rule">
-        <div class="rule-num">I</div>
-        <div class="rule-body">
-          <div class="rule-title">Voice — never call <code>say</code> directly <span class="badge">mandatory</span></div>
-          <div class="rule-text">All speech goes through <code>POST /queue/speak</code> or <code>las speak</code>. The queue prevents collisions when multiple agents speak simultaneously. Only the protagonist agent speaks; subagents are silent.</div>
-        </div>
-      </div>
-      <div class="rule">
-        <div class="rule-num">II</div>
-        <div class="rule-body">
-          <div class="rule-title">Ports — always from the registry <span class="badge">mandatory</span></div>
-          <div class="rule-text">Never hardcode a port. Check <code>GET /ports</code>, reserve with <code>las ports claim &lt;port&gt;</code>. If your port is taken by another agent, notify them via inject and wait — never steal.</div>
-        </div>
-      </div>
-      <div class="rule">
-        <div class="rule-num">III</div>
-        <div class="rule-body">
-          <div class="rule-title">Voices — unique per agent, speak in the voice's language <span class="badge">mandatory</span></div>
-          <div class="rule-text">Each agent declares its voice in <code>.agent.json</code>. Never impersonate another agent's voice. Each TTS voice has a fixed language — English voices only sound correct with English text; Spanish voices only with Spanish. Never mix. Check with <code>las voices info &lt;name&gt;</code> or <code>GET /voices/&lt;name&gt;</code>.</div>
-        </div>
-      </div>
-      <div class="rule">
-        <div class="rule-num">IV</div>
-        <div class="rule-body">
-          <div class="rule-title">Inter-agent messages — via inject</div>
-          <div class="rule-text">To send a message to another agent: <code>las agent inject &lt;Name&gt; "message" --from &lt;You&gt;</code>. The text appears directly in their terminal, prefixed with your name.</div>
-        </div>
-      </div>
-      <div class="rule">
-        <div class="rule-num">V</div>
-        <div class="rule-body">
-          <div class="rule-title">External channel — inject API <span class="badge">no file polling</span></div>
-          <div class="rule-text">Scripts and external processes reach an agent via <code>POST /agents/&lt;Name&gt;/inject</code> or <code>las agent inject &lt;Name&gt; "msg" --from external</code>. The message is delivered live to their TTY. There are no inbox files — no <code>extern-inbox.md</code>, no polling. If the agent has no live terminal the message is not delivered; retry when they start a session.</div>
-        </div>
-      </div>
-      <div class="rule">
-        <div class="rule-num">VI</div>
-        <div class="rule-body">
-          <div class="rule-title">Language — respond in the configured locale</div>
-          <div class="rule-text">Read <code>.agent.json</code> for <code>"locale"</code> (e.g. <code>"en-US"</code>, <code>"es-MX"</code>). If absent, infer from the voice name (Samantha → English; Paulina/Mónica → Spanish). The spoken text and text responses must both be in the voice's language. Code, comments, and system files are always written in English regardless of locale.</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── TEST RESULTS ── -->
-  <section>
-    <div class="section-label">Test suite</div>
-    <h2>Latest results</h2>
-    <div id="test-content"></div>
-  </section>
-
-  <!-- ── FOOTER ── -->
-  <footer class="footer">
-    <div class="footer-brand">Local Agent Society</div>
-    <div class="footer-links">
-      <a href="http://localhost:8700/docs" target="_blank">API docs</a>
-      <a href="http://localhost:8700/agents" target="_blank">Agents</a>
-      <a href="http://localhost:8700/ports" target="_blank">Ports</a>
-    </div>
-  </footer>
-
+    <figcaption class="scene-caption" id="scene-caption"><b>Live:</b> agents on two Desktops send messages through vortexia; the one speaking shows its report.</figcaption>
+  </figure>
 </div>
+
+<!-- ═══ start ══════════════════════════════════════════════════════════════ -->
+<section id="start">
+  <header>
+    <h2>Three commands to an agent that answers out loud</h2>
+  </header>
+  <div class="steps">
+    <div class="step">
+      <div class="n">1</div>
+      <h3>Install once</h3>
+      <p>Clone the repo and run the installer. It builds the widget, installs the <code>las</code> command and starts the backend and the message broker as login services.</p>
+      <pre class="term">git clone … local-agent-society
+cd local-agent-society
+bash install.sh</pre>
+    </div>
+    <div class="step">
+      <div class="n">2</div>
+      <h3>Name a project</h3>
+      <p>In any project folder, create its agent. It gets a free voice of your language and a color, and its widget appears on the Desktop you are on.</p>
+      <pre class="term">cd ~/Development/my-app
+las agent new MyApp</pre>
+    </div>
+    <div class="step">
+      <div class="n">3</div>
+      <h3>Open a session</h3>
+      <p>Start Claude through <code>las</code>. Dictations from the widget, and messages from other agents, now land in that session the moment they arrive.</p>
+      <pre class="term">las claude
+<span class="c"># or las codex, las shell…</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ widget ═════════════════════════════════════════════════════════════ -->
+<section id="widget">
+  <header>
+    <h2>The widget is the agent's face</h2>
+    <p class="lede">A small floating window in the agent's color, always on the Desktop where you work on it. It tells you what this Desktop is for, listens when you talk, and shows what the agent says back. Press a button to see what it does.</p>
+  </header>
+  <div class="anatomy">
+    <div class="stage">
+      <div class="widget" id="widget-mock">
+        <div class="top">
+          <button class="fb small" data-part="archive" aria-label="Archive">⤓</button>
+          <button class="fb small" data-part="settings" aria-label="Settings">⚙</button>
+        </div>
+        <div class="title" data-part="name">MyApp</div>
+        <div class="log"><span class="me">fix the login redirect</span>Reporting: login redirect fixed, tests green.</div>
+        <div class="row">
+          <button class="fb" data-part="clear" aria-label="Clear">🧹</button>
+          <button class="fb" data-part="open" aria-label="Open">⧉</button>
+          <button class="fb" data-part="speaker" aria-label="Speaker">🔊</button>
+          <button class="fb" data-part="mic" aria-label="Microphone" aria-pressed="true">🎙</button>
+          <button class="fb" data-part="sessions" aria-label="Sessions and map">👥</button>
+        </div>
+      </div>
+      <p class="note">Every widget looks like this, in its own agent's color.</p>
+    </div>
+    <div class="explain" aria-live="polite">
+      <div class="what"><span class="glyph" id="ex-glyph">🎙</span><span id="ex-title">Microphone</span></div>
+      <ul id="ex-list"></ul>
+      <p class="gesture" id="ex-gesture"></p>
+    </div>
+  </div>
+  <div class="aside-grid">
+    <div>
+      <h3>Speech bubbles on other Desktops</h3>
+      <p>When an agent speaks and its widget is on another Desktop, a bubble in its color slides in from the side where that Desktop lies. Click the text to go there, 🎤 to answer by voice without moving, ⌨ to type an answer, or 🔊 to silence that message — it turns into a red 🔇.</p>
+    </div>
+    <div>
+      <h3>Big when you are away</h3>
+      <p>While its Desktop is out of view, a widget can grow into a full-screen name banner, so Mission Control shows what each Desktop is for. Widgets that share a Desktop tile it as a mosaic instead of overlapping.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ sessions ═══════════════════════════════════════════════════════════ -->
+<section id="sessions">
+  <header>
+    <h2>One agent, as many sessions as you need</h2>
+    <p class="lede">An agent can have a Claude, a second Claude account, a Codex and a plain shell open at once. Each one is a session in 👥; the last one you used gets plain messages and the mic, unless you point them somewhere else.</p>
+  </header>
+  <div class="board" role="table" aria-label="Ways to open a session">
+    <div class="r head" role="row"><span role="columnheader">Command</span><span role="columnheader">What you get</span><span role="columnheader">Terminal</span><span role="columnheader">Thinks</span></div>
+    <div class="r" role="row"><span class="cmd" role="cell">las claude</span><span class="d" role="cell"><b>Claude Code with the LAS channel.</b> Dictations and agent messages appear in the conversation instantly, idle or mid-task.</span><span class="pill on" role="cell">Yes</span><span class="pill on" role="cell">Yes</span></div>
+    <div class="r" role="row"><span class="cmd" role="cell">las claudeRelay</span><span class="d" role="cell"><b>The same on your second Claude login</b> (a work account), kept in <code>~/.claude-relay</code>. If that organization blocks channels, messages are typed into the prompt instead.</span><span class="pill on" role="cell">Yes</span><span class="pill on" role="cell">Yes</span></div>
+    <div class="r" role="row"><span class="cmd" role="cell">las codex</span><span class="d" role="cell"><b>Codex's own interface,</b> with every message typed into it as you would.</span><span class="pill on" role="cell">Yes</span><span class="pill on" role="cell">Yes</span></div>
+    <div class="r" role="row"><span class="cmd" role="cell">las shell</span><span class="d" role="cell"><b>A terminal with no AI.</b> Messages are printed; commands sent to it run after you confirm.</span><span class="pill on" role="cell">Yes</span><span class="pill" role="cell">No</span></div>
+    <div class="r new" role="row"><span class="cmd" role="cell">las claude --headless<br>las codex --headless</span><span class="d" role="cell"><b>Claude or Codex with no terminal at all, voice only.</b> Each dictation is one turn of the same conversation and the answer is spoken. Also from the widget: hold ⧉ and pick 🎙 Claude or 🎙 Codex.</span><span class="pill" role="cell">No</span><span class="pill live" role="cell">Yes</span></div>
+    <div class="r" role="row"><span class="cmd" role="cell">las &lt;any command…&gt;</span><span class="d" role="cell"><b>Any program, connected.</b> <code>las echo Received:</code> runs once per message with the text as its last argument; what it prints is the answer.</span><span class="pill" role="cell">No</span><span class="pill" role="cell">Its own</span></div>
+  </div>
+  <div class="aside-grid">
+    <div>
+      <h3>Continue, or start over, by voice</h3>
+      <p>Bring back a conversation you closed — or one started in a terminal — with <code>las claude --headless --resume ID</code> (just <code>--resume</code> takes this folder's latest) or <code>las codex --headless resume --last</code>. Say “new conversation” to start fresh.</p>
+    </div>
+    <div>
+      <h3>Every terminal says what it is doing</h3>
+      <p>Sessions carry a short title next to their runtime, shown in 👥 and in the terminal's own window title. ⌖ finds a session's terminal and brings it forward; ✕ closes it; 📄 opens the log of one without a terminal.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ voice ══════════════════════════════════════════════════════════════ -->
+<section id="voice">
+  <header>
+    <h2>Talk, and hear back what was done</h2>
+    <p class="lede">The whole round trip stays on your Mac: your voice is transcribed locally, the agent works, and its report comes back in its own voice — on the Mac, or on the phone if that is where you dictated from.</p>
+  </header>
+  <div class="loop">
+    <svg viewBox="0 0 960 300" style="overflow:visible" role="img" aria-label="Voice round trip: you speak, the widget transcribes, the message reaches the chosen session, the agent works, it speaks its report through the voice queue, and you hear it.">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink-2)"/></marker>
+      </defs>
+      <path id="loop-path" d="M120 90 H840 Q900 90 900 150 Q900 210 840 210 H120 Q60 210 60 150 Q60 90 120 90 Z" fill="none" stroke="var(--rule)" stroke-width="2.5"/>
+      <g font-family="var(--body)">
+        <g transform="translate(120 90)"><circle r="34" fill="var(--live)"/><text x="0" y="8" text-anchor="middle" font-size="24">🎙</text><text class="node-t" y="-48" text-anchor="middle">You speak</text><text class="node-s" y="56" text-anchor="middle">widget, bubble or phone</text></g>
+        <g transform="translate(360 90)"><circle r="30" fill="var(--sheet)" stroke="var(--las)" stroke-width="2.5"/><text x="0" y="7" text-anchor="middle" font-size="20">✍️</text><text class="node-t" y="-46" text-anchor="middle">Transcribed here</text><text class="node-s" y="54" text-anchor="middle">local Whisper, your vocabulary fixes</text></g>
+        <g transform="translate(600 90)"><circle r="30" fill="var(--sheet)" stroke="var(--las)" stroke-width="2.5"/><text x="0" y="7" text-anchor="middle" font-size="20">📬</text><text class="node-t" y="-46" text-anchor="middle">Delivered</text><text class="node-s" y="54" text-anchor="middle">to the session 👥 points at</text></g>
+        <g transform="translate(900 150)"><circle r="34" fill="var(--las)"/><text x="0" y="8" text-anchor="middle" font-size="22">⚙️</text><text class="node-t" x="-48" y="6" text-anchor="end">The agent works</text></g>
+        <g transform="translate(600 210)"><circle r="30" fill="var(--sheet)" stroke="var(--las)" stroke-width="2.5"/><text x="0" y="7" text-anchor="middle" font-size="20">🗣️</text><text class="node-s" y="50" text-anchor="middle">a one-line report at the end of every turn</text><text class="node-t" y="72" text-anchor="middle">It reports</text></g>
+        <g transform="translate(360 210)"><circle r="30" fill="var(--sheet)" stroke="var(--las)" stroke-width="2.5"/><text x="0" y="7" text-anchor="middle" font-size="20">⏳</text><text class="node-s" y="50" text-anchor="middle">one voice at a time, never over your mic</text><text class="node-t" y="72" text-anchor="middle">Voice queue</text></g>
+        <g transform="translate(120 210)"><circle r="34" fill="var(--live)"/><text x="0" y="8" text-anchor="middle" font-size="24">🔊</text><text class="node-s" y="52" text-anchor="middle">in the agent's own voice, Mac or phone</text><text class="node-t" y="74" text-anchor="middle">You hear it</text></g>
+      </g>
+      <circle id="loop-dot" r="7" fill="var(--live)" stroke="var(--sheet)" stroke-width="3"/>
+    </svg>
+  </div>
+  <div class="loop-notes">
+    <div><h3>A voice per agent</h3><p>Close to a hundred Kokoro voices, blendable (<code>em_alex+am_onyx</code>), each agent with its own and speaking its own language. <code>las voices list</code> shows who uses which.</p></div>
+    <div><h3>Never interrupted</h3><p>While any widget is recording, every voice waits: the clip playing pauses and the rest hold until you stop talking. Nothing you say gets talked over.</p></div>
+    <div><h3>Always a report</h3><p>Each turn ends with a short spoken summary that also lands in the widget's chat and the phone. If an agent forgets, the end-of-turn hook says it for it.</p></div>
+  </div>
+</section>
+
+<!-- ═══ messages ═══════════════════════════════════════════════════════════ -->
+<section id="messages">
+  <header>
+    <h2>Agents message each other, even across Macs</h2>
+    <p class="lede">Messages travel over vortexia, a small broker that runs next to LAS. Each agent has a mailbox that keeps messages in order until a session picks them up — up to 30 days, through restarts, nothing overwritten.</p>
+  </header>
+  <pre class="term">las agent send --to Pulpo "the API moved to port 8010" --from MyApp
+las agent send --to "System@uy-mac" "deploy is done"      <span class="c"># another Mac</span>
+las agent send --to MyApp --children "pull main and rebuild"  <span class="c"># every subordinate</span></pre>
+  <div class="routes">
+    <div class="route l1"><h3>Same Mac</h3><p>Straight into the recipient's mailbox. Delivered the instant a session of it is open.</p></div>
+    <div class="route l2"><h3>Same network</h3><p>Macs find each other on the LAN and connect directly, broker to broker.</p></div>
+    <div class="route l3"><h3>Anywhere else</h3><p>Store-and-forward through a Nostr relay when there is no direct path — one Mac asleep or on another network. No code needs to know which one carried it.</p></div>
+  </div>
+  <div class="split">
+    <div>
+      <h3 style="margin-bottom:10px">Aim at the right terminal</h3>
+      <p><code>las agent sessions --all</code> maps every agent's open terminals and titles. Send to one with <code>--session codex</code>, to all with <code>--all-sessions</code>, or let the recipient's own choice decide (<code>las agent target</code>).</p>
+    </div>
+    <div>
+      <h3 style="margin-bottom:10px">They act on what they hear</h3>
+      <p>A message from another agent is treated like a request from you: the agent investigates, fixes, replies, and tells you in its report. You don't have to relay anything between terminals.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ map ════════════════════════════════════════════════════════════════ -->
+<section id="map">
+  <header>
+    <h2>A map of everything an agent works with</h2>
+    <p class="lede">Click 👥 for the agent's map: its sessions, its las-friends, and the repos and links you pin there, as mini widgets on one board. The 🎤 badge sits on whatever the mic talks to — drag it to another tile to move the mic.</p>
+  </header>
+  <div class="tiles" aria-hidden="true">
+    <div class="tile" style="background:var(--a-las)"><span class="k">session · claude</span><span class="t">Voice sessions</span><span class="mic">🎤</span></div>
+    <div class="tile" style="background:var(--a-wavi)"><span class="k">session · codex</span><span class="t">Map drag &amp; drop</span></div>
+    <div class="tile" style="background:var(--a-vortexia)"><span class="k">friend</span><span class="t">Vortexia</span></div>
+    <div class="tile repo"><span class="k">repo</span><span class="t">las-mobile</span></div>
+  </div>
+  <div class="aside-grid" style="margin-top:0">
+    <div>
+      <h3>Hierarchy comes from folders</h3>
+      <p>An agent whose folder sits inside another's is its subordinate — nothing to declare. Each git repo inside a workspace can be its own agent, with its own voice. <code>las agents --tree</code> shows the whole tree.</p>
+    </div>
+    <div>
+      <h3>Archive, don't delete</h3>
+      <p>Put away a friend, repo or link with 🗄, or a whole agent with ⤓ (<code>las agent archive</code>). It leaves the panels but one step brings it back. <code>las map global</code> shows every agent on this Mac, archived ones included.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ phone ══════════════════════════════════════════════════════════════ -->
+<section id="phone">
+  <div class="phone-wrap">
+    <div class="phone" aria-hidden="true">
+      <div class="screen">
+        <div class="p" style="background:var(--a-las)">LocalAgentSociety <span>🎙</span></div>
+        <div class="p" style="background:var(--a-pulpo)">Pulpo <span>🎙</span></div>
+        <div class="p" style="background:var(--a-garantido)">Garantido <span>🎙</span></div>
+        <div class="p" style="background:var(--a-vortexia)">Vortexia <span>🎙</span></div>
+        <div class="p" style="background:var(--a-robotics)">Robotics <span>🎙</span></div>
+        <div class="p" style="background:var(--a-teli)">Teli <span>🎙</span></div>
+      </div>
+    </div>
+    <div>
+      <h2 style="margin-bottom:18px">The same society in your pocket</h2>
+      <p class="lede">Pair an iPhone from ⚙ → All widgets → Phones by scanning a QR code and comparing a fingerprint. Every agent of the Mac becomes a panel with its own mic and chat.</p>
+      <p>Dictate on the phone and the Mac transcribes it; the agent's spoken answer follows you and plays on the phone. Pin where voices come out with ⚙ → Voice output (Auto, this Mac, or a phone). Revoke a phone from the same place.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ rules ══════════════════════════════════════════════════════════════ -->
+<section id="rules">
+  <header>
+    <h2>House rules every agent follows</h2>
+    <p class="lede">These rules are why many agents can share one Mac without fighting over it.</p>
+  </header>
+  <div class="rules">
+    <div class="rule"><span class="ic">🔌</span><div><h3>Ports come from the registry</h3><p>Before starting a server an agent checks <code>las ports audit</code>, takes a free port and claims it. A port held by another agent is asked for, never taken.</p></div></div>
+    <div class="rule"><span class="ic">🗣️</span><div><h3>One voice per agent</h3><p>No two agents on a Mac share a voice, so you can tell them apart by ear. <code>las agent new</code> picks a free one for you.</p></div></div>
+    <div class="rule"><span class="ic">🌐</span><div><h3>Speak the agent's language</h3><p>A Spanish voice never reads English. Each agent speaks and answers in its own <code>locale</code>, whatever language you write in.</p></div></div>
+    <div class="rule"><span class="ic">⏳</span><div><h3>Take turns</h3><p>All speech goes through one queue, so voices never overlap — and nothing speaks while a mic is recording.</p></div></div>
+    <div class="rule"><span class="ic">📬</span><div><h3>No files for messages</h3><p>Agents talk only through vortexia mailboxes, never through files on disk or by typing into each other's terminals.</p></div></div>
+    <div class="rule"><span class="ic">🪪</span><div><h3>Say what you are for</h3><p>Each agent describes its scope at growing lengths — a name, a short and a long line, then longer documents — so people and other agents know what it does.</p></div></div>
+  </div>
+</section>
+
+<!-- ═══ CLI ════════════════════════════════════════════════════════════════ -->
+<section id="cli">
+  <header>
+    <h2>Every command</h2>
+    <p class="lede">Run <code>las --help</code>, or <code>--help</code> after any command, for the details.</p>
+  </header>
+  <label class="find">
+    <span aria-hidden="true">🔎</span>
+    <input id="cli-filter" type="search" placeholder="Find a command — try “voice”, “port” or “archive”" aria-label="Find a command">
+    <span class="count" id="cli-count"></span>
+  </label>
+  <div class="cli" id="cli-list"></div>
+  <p class="empty" id="cli-empty" hidden>No command matches. Try a shorter word.</p>
+</section>
+
+<footer>
+  <span>Local Agent Society · this page: <code>las boarding --open</code></span>
+  <span>News since your last update: <code>las changelog</code></span>
+</footer>
+</main>
+</div>
+
 <script>
-  (function () {
-    const el = document.getElementById('test-content');
-    const raw = document.getElementById('las-test-results').textContent.trim();
-    let data = null;
-    try { data = JSON.parse(raw); } catch (_) {}
+(() => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const NS = 'http://www.w3.org/2000/svg';
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const el = (tag, attrs = {}, parent) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (parent) parent.appendChild(n);
+    return n;
+  };
 
-    if (!data) {
-      el.innerHTML = `
-        <div class="no-results">
-          <p>No test results yet.</p>
-          <p>Run <code>pytest tests/</code> to generate and embed results.</p>
-        </div>`;
-      return;
-    }
+  /* ── copy buttons ─────────────────────────────────────────────────────── */
+  document.querySelectorAll('[data-copy]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const hint = b.querySelector('.hint');
+      try { await navigator.clipboard.writeText(b.dataset.copy); hint.textContent = 'Copied'; }
+      catch { hint.textContent = 'Select and copy'; }
+      b.classList.add('done');
+      setTimeout(() => { hint.textContent = 'Copy'; b.classList.remove('done'); }, 1600);
+    });
+  });
 
-    const passed  = data.passed  || 0;
-    const failed  = data.failed  || 0;
-    const skipped = data.skipped || 0;
-    const total   = data.total   || 0;
-    const ok      = failed === 0;
-    const dur     = data.duration != null ? data.duration.toFixed(2) + 's' : '—';
+  /* ── hero scene ───────────────────────────────────────────────────────── */
+  const HUB = { x: 320, y: 250 };
+  const AGENTS = [
+    { name: 'LocalAgentSociety', short: 'LAS', color: '--a-las', x: 46, y: 64 },
+    { name: 'Pulpo', color: '--a-pulpo', x: 150, y: 168 },
+    { name: 'Garantido', color: '--a-garantido', x: 40, y: 340 },
+    { name: 'Vortexia', color: '--a-vortexia', x: 360, y: 72 },
+    { name: 'Wavi', color: '--a-wavi', x: 468, y: 196 },
+    { name: 'Robotics', color: '--a-robotics', x: 380, y: 352 },
+  ];
+  const W = 124, H = 62;
+  const REPORTS = [
+    ['Pulpo', 'Reporting: port 5173 released for Garantido.'],
+    ['Wavi', 'Reporting: 12 WhatsApp messages answered.'],
+    ['LocalAgentSociety', 'Reporting: voice sessions shipped.'],
+    ['Robotics', 'Reporting: arm calibration done.'],
+    ['Garantido', 'Reporting: build green, preview deployed.'],
+    ['Vortexia', 'Reporting: relay to uy-mac reconnected.'],
+  ];
+  const svg = document.getElementById('scene-svg');
+  const wires = document.getElementById('wires');
+  const widgetsG = document.getElementById('widgets');
+  const pulses = document.getElementById('pulses');
+  const paths = {};
+  const faces = {};
 
-    el.innerHTML = `
-      <div class="test-meta">
-        <span class="dot" style="background:${ok ? 'var(--ok)' : 'var(--err)'}"></span>
-        <span>${ok ? 'All tests passing' : 'Tests failing'}</span>
-        <span>·</span>
-        <span>${data.timestamp || ''}</span>
-        <span>·</span>
-        <span>${dur}</span>
-      </div>
-      <div class="tests-summary">
-        <div class="test-stat">
-          <div class="test-stat-value color-dim">${total}</div>
-          <div class="test-stat-label">Total</div>
-        </div>
-        <div class="test-stat">
-          <div class="test-stat-value color-ok">${passed}</div>
-          <div class="test-stat-label">Passed</div>
-        </div>
-        <div class="test-stat">
-          <div class="test-stat-value ${failed > 0 ? 'color-err' : 'color-dim'}">${failed}</div>
-          <div class="test-stat-label">Failed</div>
-        </div>
-        <div class="test-stat">
-          <div class="test-stat-value color-warn">${skipped}</div>
-          <div class="test-stat-label">Skipped</div>
-        </div>
-      </div>
-      <div class="tests-list">
-        ${(data.tests || []).map(t => {
-          const icon  = t.outcome === 'passed' ? '✓' : t.outcome === 'skipped' ? '–' : '✕';
-          const color = t.outcome === 'passed' ? 'var(--ok)' : t.outcome === 'skipped' ? 'var(--warn)' : 'var(--err)';
-          const id    = (t.nodeid || '').split('::').slice(1).join(' › ');
-          const doc   = t.doc ? `<div class="test-doc">${esc(t.doc)}</div>` : '';
-          const ms    = t.duration != null ? (t.duration * 1000).toFixed(1) + 'ms' : '';
-          return `
-            <div class="test-row">
-              <div class="test-icon" style="color:${color}">${icon}</div>
-              <div>
-                <div class="test-name">${esc(id)}</div>
-                ${doc}
-              </div>
-              <div class="test-dur">${ms}</div>
-            </div>`;
-        }).join('')}
-      </div>`;
+  AGENTS.forEach((a) => {
+    const cx = a.x + W / 2, cy = a.y + H / 2;
+    const mx = (cx + HUB.x) / 2 + (cy - HUB.y) * 0.18, my = (cy + HUB.y) / 2 - (cx - HUB.x) * 0.18;
+    paths[a.name] = el('path', { d: `M${cx} ${cy} Q${mx} ${my} ${HUB.x} ${HUB.y}`, fill: 'none', stroke: 'var(--rule)', 'stroke-width': 2.2, 'stroke-linecap': 'round' }, wires);
+    const g = el('g', { transform: `translate(${a.x} ${a.y})`, filter: 'url(#soft)' }, widgetsG);
+    el('rect', { width: W, height: H, rx: 15, fill: `var(${a.color})` }, g);
+    const label = el('text', { class: 'w-name', x: W / 2, y: 26, 'text-anchor': 'middle' }, g);
+    label.textContent = a.short || a.name;
+    for (let i = 0; i < 4; i++) el('circle', { cx: 28 + i * 23, cy: 45, r: 6.5, fill: 'rgba(255,255,255,.18)', stroke: 'rgba(255,255,255,.75)', 'stroke-width': 1.6 }, g);
+    const wave = el('g', { transform: `translate(${W - 14} 12)`, opacity: 0 }, g);
+    const bars = [0, 1, 2].map((i) => el('rect', { x: i * 4 - 6, y: 0, width: 2.6, height: 10, rx: 1.3, fill: '#fff' }, wave));
+    faces[a.name] = { a, g, wave, bars, cx, cy };
+  });
 
-    function esc(s) {
-      return String(s || '')
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-  })();
+  const caption = document.getElementById('scene-caption');
+  const bubble = document.getElementById('bubble');
+  const bubbleBox = document.getElementById('bubble-box');
+  const bubbleText = document.getElementById('bubble-text');
+  const hubRing = document.getElementById('hub-ring');
+
+  function pulse(from, to, done) {
+    const dot = el('circle', { r: 5.5, fill: 'var(--live)', stroke: 'var(--sheet)', 'stroke-width': 2 }, pulses);
+    const p1 = paths[from], p2 = paths[to];
+    const L1 = p1.getTotalLength(), L2 = p2.getTotalLength();
+    const T = 1500, t0 = performance.now();
+    p1.setAttribute('stroke', 'var(--live)');
+    const step = (now) => {
+      const t = Math.min(1, (now - t0) / T);
+      const e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      let pt;
+      if (e < .5) pt = p1.getPointAtLength(L1 * (e / .5));
+      else {
+        if (p2.getAttribute('stroke') !== 'var(--live)') { p1.setAttribute('stroke', 'var(--rule)'); p2.setAttribute('stroke', 'var(--live)'); flashHub(); }
+        pt = p2.getPointAtLength(L2 * (1 - (e - .5) / .5));
+      }
+      dot.setAttribute('cx', pt.x); dot.setAttribute('cy', pt.y);
+      if (t < 1) requestAnimationFrame(step);
+      else { dot.remove(); p2.setAttribute('stroke', 'var(--rule)'); done && done(); }
+    };
+    requestAnimationFrame(step);
+  }
+  function flashHub() {
+    hubRing.animate([{ opacity: .9, r: 30 }, { opacity: 0, r: 46 }], { duration: 700, easing: 'ease-out' });
+  }
+  let speakingTimer = null;
+  function speak(name, text) {
+    const f = faces[name];
+    f.wave.setAttribute('opacity', 1);
+    const t0 = performance.now();
+    clearInterval(speakingTimer);
+    speakingTimer = setInterval(() => {
+      const k = (performance.now() - t0) / 120;
+      f.bars.forEach((b, i) => { const h = 4 + Math.abs(Math.sin(k + i * 1.7)) * 10; b.setAttribute('height', h); b.setAttribute('y', 7 - h / 2); });
+    }, 60);
+    bubbleText.textContent = '';
+    const bx = Math.max(24, Math.min(616 - 260, f.cx - 130));
+    const by = f.a.y > 300 ? f.a.y - 46 : f.a.y + H + 12;
+    bubble.setAttribute('transform', `translate(${bx} ${by})`);
+    bubble.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, fill: 'forwards' });
+    bubble.setAttribute('opacity', 1);
+    let i = 0;
+    const typer = setInterval(() => {
+      bubbleText.textContent = text.slice(0, ++i);
+      const w = bubbleText.getComputedTextLength();
+      bubbleBox.setAttribute('width', w + 28);
+      bubbleBox.setAttribute('x', 0); bubbleBox.setAttribute('y', 0);
+      bubbleText.setAttribute('x', 14); bubbleText.setAttribute('y', 22);
+      if (i >= text.length) clearInterval(typer);
+    }, 34);
+    caption.innerHTML = `<b>${name}</b> is speaking its closing report.`;
+    setTimeout(() => {
+      clearInterval(speakingTimer); f.wave.setAttribute('opacity', 0);
+      bubble.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: 'forwards' });
+    }, 3400);
+  }
+  function staticFrame() {
+    const [name, text] = REPORTS[2];
+    const f = faces[name];
+    f.wave.setAttribute('opacity', 1);
+    bubbleText.textContent = text;
+    bubbleText.setAttribute('x', 14); bubbleText.setAttribute('y', 22);
+    bubble.setAttribute('transform', `translate(${Math.max(24, f.cx - 60)} ${f.a.y + H + 12})`);
+    bubble.setAttribute('opacity', 1);
+    requestAnimationFrame(() => { bubbleBox.setAttribute('width', bubbleText.getComputedTextLength() + 28); });
+  }
+  if (reduced) staticFrame();
+  else {
+    let k = 0;
+    const tick = () => {
+      if (document.hidden) return setTimeout(tick, 1000);
+      const [speaker, text] = REPORTS[k % REPORTS.length];
+      const others = AGENTS.filter((a) => a.name !== speaker);
+      const from = others[k % others.length].name;
+      caption.innerHTML = `<b>${from}</b> sends <b>${speaker}</b> a message through vortexia.`;
+      pulse(from, speaker, () => speak(speaker, text));
+      k++;
+      setTimeout(tick, 5600);
+    };
+    setTimeout(tick, 500);
+  }
+
+  /* ── voice loop dot ───────────────────────────────────────────────────── */
+  const loopPath = document.getElementById('loop-path');
+  const loopDot = document.getElementById('loop-dot');
+  const LL = loopPath.getTotalLength();
+  if (reduced) { const p = loopPath.getPointAtLength(0); loopDot.setAttribute('cx', p.x); loopDot.setAttribute('cy', p.y); }
+  else {
+    const T = 9000, t0 = performance.now();
+    const run = (now) => { const p = loopPath.getPointAtLength(LL * (((now - t0) % T) / T)); loopDot.setAttribute('cx', p.x); loopDot.setAttribute('cy', p.y); requestAnimationFrame(run); };
+    requestAnimationFrame(run);
+  }
+
+  /* ── widget anatomy ───────────────────────────────────────────────────── */
+  const PARTS = {
+    mic: { g: '🎙', t: 'Microphone', l: [
+      'Click to start a dictation, click again to send it. Transcription runs locally with Whisper.',
+      'The text goes to whichever session 👥 points at — a Claude, a Codex, a shell, a voice session.',
+      'Words it keeps mishearing can be fixed for good with <code>las vocab add</code>.',
+      'Double-click runs a self-test: a real session has to answer “OK”, so silence means nobody is listening.'],
+      gs: 'While you dictate, every agent’s voice waits.' },
+    sessions: { g: '👥', t: 'Sessions and map', l: [
+      'Click opens the map: sessions, friends, repos and links of this agent as mini widgets.',
+      'Hold or right-click to pick where the mic and plain messages go: one session, all of them, or the last used.',
+      '🎙 Claude and 🎙 Codex open a voice session right from here.',
+      'Each row has ⌖ to find its terminal, ✕ to close it, 📄 for the log of one without a terminal.'],
+      gs: 'Click for the map, hold for the list.' },
+    open: { g: '⧉', t: 'Open', l: [
+      'Click opens a new terminal window in the agent’s folder (Ghostty first, then iTerm2, then Terminal).',
+      'Hold it for the menu: Terminal, Folder, 🎙 Claude · no terminal, 🎙 Codex · no terminal.',
+      'Reorder the menu with ▲ ▼ — whatever is on top is what a plain click does.'],
+      gs: 'Click runs the default, hold to choose.' },
+    speaker: { g: '🔊', t: 'Speaker', l: [
+      'Mutes or unmutes this agent’s voice. Its reports still appear in the chat.',
+      'Where the voice comes out — this Mac or a paired phone — is set in ⚙ → Voice output.'],
+      gs: 'One click toggles.' },
+    clear: { g: '🧹', t: 'Clear', l: [
+      'Sends <code>/clear</code> to the agent’s session, to start its conversation fresh.',
+      'In a voice session, saying “new conversation” does the same.'],
+      gs: 'One click.' },
+    settings: { g: '⚙', t: 'Settings', l: [
+      'Color and opacity, always on top, mute, speech bubbles, growing when hidden, dictation language.',
+      'Voice output (Auto, this Mac or a phone), security mode, and whether the agent shows on the phone’s main screen.',
+      'All widgets: phones to pair, and the timings every widget shares.'],
+      gs: 'Opens inline; the name and chat stay visible.' },
+    archive: { g: '⤓', t: 'Archive', l: [
+      'Takes this agent off the society’s panels and closes its widget. Nothing is deleted.',
+      'Bring it back from ⚙ → All widgets → Archived agents, or with <code>las agent unarchive</code>. Opening a session in its folder brings it back too.'],
+      gs: 'Reversible in one step.' },
+    name: { g: 'Aa', t: 'Name and chat', l: [
+      'The agent’s name, sized to fit, so you know which Desktop you are on at a glance.',
+      'Below it, the conversation: your dictations on the right, what the agent says in the middle, other agents on the left with their color.'],
+      gs: 'Read-only — the record of what happened.' },
+  };
+  const exGlyph = document.getElementById('ex-glyph');
+  const exTitle = document.getElementById('ex-title');
+  const exList = document.getElementById('ex-list');
+  const exGesture = document.getElementById('ex-gesture');
+  const parts = document.querySelectorAll('#widget-mock [data-part]');
+  function show(part) {
+    const p = PARTS[part];
+    if (!p) return;
+    parts.forEach((b) => b.tagName === 'BUTTON' && b.setAttribute('aria-pressed', String(b.dataset.part === part)));
+    exGlyph.textContent = p.g; exTitle.textContent = p.t;
+    exList.innerHTML = p.l.map((x) => `<li>${x}</li>`).join('');
+    exGesture.textContent = p.gs;
+  }
+  parts.forEach((b) => {
+    b.addEventListener('click', () => show(b.dataset.part));
+    if (b.tagName !== 'BUTTON') { b.setAttribute('tabindex', '0'); b.setAttribute('role', 'button'); b.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), show(b.dataset.part))); }
+  });
+  show('mic');
+
+  /* ── CLI reference ────────────────────────────────────────────────────── */
+  const CLI = [
+    ['Run the society', [
+      ['las start', 'Start the backend and the widgets.'],
+      ['las stop', 'Stop them.'],
+      ['las restart', 'Restart both — waits if someone is dictating.'],
+      ['las status', 'Backend, agents and ports at a glance.'],
+      ['las update', 'Pull, rebuild, restart and show what changed.'],
+      ['las changelog', 'The news from the last update again.'],
+      ['las logs', 'Follow the backend log.'],
+      ['las boarding --open', 'Open this page.'],
+      ['las install / uninstall', 'Install or remove the whole system.'],
+    ]],
+    ['Open a session', [
+      ['las claude', 'Claude Code connected to LAS.'],
+      ['las claudeRelay', 'Claude on your second account.'],
+      ['las codex', 'Codex, with messages typed into it.'],
+      ['las shell', 'A terminal with no AI.'],
+      ['las claude --headless', 'Claude with no terminal: a voice session.'],
+      ['las codex --headless', 'Codex with no terminal: a voice session.'],
+      ['--resume ID / resume --last', 'Continue a closed conversation by voice.'],
+      ['las <command…>', 'Connect any program; each message runs it once.'],
+      ['las attach <command…>', 'The same, showing each run in this terminal.'],
+    ]],
+    ['Agents', [
+      ['las agent new NAME', 'Create the agent for this folder.'],
+      ['las agents [--tree]', 'Every agent, or the hierarchy.'],
+      ['las agent sessions [--all]', 'Open sessions and their titles.'],
+      ['las agent target', 'Where the mic and plain messages land.'],
+      ['las agent title "…"', 'Name what this session is doing.'],
+      ['las agent children / parent', 'Who reports to whom, from the folders.'],
+      ['las agent friends --add X', 'Link an agent as a las-friend.'],
+      ['las agent archive / unarchive', 'Put an agent away, or bring it back.'],
+      ['las agent deactivate / activate', 'Close its widget, or mark it active again.'],
+      ['las agent rename / delete', 'Rename, or unregister (the folder stays).'],
+      ['las agent normalize', 'Bring .las-agent.json to its current shape.'],
+      ['las agent security', 'Ask before destructive actions, or not.'],
+      ['las agent main-screen', 'Show or hide it on the phone’s main screen.'],
+    ]],
+    ['Messages', [
+      ['las agent send --to NAME "…"', 'Send to an agent, here or NAME@other-mac.'],
+      ['--session / --all-sessions', 'Aim at one session, or all of them.'],
+      ['--children / --friends', 'One delivery to each subordinate or friend.'],
+      ['las agent poll', 'Print what is waiting in this mailbox.'],
+      ['las bridge status', 'Is this session receiving live?'],
+      ['las bridge exec / shell / stdout', 'Deliver a mailbox to anything else.'],
+    ]],
+    ['Voice', [
+      ['las speak "…" --name NAME', 'Say something in an agent’s voice.'],
+      ['las voices list', 'Every voice and who speaks with it.'],
+      ['las voices random', 'A free voice for a language.'],
+      ['las agent mute / unmute', 'Silence an agent, or not.'],
+      ['las queue ls / clear', 'What is waiting to be spoken.'],
+      ['las vocab add "Supabase"', 'Teach dictation a word it mishears.'],
+      ['las hook install', 'The end-of-turn spoken report.'],
+    ]],
+    ['Widgets and map', [
+      ['las widget [NAME]', 'Bring a widget to this Desktop.'],
+      ['las widgets', 'Bring every active widget here.'],
+      ['las map open', 'This agent’s map.'],
+      ['las map add repo|url', 'Pin a repo or a link to the map.'],
+      ['las map global', 'Every agent of this Mac in one panel.'],
+      ['las shell-init --install', 'Tint the terminal in the agent’s color.'],
+    ]],
+    ['Ports', [
+      ['las ports free', 'A port nobody is using.'],
+      ['las ports claim "app" --port N', 'Register a port before starting a server.'],
+      ['las ports audit', 'Registry versus what is really running.'],
+      ['las ports ls / release', 'See or give back registered ports.'],
+    ]],
+  ];
+  const list = document.getElementById('cli-list');
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  list.innerHTML = CLI.map(([g, rows]) => `<div class="group"><h3>${g}</h3>${rows.map(([c, d]) =>
+    `<div class="c-row" data-k="${esc((g + ' ' + c + ' ' + d).toLowerCase())}"><span class="cmd">${esc(c)}</span><span>${esc(d)}</span></div>`).join('')}</div>`).join('');
+  const filter = document.getElementById('cli-filter');
+  const count = document.getElementById('cli-count');
+  const empty = document.getElementById('cli-empty');
+  const total = list.querySelectorAll('.c-row').length;
+  const apply = () => {
+    const q = filter.value.trim().toLowerCase();
+    let n = 0;
+    list.querySelectorAll('.group').forEach((grp) => {
+      let any = false;
+      grp.querySelectorAll('.c-row').forEach((r) => { const hit = !q || r.dataset.k.includes(q); r.hidden = !hit; if (hit) { any = true; n++; } });
+      grp.hidden = !any;
+    });
+    count.textContent = q ? `${n} of ${total}` : `${total} commands`;
+    empty.hidden = n > 0;
+  };
+  filter.addEventListener('input', apply);
+  apply();
+
+  /* ── table of contents ────────────────────────────────────────────────── */
+  const links = [...document.querySelectorAll('nav.toc a.item')];
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) links.forEach((a) => a.classList.toggle('here', a.getAttribute('href') === '#' + e.target.id)); });
+  }, { rootMargin: '-40% 0px -55% 0px' });
+  document.querySelectorAll('main section[id]').forEach((s) => io.observe(s));
+})();
 </script>
 </body>
 </html>
