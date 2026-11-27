@@ -2191,10 +2191,10 @@ test('glass look: every face window takes glassWindowOptions and tells its page'
   assert.match(src, /ipcMain\.handle\('glass:set'/);
   const apply = extractFunctionBody(src, 'function applyGlass(');
   assert.match(apply, /setVibrancy\(on \? GLASS_MATERIAL : null\)/);
-  assert.match(apply, /send\('glass:changed', on\)/);
+  assert.match(apply, /send\('glass:changed', flag\)/);
   // The pages switch the class before first paint (head script) and live.
   for (const page of ['index.html', 'map.html', 'global.html']) {
-    assert.match(readSrc('renderer', page), /<script>document\.documentElement\.classList\.toggle\('glass'/, page);
+    assert.match(readSrc('renderer', page), /<script>\(function \(g, c\) \{ c\.toggle\('glass', g === '1' \|\| g === '2'\); c\.toggle\('native', g === '2'\); \}\)/, page);
   }
   for (const js of ['widget.js', 'map.js', 'global.js']) assert.match(readSrc('renderer', js), /window\.las\.onGlass\(/, js);
   assert.match(readSrc('preload.js'), /getGlass: .*'glass:get'/);
@@ -2204,14 +2204,42 @@ test('glass look: every face window takes glassWindowOptions and tells its page'
 
 test('glass look: bubbles fill their window (no margin, no tail) and fade in at the window level', () => {
   const src = readSrc('bubbles.js');
-  assert.match(src, /glass = \(\) => false, glassMaterial = 'popover'/, 'off unless main passes the getter');
-  assert.match(src, /\.\.\.\(glass\(\) \? \{ vibrancy: glassMaterial, visualEffectState: 'active' \} : \{\}\)/);
-  assert.match(src, /glass: glassOn \? '1' : '0'/);
+  assert.match(src, /glass = \(\) => '0', glassMaterial = 'hud', dress = \(\) => \{\}/, 'off unless main passes the getter');
+  assert.match(src, /\.\.\.\(glass\(\) === '1' \? \{ vibrancy: glassMaterial, visualEffectState: 'active', roundedCorners: true \} : \{\}\)/);
+  assert.match(src, /if \(glassFlag === '2'\) dress\(win, color, opacity\);/, 'native glass under the bubble');
+  assert.match(src, /glass: glassFlag \}/);
   assert.match(src, /if \(glassOn\) win\.setOpacity\(0\);\n\s*win\.showInactive\(\);\n\s*if \(glassOn\) fadeIn\(win\);/);
   const html = readSrc('renderer', 'bubble.html');
   assert.match(html, /html\.glass \.card \{\n\s*margin: 0;/);
   assert.match(html, /html\.glass \.card::before \{ display: none; \}/);
   // The size report is the card itself in glass (the 12px was the margins).
   assert.match(html, /height: card\.offsetHeight \+ \(glass \? 0 : 12\)/);
-  assert.match(readSrc('main.js'), /createBubbles\(\{ .*glass: glassEnabled, glassMaterial: GLASS_MATERIAL \}\)/);
+  assert.match(readSrc('main.js'), /createBubbles\(\{ .*glass: glassFlag, glassMaterial: GLASS_MATERIAL, dress: dressWindow \}\)/);
+});
+
+test('glass look: native Liquid Glass (lib/glass.js) is the first choice, vibrancy the fallback', () => {
+  const src = readSrc('main.js');
+  assert.match(src, /const glass = require\('\.\/lib\/glass'\);/);
+  // '2' when the Mac has NSGlassEffectView, '1' for the blur, '0' off.
+  const flag = extractFunctionBody(src, 'function glassFlag(');
+  assert.match(flag, /return glass\.available\(\) \? '2' : '1'/);
+  // Native glass draws its own shape: no vibrancy/roundedCorners options then.
+  assert.match(extractFunctionBody(src, 'function glassWindowOptions('), /if \(!GLASS_SUPPORTED \|\| glass\.available\(\)\) return \{\};/);
+  // Every face window is dressed right after creation, with its page's tint.
+  assert.equal((src.match(/^  dressWindow\((win|p), /gm) || []).length, 4, 'widget, popup, map, global');
+  assert.match(extractFunctionBody(src, 'function dressWindow('), /glass\.attach\(win, \{ color, opacity \}\)/);
+  // A color/opacity change in ⚙ re-tints the agent's windows.
+  assert.match(src, /if \(patch\.color !== undefined \|\| patch\.opacity !== undefined\) \{\n\s*for \(const w of \[win, popup, mapWindows\.get\(name\)\]\) retintWindow\(w, next\.color, next\.opacity\);/);
+  // The pages paint nothing behind their content on native glass.
+  assert.match(readSrc('renderer', 'widget.css'), /html\.glass\.native \.widget:not\(\.icon-mode\) \{\n\s*background: transparent;/);
+  assert.match(readSrc('renderer', 'map.css'), /html\.glass\.native \.map-face \{\n\s*background: transparent;/);
+  assert.match(readSrc('renderer', 'bubble.html'), /html\.glass\.native \.card \{ background: transparent; box-shadow: none; \}/);
+  // lib/glass.js: capability check, no variadic objc_msgSend, superview owns the view.
+  const lib = readSrc('lib', 'glass.js');
+  assert.match(lib, /getClass\('NSGlassEffectView'\)/);
+  assert.doesNotMatch(lib, /objc_msgSend\(.*\.\.\./, 'fixed prototypes only (arm64 variadic ABI differs)');
+  assert.match(lib, /send\.obj\(glass, sel\('release'\)\)/);
+  assert.match(lib, /removeFromSuperview/);
+  // Shipped: lib/** is in the electron-builder whitelist.
+  assert.ok(require('../package.json').build.files.includes('lib/**/*'));
 });

@@ -68,7 +68,7 @@ function clampHeight(h) {
  * @param {{sources: {bubbleDir: string, bubblePreloadPath: string}, log: object,
  *          onAction: (kind: string, agentName: string, payload: object) => void}} opts
  */
-function createBubbles({ sources, log, onAction, glass = () => false, glassMaterial = 'popover' }) {
+function createBubbles({ sources, log, onAction, glass = () => '0', glassMaterial = 'hud', dress = () => {} }) {
   /** @type {Array<{win: BrowserWindow, agentName: string, side: string, displayId: number, height: number, timer: any, pinned: boolean}>} */
   const bubbles = [];
 
@@ -131,8 +131,7 @@ function createBubbles({ sources, log, onAction, glass = () => false, glassMater
       backgroundColor: '#00000000',
       // Glass (main.js "glass look"): the card fills the window and the
       // system blur sits behind it; roundedCorners gives the 15pt mask.
-      ...(process.platform === 'darwin' ? { roundedCorners: true } : {}),
-      ...(glass() ? { vibrancy: glassMaterial, visualEffectState: 'active' } : {}),
+      ...(glass() === '1' ? { vibrancy: glassMaterial, visualEffectState: 'active', roundedCorners: true } : {}),
       alwaysOnTop: true,
       skipTaskbar: true,
       resizable: false,
@@ -155,11 +154,13 @@ function createBubbles({ sources, log, onAction, glass = () => false, glassMater
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-    const glassOn = glass();
+    const glassFlag = glass();
+    const glassOn = glassFlag !== '0';
+    if (glassFlag === '2') dress(win, color, opacity);
     const b = { win, agentName, side, displayId, height: BUBBLE_MIN_HEIGHT, timer: null, pinned: false, voice: false, closing: false };
     bubbles.push(b);
     win.loadFile(path.join(sources.bubbleDir, 'bubble.html'), {
-      query: { agent: agentName, text, color, opacity: String(opacity), side, glass: glassOn ? '1' : '0' },
+      query: { agent: agentName, text, color, opacity: String(opacity), side, glass: glassFlag },
     });
     win.once('ready-to-show', () => {
       if (win.isDestroyed()) return;

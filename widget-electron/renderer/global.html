@@ -8,7 +8,7 @@
      settings shared by every widget (global.js). -->
 <link rel="stylesheet" href="widget.css" />
 <link rel="stylesheet" href="map.css" />
-<script>document.documentElement.classList.toggle('glass', new URLSearchParams(location.search).get('glass') === '1');</script>
+<script>(function (g, c) { c.toggle('glass', g === '1' || g === '2'); c.toggle('native', g === '2'); })(new URLSearchParams(location.search).get('glass'), document.documentElement.classList);</script>
 </head>
 <body>
   <div id="face" class="map-face global-face">

@@ -65,8 +65,8 @@ contextBridge.exposeInMainWorld('las', {
   /** Glass look (main.js "glass look"): the macOS background blur behind every face window. {on, supported} */
   getGlass: () => ipcRenderer.invoke('glass:get'),
   setGlass: (on) => ipcRenderer.invoke('glass:set', !!on),
-  /** The glass setting changed (any window). @param {(on: boolean) => void} cb */
-  onGlass: (cb) => ipcRenderer.on('glass:changed', (_e, on) => cb(!!on)),
+  /** The glass setting changed (any window): '0' off, '1' vibrancy, '2' native. @param {(flag: string) => void} cb */
+  onGlass: (cb) => ipcRenderer.on('glass:changed', (_e, flag) => cb(String(flag))),
 
   /** Update notice: { available, behind, commits: [{sha, subject}], checked_at, error } or null (backend/updates.py). */
   getUpdateStatus: () => ipcRenderer.invoke('update:get'),

@@ -39,15 +39,17 @@
       margin: 0;
       border-radius: 15px;
       background:
-        linear-gradient(165deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.10) 38%, rgba(255, 255, 255, 0) 62%, rgba(255, 255, 255, 0.10) 100%),
-        color-mix(in srgb, var(--bubble-color) calc(var(--bubble-opacity) * 55%), transparent);
+        linear-gradient(165deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.05) 38%, rgba(255, 255, 255, 0) 62%, rgba(255, 255, 255, 0.06) 100%),
+        color-mix(in srgb, var(--bubble-color) calc(var(--bubble-opacity) * 30%), transparent);
       box-shadow:
-        inset 0 0 0 1px rgba(255, 255, 255, 0.30),
-        inset 0 1px 0 rgba(255, 255, 255, 0.55),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.07);
+        inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.50),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.10);
       animation: none;
     }
     html.glass .card::before { display: none; }
+    /* Native Liquid Glass under the window: nothing painted behind the words. */
+    html.glass.native .card { background: transparent; box-shadow: none; }
     .card::before {
       content: "";
       position: absolute;
@@ -181,8 +183,10 @@
     const color = params.get('color') || '#90c060';
     const opacity = Math.max(0.85, Math.min(1, Number(params.get('opacity')) || 0.92));
     const side = params.get('side') === 'left' ? 'left' : 'right';
-    const glass = params.get('glass') === '1';
+    const glassFlag = params.get('glass') || '0';
+    const glass = glassFlag !== '0';
     document.documentElement.classList.toggle('glass', glass);
+    document.documentElement.classList.toggle('native', glassFlag === '2');
 
     document.body.classList.add(side);
     document.documentElement.style.setProperty('--bubble-color', color);

@@ -201,10 +201,11 @@
     if (!g) return;
     glassEl.checked = !!g.on;
     $('glassRow').classList.toggle('hidden', !g.supported);
+    glassEl.title = g.native ? 'Liquid Glass (this macOS has it)' : 'Blur behind the widgets (this macOS has no Liquid Glass)';
   };
   window.las.getGlass().then(applyGlass).catch((err) => console.warn('[global] could not read glass setting:', err));
   glassEl.addEventListener('change', async () => applyGlass(await window.las.setGlass(glassEl.checked)));
-  window.las.onGlass((on) => { glassEl.checked = on; document.documentElement.classList.toggle('glass', on); });
+  window.las.onGlass((flag) => { glassEl.checked = flag !== '0'; const c = document.documentElement.classList; c.toggle('glass', flag !== '0'); c.toggle('native', flag === '2'); });
 
   const checkEl = $('updateCheck');
   const checkedEl = $('updateChecked');

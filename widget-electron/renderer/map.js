@@ -432,4 +432,4 @@
 })();
 
 // Glass look toggled from the global map's ⚙ (main.js 'glass:changed').
-window.las.onGlass((on) => document.documentElement.classList.toggle('glass', on));
+window.las.onGlass((flag) => { const c = document.documentElement.classList; c.toggle('glass', flag !== '0'); c.toggle('native', flag === '2'); });

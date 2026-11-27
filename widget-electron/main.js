@@ -47,6 +47,7 @@ const { spawn, execFile } = require('node:child_process');
 const Store = require('electron-store');
 const { createTray } = require('./tray');
 const { createBubbles } = require('./bubbles');
+const glass = require('./lib/glass');
 const spaces = require('./lib/spaces');
 
 // Real protocol scheme, claimed by this Electron app as of the full cutover
@@ -415,29 +416,59 @@ const ICON_SIZE = 64;
 // radius matches it — and `visualEffectState: 'active'` keeps the full
 // material on these never-focused windows. The setting is global to the
 // instance (⚙ in the global map), live: setVibrancy() + 'glass:changed'.
+// Two materials, by what the Mac has (lib/glass.js `available()`):
+//  - native (macOS 26+): the real Liquid Glass, NSGlassEffectView under the
+//    page through koffi — highly transparent, a mild blur, the edge
+//    refraction, the agent color as the glass tint. The page paints nothing
+//    behind its content then (`html.glass.native`).
+//  - vibrancy (older): NSVisualEffectView 'hud' — a full blur that keeps the
+//    most of the backdrop's color of all the materials (measured over
+//    red/blue stripes: 98%, vs 77% 'popover', ~45% sidebar/tooltip, ~0% for
+//    window/sheet/content), with the page painting a thin tint, a rim and a
+//    sheen over it (`html.glass`).
+// The query/IPC flag is '0' off, '1' vibrancy, '2' native.
 const GLASS_SUPPORTED = process.platform === 'darwin';
-const GLASS_MATERIAL = 'popover';
+const GLASS_MATERIAL = 'hud';
 function glassEnabled() {
   return GLASS_SUPPORTED && store.get('glass', true) !== false;
 }
 function glassFlag() {
-  return glassEnabled() ? '1' : '0';
+  if (!glassEnabled()) return '0';
+  return glass.available() ? '2' : '1';
 }
-/** BrowserWindow options for a face window; roundedCorners always, so a later live toggle still gets the mask. */
+/** BrowserWindow options for a face window. Vibrancy needs roundedCorners at
+ * creation (passed whenever that path may be toggled on later); native glass
+ * draws its own rounded shape and wants the plain transparent window. */
 function glassWindowOptions() {
-  if (!GLASS_SUPPORTED) return {};
+  if (!GLASS_SUPPORTED || glass.available()) return {};
   return glassEnabled() ? { vibrancy: GLASS_MATERIAL, visualEffectState: 'active', roundedCorners: true } : { roundedCorners: true };
 }
-/** Flip the blur on every open window and tell their pages (they switch the `glass` class). */
+/** Right after `new BrowserWindow`: the native glass, tinted like the page. Remembered for a later toggle/re-tint. */
+function dressWindow(win, color, opacity) {
+  win.glassTint = { color, opacity };
+  if (glassEnabled() && glass.available()) glass.attach(win, { color, opacity });
+}
+function retintWindow(win, color, opacity) {
+  if (!win || win.isDestroyed()) return;
+  win.glassTint = { color, opacity };
+  glass.setTint(win, color, opacity);
+}
+/** Flip the look on every open window and tell their pages (they switch the `glass`/`native` classes). */
 function applyGlass(on) {
+  const flag = glassFlag();
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
     try {
-      win.setVibrancy(on ? GLASS_MATERIAL : null);
+      if (glass.available()) {
+        if (on) glass.attach(win, win.glassTint || {});
+        else glass.detach(win);
+      } else {
+        win.setVibrancy(on ? GLASS_MATERIAL : null);
+      }
     } catch (err) {
-      log.warn('glass', `setVibrancy failed: ${err.message}`);
+      log.warn('glass', `could not switch the window: ${err.message}`);
     }
-    win.webContents.send('glass:changed', on);
+    win.webContents.send('glass:changed', flag);
   }
 }
 
@@ -530,6 +561,7 @@ function createWidgetWindow(name, { forgetPosition = false } = {}) {
   // widget.css's placeholder green while waiting on the async
   // window.las.getPrefs() IPC round-trip (see widget.js's initialParams
   // block, right below where agentName is read).
+  dressWindow(win, prefs.color, prefs.opacity);
   win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'index.html'), {
     query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), icon: prefs.iconMode ? '1' : '0', glass: glassFlag() },
   });
@@ -763,6 +795,9 @@ ipcMain.handle('prefs:set', (event, name, patch) => {
   }
   const popup = popups.get(name);
   if (popup && !popup.isDestroyed() && popup.webContents !== event.sender) popup.webContents.send('prefs:changed', next);
+  if (patch.color !== undefined || patch.opacity !== undefined) {
+    for (const w of [win, popup, mapWindows.get(name)]) retintWindow(w, next.color, next.opacity);
+  }
   return next;
 });
 
@@ -946,6 +981,7 @@ function togglePopup(name, drawer = null, anchor = null) {
   p.place = place;
   p.popupBarHeight = 60;
   popups.set(name, p);
+  dressWindow(p, prefs.color, prefs.opacity);
   p.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'index.html'), {
     query: { agent: name, color: prefs.color, opacity: String(prefs.opacity), role: 'popup', drawer: drawer || '', grow: place.grow, glass: glassFlag() },
   });
@@ -1997,6 +2033,7 @@ function openMapWindow(name) {
   win.isMap = true;
   win.agentName = name;
   mapWindows.set(name, win);
+  dressWindow(win, prefs.color, prefs.opacity);
   win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'map.html'), { query: { agent: name, color: prefs.color || '', opacity: String(prefs.opacity), glass: glassFlag() } });
   win.webContents.on('console-message', (_event, _level, message) => console.log(`[map:${name}]`, message));
   win.on('closed', () => { if (mapWindows.get(name) === win) mapWindows.delete(name); });
@@ -2027,6 +2064,7 @@ function openGlobalMapWindow() {
   win.isMap = true;
   win.isGlobalMap = true;
   globalMapWindow = win;
+  dressWindow(win, '#8f9bb0', 0.82); // global.js's fixed gray
   win.loadFile(path.join(WIDGET_SOURCES.rendererDir, 'global.html'), { query: { glass: glassFlag() } });
   win.webContents.on('console-message', (_event, _level, message) => console.log('[global-map]', message));
   win.on('closed', () => { if (globalMapWindow === win) globalMapWindow = null; });
@@ -3106,7 +3144,7 @@ app.whenReady().then(async () => {
   setTimeout(mirrorAllColors, 30000);
 
   createTray({ registryUrl: REGISTRY_URL, onSelectAgent: openWidget, onReload: () => reloadWidgets(), onQuit: () => app.quit() });
-  bubbles = createBubbles({ sources: WIDGET_SOURCES, log, onAction: onBubbleAction, glass: glassEnabled, glassMaterial: GLASS_MATERIAL });
+  bubbles = createBubbles({ sources: WIDGET_SOURCES, log, onAction: onBubbleAction, glass: glassFlag, glassMaterial: GLASS_MATERIAL, dress: dressWindow });
 
   // System sleep/wake: the occlusion-expand/mosaic feature (see
   // the tile reconciler below) drives off document.visibilitychange,
@@ -3171,13 +3209,15 @@ app.whenReady().then(async () => {
   };
   startTileHeartbeat();
   // Glass look (see "glass look" above): one switch for every window of this instance.
-  ipcMain.handle('glass:get', () => ({ on: glassEnabled(), supported: GLASS_SUPPORTED }));
+  const glassState = () => ({ on: glassEnabled(), supported: GLASS_SUPPORTED, native: glass.available(), flag: glassFlag() });
+  log.info('glass', `${glassEnabled() ? 'on' : 'off'} — ${glass.status()}`);
+  ipcMain.handle('glass:get', () => glassState());
   ipcMain.handle('glass:set', (_event, on) => {
-    if (!GLASS_SUPPORTED) return { on: false, supported: false };
+    if (!GLASS_SUPPORTED) return glassState();
     store.set('glass', on !== false);
     applyGlass(glassEnabled());
-    log.info('glass', glassEnabled() ? 'on' : 'off');
-    return { on: glassEnabled(), supported: true };
+    log.info('glass', glassEnabled() ? `on (${glass.status()})` : 'off');
+    return glassState();
   });
   ipcMain.handle('tiles:get', () => ({ ...tileSettings, limits: TILE_SETTINGS_LIMITS, defaults: { tickMs: TILE_TICK_MS, collapseSettleMs: TILE_COLLAPSE_SETTLE_MS } }));
   ipcMain.handle('tiles:set', (_event, patch) => {
