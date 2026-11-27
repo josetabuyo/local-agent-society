@@ -1717,6 +1717,10 @@ function onBubbleAction(kind, name, payload) {
   const win = windows.get(name);
   if (kind === 'open') {
     focusWidget(name);
+  } else if (kind === 'hush') {
+    // 🔇 on a speech bubble: that agent's widget stops the clip it is playing
+    // (only this message: the agent is not muted, the next one plays).
+    if (win && !win.isDestroyed()) win.webContents.send('speech:stop');
   } else if (kind === 'voice' || kind === 'mic-stop' || kind === 'mic-cancel') {
     // The widget records, transcribes and sends from its own Space, unseen;
     // the bubble shows the phases (mic:status below). No Space switch.

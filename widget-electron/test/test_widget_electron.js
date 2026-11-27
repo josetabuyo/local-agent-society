@@ -2150,3 +2150,14 @@ test('settings: Voice output (reply_output) — Auto names where it goes now, Ma
   assert.match(m, /JSON\.stringify\(\{ reply_output: String\(mode \|\| 'auto'\) \}\)/);
   assert.match(readSrc('preload.js'), /getReplyOutput:[\s\S]*setReplyOutput:/);
 });
+
+test('🔇 on a speech bubble stops that agent\'s current message, without muting it', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'bubble.html'), 'utf8');
+  assert.match(html, /id="hush"/);
+  assert.match(html, /act\('hush'\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'bubbles.js'), 'utf8'), /case 'hush':/);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(main, /kind === 'hush'[\s\S]{0,300}webContents\.send\('speech:stop'\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8'), /onSpeechStop/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'widget.js'), 'utf8'), /onSpeechStop\(\(\) => stopCurrentSpeech\(\)\)/);
+});

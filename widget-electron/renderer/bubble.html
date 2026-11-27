@@ -134,6 +134,7 @@
     <div class="head">
       <span class="name" id="name"></span>
       <div class="circles">
+        <button class="circle" id="hush" title="Silence this message — the agent stops speaking it (it stays in the chat)">🔇</button>
         <button class="circle" id="voice" title="Answer by voice: go to the agent and start a dictation">🎤</button>
         <button class="circle" id="textBtn" title="Answer by text, right here">⌨</button>
         <button class="circle" id="dismiss" title="Dismiss (Esc)">✕</button>
@@ -192,6 +193,7 @@
     card.addEventListener('mouseleave', () => act('pin', { on: replying }));
 
     document.getElementById('dismiss').addEventListener('click', (e) => { e.stopPropagation(); act('dismiss'); });
+    document.getElementById('hush').addEventListener('click', (e) => { e.stopPropagation(); act('hush'); });
     document.getElementById('text').addEventListener('click', () => act('open'));
     // Voice: the agent's widget records and transcribes from its own Space;
     // this bubble is the face of that dictation (bubble:mic from main).

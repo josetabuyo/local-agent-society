@@ -228,6 +228,7 @@ contextBridge.exposeInMainWorld('las', {
   /** A speech bubble drives this widget's dictation (main.js onBubbleAction):
    * command 'start' (same as a click on the mic button), 'stop' (stop and
    * send) or 'cancel' (stop, send nothing). */
+  onSpeechStop: (cb) => ipcRenderer.on('speech:stop', () => cb()),
   onMicRequest: (cb) => ipcRenderer.on('mic:request', (_event, command) => cb(command || 'start')),
   /** The phases of this widget's dictation, for the bubble that asked for
    * it: listening / transcribing / sent {text} / failed {error} / cancelled / idle. */

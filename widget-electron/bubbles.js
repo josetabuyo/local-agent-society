@@ -183,6 +183,7 @@ function createBubbles({ sources, log, onAction }) {
         onAction(kind, b.agentName, payload);
         return;
       case 'mic-stop':
+      case 'hush':   // 🔇: stop the voice reading this message; the bubble stays to be read
         onAction(kind, b.agentName, payload);
         return;
       case 'mic-cancel':
