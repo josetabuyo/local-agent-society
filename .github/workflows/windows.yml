@@ -1,0 +1,52 @@
+# Windows port (docs/WINDOWS.md): every suite on windows-latest.
+# Until the port is done this job is a punch list, not a gate: each suite runs
+# to the end and reports every failure, none of them stops the others.
+name: windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: local-agent-society }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install
+        working-directory: local-agent-society
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . fastapi "uvicorn[standard]" httpx pytest paho-mqtt soundfile
+      - name: pytest
+        working-directory: local-agent-society
+        run: python -m pytest -q -rf --tb=line -p no:cacheprovider
+
+  node:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [bridge, widget-electron]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: local-agent-society }
+      - uses: actions/checkout@v4
+        with: { repository: haciendo/vortexia, path: vortexia }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install
+        working-directory: local-agent-society/${{ matrix.suite }}
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Install vortexia
+        working-directory: vortexia
+        run: npm install --no-audit --no-fund
+      - name: Test
+        working-directory: local-agent-society/${{ matrix.suite }}
+        run: npm test
